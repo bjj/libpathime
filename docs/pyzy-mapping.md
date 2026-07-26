@@ -7,10 +7,11 @@ This document maps the pyzy (libpyzy) C++ library and its IBus wrapper
 ## Library overview
 
 libpyzy is a C++ shared library for Chinese Pinyin and Bopomofo phonetic
-conversion. Its sole public header is `pyzy/src/InputContext.h`; the
-constants in `pyzy/src/Const.h` and the tagged-union type in
-`pyzy/src/Variant.h` are also part of the public surface. Everything else
-in `pyzy/src/` is an internal implementation detail.
+conversion. Its sole public header is `pyzy/src/InputContext.h` (installed as
+`<PyZy/InputContext.h>`, capital-P directory); the constants in
+`pyzy/src/Const.h` and the tagged-union type in `pyzy/src/Variant.h` are also
+part of the public surface. Everything else in `pyzy/src/` is an internal
+implementation detail.
 
 The conversion model is phonetic-to-phrase:
 
@@ -49,12 +50,12 @@ are set per-context via `setProperty()` using the `PropertyName` enum and
 | **Engine** | `PyZy::InputContext` is the engine object. There is no separate factory or engine registry; the factory method is `InputContext::create()`. |
 | **Input context** | `PyZy::InputContext*` — created by `InputContext::create(InputType, Observer*)`, destroyed by `delete`. Each instance carries independent composition state. |
 | **Key event** | No key-event type exists in pyzy. The caller decomposes key events itself and calls individual mutation methods (`insert(char)`, `removeCharBefore()`, `moveCursorLeft()`, etc.). |
-| **Handled / Unhandled** | Each mutation method returns `bool`: `true` if the operation changed state (approximately "handled"), `false` if it had no effect. `insert()` returns `false` for invalid or overlong input. There is no concept of forwarding an unhandled event. |
+| **Handled / Unhandled** | Each mutation method returns `bool`: `true` if the operation changed state (approximately "handled"), `false` if it had no effect. For full pinyin, `insert(char)` returns `false` **only for an invalid character** (`!islower(ch) && ch != '\''`, `FullPinyinContext.cc:41-50`); when the buffer is full (`MAX_PINYIN_LEN == 64`) it returns `true` and **silently drops** the character. So the bool is not a clean "handled" signal. There is no concept of forwarding an unhandled event. |
 | **Forward key event** | Not present. pyzy never asks the caller to deliver a key event to a downstream recipient. |
 | **Composition data** | The combination of `selectedText()`, `conversionText()`, `restText()`, and `auxiliaryText()` accessors, plus the lazy candidate list. These are delivered via separate `Observer` callbacks rather than as a single composite value. |
-| **Preedit text** | Decomposed into three `std::string` segments returned by `selectedText()`, `conversionText()`, and `restText()`. The internal `Preedit` struct (in `pyzy/src/PhoneticContext.h`) holds `selected_text`, `candidate_text`, and `rest_text`. The full preedit string must be assembled by concatenation. `preeditTextChanged(InputContext*)` is the notification callback. |
+| **Preedit text** | Decomposed into three `std::string` segments returned by `selectedText()`, `conversionText()`, and `restText()`. The internal `Preedit` struct (`PhoneticContext.h:40-50`) holds fields `selected_text`, `candidate_text`, and `rest_text` — note the accessor `conversionText()` returns the `candidate_text` field (the accessor and struct-field names differ). The full preedit string must be assembled by concatenation. `preeditTextChanged(InputContext*)` is the notification callback. |
 | **Auxiliary text** | `auxiliaryText()` returns a `std::string`. `auxiliaryTextChanged(InputContext*)` is the notification callback. |
-| **Candidate list** | Accessed via `hasCandidate(size_t index)` and `getCandidate(size_t index, Candidate& output)`. `Candidate` is a struct with `std::string text` and `CandidateType type` (`NORMAL_PHRASE`, `USER_PHRASE`, `SPECIAL_PHRASE`). The list is unbounded and lazily populated. `candidatesChanged(InputContext*)` is the notification callback. `getPreparedCandidatesSize()` returns how many entries have been materialized. |
+| **Candidate list** | Accessed via `hasCandidate(size_t index)` and `getCandidate(size_t index, Candidate& output)`. `Candidate` is a struct with `std::string text` and `CandidateType type` (`NORMAL_PHRASE`, `USER_PHRASE`, `SPECIAL_PHRASE`). The list is unbounded and lazily populated. **`hasCandidate(i)` is not a const query** — it loops calling `PhraseEditor::fillCandidates()` until index `i` is reachable, materializing candidates as a side effect (`PhoneticContext.cc:231-250`). The flat index space is `special_phrases` first, then phrase-editor candidates: indices `[0, m_special_phrases.size())` are special phrases; indices `>= m_special_phrases.size()` map into the phrase editor via `i -= m_special_phrases.size()` (`PhoneticContext.cc:166-277`). `candidatesChanged(InputContext*)` is the notification callback. `getPreparedCandidatesSize()` returns how many entries have been materialized. |
 | **Select candidate** | `selectCandidate(size_t index)` — 0-origin absolute index into the current candidate list. Returns `bool`. If selecting the candidate exhausts the remaining input, pyzy fires `commitText` automatically. Otherwise it updates the three preedit segments and fires `preeditTextChanged`. |
 | **Surrounding text** | Not present. pyzy has no API to accept or use surrounding text from the client. |
 | **Commit text** | `Observer::commitText(InputContext*, const std::string&)` — fires when pyzy decides to emit finalized text. The caller can also force a commit by calling `InputContext::commit(CommitType)` directly (`TYPE_RAW`, `TYPE_PHONETIC`, or `TYPE_CONVERTED`). |
@@ -62,7 +63,7 @@ are set per-context via `setProperty()` using the `PropertyName` enum and
 | **Focus** | Not present. pyzy has no focus-in / focus-out lifecycle callbacks. |
 | **Activation** | Not present. pyzy has no enable / disable callbacks. |
 | **Reset** | `InputContext::reset()` — discards all transient composition state and returns to empty. Does not commit; the caller must commit explicitly first if it wants to preserve the preedit. |
-| **Negotiation** | Partially covered by `setProperty(PropertyName, Variant)`. The four properties are `PROPERTY_CONVERSION_OPTION` (unsigned int bitmask), `PROPERTY_DOUBLE_PINYIN_SCHEMA` (unsigned int), `PROPERTY_BOPOMOFO_SCHEMA` (unsigned int), and `PROPERTY_MODE_SIMP` (bool). There is no capability negotiation, no field-purpose hints, and no behavioral-policy exchange. |
+| **Negotiation** | Partially covered by `setProperty(PropertyName, Variant)`. The **five** properties (`InputContext.h:176-209`) are `PROPERTY_CONVERSION_OPTION` (unsigned int bitmask), `PROPERTY_DOUBLE_PINYIN_SCHEMA` (unsigned int), `PROPERTY_BOPOMOFO_SCHEMA` (unsigned int), `PROPERTY_SPECIAL_PHRASE` (bool), and `PROPERTY_MODE_SIMP` (bool). `setProperty` is split across the class hierarchy: `PhoneticContext::setProperty` handles only `CONVERSION_OPTION`, `SPECIAL_PHRASE`, and `MODE_SIMP`, and returns `false` for the two schema properties, which are honored only in the `DoublePinyinContext` / `BopomofoContext` subclasses. There is no capability negotiation, no field-purpose hints, and no behavioral-policy exchange. |
 
 ---
 
@@ -71,10 +72,14 @@ are set per-context via `setProperty()` using the `PropertyName` enum and
 pyzy covers the following parts of a working Pinyin/Bopomofo IME engine
 directly:
 
-**Phonetic parsing.** `insert(char ch)` accepts printable ASCII and
-internally parses the accumulated string into a `PinyinArray` (or
-Bopomofo symbol sequence for `BOPOMOFO` mode). The cursor within the raw
-input string is tracked by `cursor()`.
+**Phonetic parsing.** `insert(char ch)` for full pinyin accepts only
+lowercase letters `[a-z]` and the apostrophe `'` (`FullPinyinContext.cc:43`);
+digits, uppercase, and punctuation are rejected (the wrapper routes those
+itself). It internally parses the accumulated string into a `PinyinArray` (or
+Bopomofo symbol sequence for `BOPOMOFO` mode). The cursor within the raw input
+string is tracked by `cursor()`, which is a **byte offset** (`size_t
+m_cursor`, `PhoneticContext.h:147`) into the raw ASCII input — distinct from
+any UTF-8 code-point position in the output.
 
 **Phrase lookup and ranking.** The internal `PhraseEditor` queries a
 bundled SQLite phrase database and a user-phrase history database,
@@ -95,23 +100,31 @@ distinguish provenance.
 the user has confirmed by selecting candidates, `conversionText()` is the
 candidate currently being shown for the next phonetic segment, and
 `restText()` is the unconverted tail. This decomposition conveys the
-display-position concept from `CONCEPTS.md` in structural form: the
-boundary between `selectedText` and `conversionText` is the preedit
-display position.
+display-position concept from `CONCEPTS.md` in structural form. Note there are
+effectively **two** boundaries (`selectedText | conversionText | restText`):
+the CONCEPTS.md "internal display position" is the end of `selectedText` (that
+prefix is stable on commit), but `conversionText` beyond it is itself
+**provisional** — it tracks `focusedCandidate()` and changes as the user
+focus-navigates the candidate list. The single-position concept does not
+capture that focused-candidate substructure.
 
 **Auxiliary text.** For Bopomofo contexts the auxiliary text echoes the
-phonetic symbols being composed. For Pinyin contexts it may contain
-supplemental information about the current input.
+phonetic symbols being composed. For Pinyin contexts it is **structured**
+(`PinyinContext::updateAuxiliaryText`, `PinyinContext.cc:160-208`): the parsed
+pinyin syllables separated by spaces, a `|` marker at the cursor position, and
+any non-pinyin tail — effectively a rendering of cursor/segmentation state, not
+free-form text.
 
 **Conversion options.** The bitmask `PROPERTY_CONVERSION_OPTION` (flags
 from `Const.h`) controls incomplete-pinyin matching, typo-correction rules
-(nine `PINYIN_CORRECT_*` flags), and fuzzy-pinyin pairs (fourteen
-`PINYIN_FUZZY_*` flags). These can be changed at any time via
-`setProperty()`.
+(**8** `PINYIN_CORRECT_*` bits; `PINYIN_CORRECT_ALL` is an aggregate mask, not
+a rule), and fuzzy-pinyin pairs (**14** consonant-pair bits plus **6** vowel-pair
+bits, `Const.h:49-73`). These can be changed at any time via `setProperty()`.
 
 **Special phrases.** A user-editable phrase table (`phrases.txt` under the
 configured config directory) supports date/time macros and other special
-expansions. Enabled by `PROPERTY_SPECIAL_PHRASE`.
+expansions. Enabled by `PROPERTY_SPECIAL_PHRASE`. Their candidates occupy the
+front of the flat candidate list (indices `[0, special_phrases.size())`).
 
 **Simplified/Traditional selection.** `PROPERTY_MODE_SIMP` (bool)
 switches the output character repertoire between simplified and traditional
@@ -139,7 +152,20 @@ returning to the unconverted state.
 **Initialization and teardown.** `InputContext::init()` (or
 `init(user_cache_dir, user_config_dir)`) must be called once before
 creating any context. `InputContext::finalize()` must be called before
-program exit. These are process-global operations.
+program exit. These are **process-global** operations (`InputContext.cc:34-65`)
+that initialize the shared SQLite `Database` and `SpecialPhraseTable` — they are
+not per-context, so a library must tie them to library load/unload separately
+from per-context lifetime.
+
+**Mode is fixed at construction.** The `InputType` (`FULL_PINYIN` /
+`DOUBLE_PINYIN` / `BOPOMOFO`) is chosen at `create()` and cannot be changed on a
+live context (`InputContext.cc:67-81`); switching phonetic type means destroying
+and recreating the context.
+
+**Encoding.** All text is returned as `const std::string&` (UTF-8) **by
+reference** into internal buffers (`PhoneticContext.h:74-97`); the internal
+`String` type derives from `std::string` (`String.h:33`). Returned references
+are valid only until the next mutation.
 
 ---
 
@@ -447,11 +473,13 @@ all editors in `focusOut()` and re-registers language-bar properties in
 **Project concept:** Capabilities, field information, behavioral policies,
 and engine options are exchanged through negotiation.
 
-**pyzy provides:** Four properties settable via `setProperty()`:
+**pyzy provides:** Five properties settable via `setProperty()`:
 `PROPERTY_CONVERSION_OPTION`, `PROPERTY_DOUBLE_PINYIN_SCHEMA`,
-`PROPERTY_BOPOMOFO_SCHEMA`, `PROPERTY_SPECIAL_PHRASE`,
-`PROPERTY_MODE_SIMP`. There is no capability query mechanism, no field-type
-hint, no behavioral-policy exchange, and no protocol versioning.
+`PROPERTY_BOPOMOFO_SCHEMA`, `PROPERTY_SPECIAL_PHRASE`, and
+`PROPERTY_MODE_SIMP` (the two schema properties are honored only in the
+`DoublePinyinContext` / `BopomofoContext` subclasses). There is no capability
+query mechanism, no field-type hint, no behavioral-policy exchange, and no
+protocol versioning.
 
 **Bridge required:** Engine options that map to pyzy properties can be
 delivered via `setProperty()`. All other negotiation concepts (client

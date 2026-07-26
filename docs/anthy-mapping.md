@@ -51,7 +51,7 @@ All text exchanged with the library is UTF-8 when the context is configured with
 | **Delete surrounding text** | No equivalent | The library never requests deletion of client text. |
 | **Focus** | No equivalent | anthy-unicode has no lifecycle callbacks or awareness of focus. |
 | **Activation** | No equivalent | Same as focus — purely a wrapper/framework concern. |
-| **Negotiation** | `anthy_conf_override(key, value)` for global config; `anthy_set_personality(name)` / `anthy_do_set_personality(name)` for per-context dictionary personality | Closer to static configuration than to a per-context negotiation protocol. |
+| **Negotiation** | `anthy_conf_override(key, value)` for global config; `anthy_set_personality(name)` for dictionary personality | Closer to static configuration than to a per-context negotiation protocol. `anthy_set_personality` and `anthy_conf_override` are the **public** entry points (`anthy/anthy.h`); `anthy_do_set_personality` / `anthy_init_personality` are **internal** (`src-main/main.h`) and must not be bound directly. |
 | **Composition data** | Assembled by the caller from: (a) the pre-conversion hiragana buffer, (b) `anthy_get_segment` calls for the converted text, and (c) synthetic auxiliary string | No single library call returns all three fields. |
 
 ---
@@ -63,7 +63,9 @@ management**:
 
 - **Context lifecycle**: `anthy_create_context()` / `anthy_release_context()` / `anthy_reset_context()` map cleanly to the creation, destruction, and reset of a per-context conversion state.
 
-- **Hiragana-to-kanji conversion**: `anthy_set_string(ctx, hiragana_utf8)` accepts a complete hiragana string and returns the number of segments via `anthy_get_stat`. The caller iterates segments with `anthy_get_segment_stat` and retrieves each candidate with `anthy_get_segment(ctx, seg_idx, cand_idx)`.
+- **Hiragana-to-kanji conversion**: `anthy_set_string(ctx, hiragana_utf8)` accepts a complete hiragana string and returns a **status code** (`0` on success, `-1` on error) — *not* a segment count (`src-main/main.c:202`). The segment count is read separately from `anthy_get_stat(ctx, &stat)` → `stat.nr_segment`. The caller iterates segments with `anthy_get_segment_stat` and retrieves each candidate with `anthy_get_segment(ctx, seg_idx, cand_idx)`. `anthy_set_string` calls `anthy_do_reset_context` as its first action (`main.c:212`), so it fully clears any prior conversion state before segmenting.
+
+- **Candidate string retrieval / buffer sizing**: `anthy_get_segment(ctx, seg_idx, cand_idx, buf, buf_len)` uses a **two-call length protocol** — calling it with `buf = NULL, buf_len = 0` returns the required byte length without copying; a too-small buffer returns `-1` (`main.c:349-357`). A binding must measure then fetch (or grow a buffer); do not assume a fixed candidate size. `anthy_segment_stat.seg_len` is the segment's length in **input reading xchars (kana characters)**, not a byte length and not the candidate's length (`main.c:282`).
 
 - **Segment boundary adjustment**: `anthy_resize_segment(ctx, seg_idx, +1|-1)` widens or narrows a segment boundary; re-querying the segment count and candidates afterward reflects the new segmentation.
 
@@ -75,7 +77,7 @@ management**:
 
 - **Reconversion mode**: `anthy_set_reconversion_mode(ctx, ANTHY_RECONVERT_AUTO|DISABLE|ALWAYS)` controls whether a context participates in reconversion (re-editing already committed text).
 
-- **Dictionary personality**: `anthy_init_personality()` / `anthy_do_set_personality(name)` switch the active user dictionary, enabling per-user or per-domain conversion profiles.
+- **Dictionary personality**: `anthy_set_personality(name)` (public) switches the active user dictionary, enabling per-user or per-domain conversion profiles. (It is a thin wrapper over the internal `anthy_do_set_personality` / `anthy_init_personality` in `src-main/main.h`, which are not part of the public `anthy/anthy.h` API.)
 
 What the library explicitly does **not** provide: keystroke processing, romaji-to-kana conversion,
 mode state (hiragana/katakana/latin), preedit string assembly, candidate list paging, focus
@@ -195,8 +197,16 @@ callbacks:
 
 `self.__reset()` (`engine.py:Engine.__reset`) discards the `JaString`, clears `__segments`,
 clears the lookup table, and resets `__convert_mode` to `CONV_MODE_OFF`. It does **not** call
-`anthy_reset_context` directly; the anthy context object (`self.__context`) is simply left
-holding stale data and overwritten on the next `set_string` call.
+`anthy_reset_context` directly. This is safe not because "the stale state is overwritten" but
+because `anthy_set_string` itself calls `anthy_do_reset_context` first (`main.c:212`); the C
+context is always reset at the start of the next conversion. Calling `anthy_reset_context` on
+reset is still worthwhile to release the segment list / dictionary session promptly (see
+mismatch #5).
+
+**Note on API naming:** the introspection wrapper uses convenience methods
+(`get_nr_segments()`, `get_nr_candidates(seg)`, `get_nr_predictions()`) that are GObject-introspection
+helpers over `anthy_get_stat` / `anthy_get_segment_stat` / `anthy_get_prediction_stat`. They are
+**not** C entry points — do not look for `anthy_get_nr_segments` in the header.
 
 ### Reconversion (`engine.py:__cmd_reconvert`, `__update_reconvert`)
 
@@ -243,6 +253,21 @@ disambiguation scheme. Option (a) matches ibus-anthy's behaviour and is simpler.
 but only at commit time — during navigation the candidate is tracked locally without informing
 the library.
 
+anthy's real model has **three** independent state changes that each regenerate the flat
+candidate list the concepts model exposes:
+
+- **Segment focus movement** — an *active-segment index* (the wrapper's `__cursor_pos`) selects
+  which segment's candidates are shown. Moving it (arrow keys → `__select_segment`) refills the
+  list. CONCEPTS.md has no notion of segment focus, so "select candidate" is only unambiguous once
+  the binding fixes it to mean "select within the currently focused segment."
+- **Segment resize** — `anthy_resize_segment(ctx, seg_idx, ±1)` (`main.c:259`) re-segments from
+  that boundary and **invalidates every segment's candidate list**.
+- **Per-segment candidate selection** — the "currently shown but not committed" candidate index is
+  **library-invisible**: anthy only records a choice at `anthy_commit_segment` time. The binding
+  must own an array of per-segment chosen indices itself.
+
+All three produce fresh composition data; any client-cached candidate list is invalid after each.
+
 ### 2. No key-event API
 
 **What CONCEPTS.md expects**: the engine receives key events and reports handled/unhandled.
@@ -263,9 +288,13 @@ buffer is maintained by the caller (`JaString`). After `anthy_set_string`, the l
 per-segment unconverted text via `anthy_get_segment(ctx, seg_idx, NTH_UNCONVERTED_CANDIDATE)`.
 
 **What must be bridged**: the libpathime layer must concatenate per-segment texts (or the
-pre-conversion `JaString` output) to form a single preedit string. The concept of a cursor
-position within the preedit that advances as segments are confirmed is computed by the wrapper
-from character lengths, not from the library.
+pre-conversion `JaString` output) to form a single preedit string. CONCEPTS.md's preedit
+"internal display position" maps to the boundary of the active segment: text of segments before
+the active one is settled, the active segment and everything after is still mutable. The wrapper
+computes this cursor offset by summing the character lengths of the unconverted-segment strings
+(`len(get_segment(i, NTH_UNCONVERTED_CANDIDATE))`, `engine.py:2731-2732`), not `seg_len` and not
+any library-provided cursor — so in the anthy world the display position is
+**per-segment-boundary**, driven by the active-segment index, not a free character cursor.
 
 ### 4. Commit is destructive and triggers learning
 
@@ -292,12 +321,13 @@ neutral state.
 **What anthy-unicode provides**: `anthy_reset_context(ctx)` resets the context's internal
 conversion state. The function exists and is the correct tool.
 
-**What must be bridged**: ibus-anthy's `self.__reset()` does *not* call `anthy_reset_context`.
-It simply discards the Python-side `JaString` and segment list, leaving the C context holding
-stale data. This works because `anthy_set_string` on the next conversion overwrites the stale
-state, but it means the C library's state is not actually cleared between compositions. A
-correct libpathime implementation should call `anthy_reset_context` on reset to avoid any
-risk of stale state affecting the next `anthy_get_stat` or `anthy_get_segment` call.
+**What must be bridged**: ibus-anthy's `self.__reset()` does *not* call `anthy_reset_context`;
+it discards only the Python-side `JaString` and segment list. There is **no stale-state hazard**,
+because `anthy_set_string` calls `anthy_do_reset_context` as its first action (`main.c:212`,
+`context.c:322` — it frees the prior segment list, split context, and input string). The C side
+is therefore always reset at the start of each conversion. A libpathime implementation should
+still call `anthy_reset_context` on reset, but the justification is **prompt resource release**
+(freeing the segment list and releasing the dictionary session) rather than avoiding stale state.
 
 ### 6. No surrounding text input to the library
 

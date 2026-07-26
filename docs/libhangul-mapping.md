@@ -30,15 +30,15 @@ separate from the syllable-composition core.
 
 | CONCEPTS.md term        | libhangul element                                                                                      |
 |-------------------------|--------------------------------------------------------------------------------------------------------|
-| **Engine**              | No direct object. The library is stateless at the engine level; all state lives in `HangulInputContext`. |
-| **Input context**       | `HangulInputContext` (opaque struct, `libhangul/hangul/hangulinputcontext.c`). Created with `hangul_ic_new(const char* keyboard)`, destroyed with `hangul_ic_delete()`. |
+| **Engine**              | No direct object. Composition state lives in `HangulInputContext`, but the library is **not** fully stateless: the keyboard registry (`hangul_keyboards`) is a process-global file-scope static in `hangulkeyboard.c`, mutated by `hangul_init()` / `hangul_fini()`. Built-in layouts resolve without `hangul_init`; external/custom keyboards require it. |
+| **Input context**       | `HangulInputContext` (opaque struct, `libhangul/hangul/hangulinputcontext.c`). Created with `hangul_ic_new(const char* keyboard)`, destroyed with `hangul_ic_delete()`. **Hazard:** an unknown keyboard id is not reported — `hangul_ic_select_keyboard()` sets `keyboard = NULL` and the first `hangul_ic_process()` then dereferences it and crashes. The caller must validate the id before use. |
 | **Key event**           | A plain C `int ascii` value passed to `hangul_ic_process(HangulInputContext*, int ascii)` or `hangul_ic_backspace(HangulInputContext*)`. The value is expected to be a US-QWERTY ASCII code; modifier state is expressed only by case (uppercase = Shift held). |
 | **Handled**             | Boolean return value of `hangul_ic_process()` and `hangul_ic_backspace()`. `true` = handled; `false` = unhandled (the caller must forward the event). |
 | **Unhandled**           | `hangul_ic_process()` / `hangul_ic_backspace()` returns `false`.          |
-| **Preedit text**        | `const ucschar* hangul_ic_get_preedit_string(HangulInputContext*)` — UCS-4 string, valid until the next call that mutates `hic`. Always at most one Hangul syllable in length. |
-| **Commit text**         | `const ucschar* hangul_ic_get_commit_string(HangulInputContext*)` — UCS-4 string, valid until the next call that mutates `hic`. Contains zero or one syllable per key press in normal usage. |
+| **Preedit text**        | `const ucschar* hangul_ic_get_preedit_string(HangulInputContext*)` — UCS-4 string, valid until the next call that mutates `hic`. At most one syllable's worth of composition, but that may be **1–3 UCS-4 codepoints** (e.g. choseong + `HANGUL_JUNGSEONG_FILLER`, non-precomposable jaso combinations, or decomposed jamo under `HANGUL_OUTPUT_JAMO` mode). |
+| **Commit text**         | `const ucschar* hangul_ic_get_commit_string(HangulInputContext*)` — UCS-4 string, valid until the next call that mutates `hic`. **Not limited to one syllable:** a single `hangul_ic_process()` can leave a completed syllable *followed by* an appended character (up to the internal `commit_string[64]` buffer). In particular a printable **non-jamo ASCII** character is appended to the commit string and the call returns `true` (handled), so libhangul swallows and re-emits such characters rather than declining them. |
 | **Reset**               | `void hangul_ic_reset(HangulInputContext*)` — clears preedit, commit, and flushed strings and resets the internal jamo buffer; does not commit. |
-| **Flush (forced commit)** | `const ucschar* hangul_ic_flush(HangulInputContext*)` — commits whatever is in the composition buffer and returns the resulting string; intended for focus-out / context-switch scenarios. (Not a CONCEPTS.md term, but closely related to how focus-out must be handled.) |
+| **Flush (forced commit)** | `const ucschar* hangul_ic_flush(HangulInputContext*)` — serializes the pending jamo buffer into a **separate** `flushed_string[64]` buffer and returns *that*. It first clears the preedit, commit, **and** flushed strings, so `hangul_ic_get_commit_string()` is **empty** afterward; the caller must use the flush return value directly. This is distinct from the internal flush-to-commit path (`hangul_ic_flush_internal`) used during normal composition. Intended for focus-out / context-switch scenarios. (Not a CONCEPTS.md term, but closely related to how focus-out must be handled.) |
 | **Composition data**    | Partially covered. `hangul_ic_get_preedit_string()` provides preedit text. No auxiliary text concept. No candidate list concept. |
 | **Auxiliary text**      | No equivalent in libhangul.                                               |
 | **Candidate list**      | No equivalent in libhangul for Hangul composition. The Hanja subsystem (`HanjaTable`, `HanjaList`) provides a candidate list for Hanja conversion, but it is a separate lookup table, not integrated into the composition loop. |
@@ -49,7 +49,7 @@ separate from the syllable-composition core.
 | **Focus out**           | No equivalent. See above.                                                 |
 | **Activation**          | No equivalent. The caller decides when to route keys to libhangul.        |
 | **Forward key event**   | No equivalent. libhangul reports an unhandled key by returning `false`; the caller is responsible for forwarding it. |
-| **Negotiation**         | Partially covered. `hangul_ic_set_option()` sets per-context options (`HANGUL_IC_OPTION_AUTO_REORDER`, `HANGUL_IC_OPTION_COMBI_ON_DOUBLE_STROKE`, `HANGUL_IC_OPTION_NON_CHOSEONG_COMBI`). Keyboard layout is selected at creation time or changed with `hangul_ic_select_keyboard()`. No capability or purpose negotiation. |
+| **Negotiation**         | Partially covered. `hangul_ic_set_option()` sets per-context options (`HANGUL_IC_OPTION_AUTO_REORDER`, `HANGUL_IC_OPTION_COMBI_ON_DOUBLE_STROKE`, `HANGUL_IC_OPTION_NON_CHOSEONG_COMBI`). `hangul_ic_set_output_mode()` selects `HANGUL_OUTPUT_SYLLABLE` (precomposed) vs `HANGUL_OUTPUT_JAMO` (decomposed) for preedit/commit/flush text. Keyboard layout is selected at creation time, changed with `hangul_ic_select_keyboard()`, or its sub-table switched with `hangul_ic_switch_keyboard_table()`. Note `hangul_ic_set_combination()` is **deprecated and a no-op**. No capability or purpose negotiation. |
 
 **Hanja dictionary API** (separate from composition):
 
@@ -95,8 +95,19 @@ consumed by the composition logic. This maps directly to the CONCEPTS.md
 `Handled` / `Unhandled` distinction.
 
 **Reset.** `hangul_ic_reset()` discards all transient composition state without
-committing it. `hangul_ic_flush()` commits any remaining composition state and
-returns the resulting text.
+committing it. `hangul_ic_flush()` serializes any remaining composition into a
+separate flushed buffer and returns it (and clears the commit string in the
+process — read the flush return value, not `hangul_ic_get_commit_string()`).
+
+**Composition state predicates.** `hangul_ic_is_empty()`,
+`hangul_ic_has_choseong()`, `hangul_ic_has_jungseong()`, and
+`hangul_ic_has_jongseong()` let a caller inspect composition state without
+serializing it — useful for deciding commit/flush/reset policy at the boundary.
+
+**Translation / transition callbacks.** `hangul_ic_connect_callback(hic,
+"translate" | "transition", ...)` lets a caller intercept ASCII→jamo translation
+and veto jaso transitions. This has no CONCEPTS.md analogue but is a real
+per-context hook for custom layout logic.
 
 **Keyboard layouts.** The library ships built-in tables for the standard 2-set
 layout, two-set old Korean, 3-set layouts (390, 3-final, 3-sun, and others),
@@ -117,6 +128,18 @@ an optional add-on used to provide a Hanja candidate list.
 `hangul_is_*()` predicate functions and jamo-to-syllable / syllable-to-jamo
 conversion functions. These are helpers for callers that need to inspect or
 decompose Hangul text.
+
+**Encoding split (library-wide).** The composition APIs work in **UCS-4**
+(`ucschar` = `uint32_t`): `hangul_ic_get_preedit_string`,
+`hangul_ic_get_commit_string`, and `hangul_ic_flush` all return
+`const ucschar*`. The entire Hanja API, by contrast, returns **UTF-8**
+(`hanja_list_get_nth_value/key/comment`). A wrapper must convert Hanja UTF-8 ↔
+UCS-4 at the boundary and settle on one canonical Unicode-scalar unit for
+commit/composition text. All returned string pointers are **borrowed and
+volatile** — they point into fixed internal `[64]` buffers that the next
+mutating call (`process`, `backspace`, `reset`, `flush`) overwrites; the commit
+buffer is cleared at the *start* of `process`/`backspace`, so read it before the
+next key. Anything that must survive must be copied immediately.
 
 ---
 
@@ -255,9 +278,11 @@ events with Control, Alt, Super, or other non-Shift modifiers.
 **Project concept:** Preedit text is a single plain-text string of arbitrary
 length representing the entire current composition.
 
-**libhangul provides:** A preedit string that is at most one Hangul syllable.
-Once a syllable is complete, it moves to the commit string and the preedit
-resets. There is no multi-syllable preedit buffer in the library.
+**libhangul provides:** A preedit string that is at most one syllable's worth of
+composition — though that syllable may serialize to **1–3 UCS-4 codepoints**
+(fillers, non-precomposable jaso combinations, or decomposed jamo under
+`HANGUL_OUTPUT_JAMO`). Once a syllable is complete, it moves to the commit string
+and the preedit resets. There is no multi-syllable preedit buffer in the library.
 
 **Bridge required:** If the application wants to show a whole word (or
 multi-syllable sequence) as preedit, the wrapper must accumulate committed
@@ -270,11 +295,15 @@ preedit.
 **Project concept:** Commit text is a request to insert finalised text into
 the client; quantity and timing are engine-defined.
 
-**libhangul provides:** At most one Hangul syllable per `hangul_ic_process()`
-call in the commit string. The commit string is always valid only until the
-next call to `hangul_ic_process()` or any other mutating function. The text
-belongs to an internal fixed-size buffer (`commit_string[64]` in
-`_HangulInputContext`) and must be consumed immediately.
+**libhangul provides:** Usually zero or one syllable per `hangul_ic_process()`
+call, but **not strictly** — a single call can leave a completed syllable
+*followed by* an appended non-jamo character (up to the buffer size), and a
+printable non-jamo ASCII character is committed with the call returning `true`
+(handled). The commit string is valid only until the next call to
+`hangul_ic_process()` or any other mutating function, and is overwritten at the
+*start* of the next `process`/`backspace`. The text belongs to an internal
+fixed-size buffer (`commit_string[64]` in `_HangulInputContext`) and must be
+consumed immediately.
 
 **Bridge required:** The wrapper must read the commit string after every call
 and act on it before the next call. In word-commit mode it must buffer
@@ -288,8 +317,11 @@ engine contract (via negotiation) defines whether preedit is committed or
 discarded when focus is lost.
 
 **libhangul provides:** `hangul_ic_reset()` discards without committing.
-`hangul_ic_flush()` commits any in-progress syllable and returns the text, but
-does not interact with any client.
+`hangul_ic_flush()` serializes any in-progress syllable into a separate
+`flushed_string` buffer and returns it (clearing the commit string as a side
+effect), but does not interact with any client. Note this means the flush return
+value is the only place the flushed text appears — `hangul_ic_get_commit_string()`
+is empty after a flush.
 
 **Bridge required:** The wrapper must decide on focus-out (and on receiving
 Control/Alt/etc. keystrokes) whether to call `hangul_ic_reset()` (discard) or
