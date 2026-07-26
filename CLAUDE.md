@@ -35,6 +35,6 @@ git submodule update --init --recursive
 The `refs/` directory contains four IBus engine implementations to study. Each follows a similar pattern:
 
 - **ibus-hangul**: C engine wrapping `libhangul`; straightforward single-library integration
-- **ibus-anthy**: Python/GObject Introspection engine wrapping `anthy-unicode`
+- **ibus-anthy**: Python/GObject Introspection engine wrapping `anthy-unicode` — pinned to `bjj/ibus-anthy` @ `0962741`
 - **ibus-table**: Self-contained Python engine; no external IM library dependency
 - **ibus-pinyin**: C++ engine wrapping `pyzy`; most complex, supports Pinyin and Bopomofo

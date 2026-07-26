@@ -14,7 +14,8 @@ Each IBus engine in `refs/` depends on an underlying input-method library. This 
 
 ## ibus-anthy → anthy-unicode
 
-- **Repository**: https://github.com/fujiwarat/anthy-unicode
+- **Reference clone**: https://github.com/bjj/ibus-anthy — pinned to `0962741856498bc9d197be0713b2fae1879c29ba` ("engine: Add behavior-on-select-candidate")
+- **Upstream**: https://github.com/ibus/ibus-anthy
 - **pkg-config name**: `anthy-unicode` (checked first), falls back to `anthy`
 - **Header**: `<anthy/anthy.h>`
 - **Notes**: The original anthy project lived on OSDN (defunct). `anthy-unicode` is the actively maintained fork shipped by Fedora/RHEL; `fujiwarat/anthy-unicode` is the canonical upstream GitHub location.
