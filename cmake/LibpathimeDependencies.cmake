@@ -1,0 +1,73 @@
+# Per-backend dependency discovery and gating.
+#
+# Philosophy: a fresh checkout should always *configure*. If an enabled backend
+# is missing a dependency we warn and skip it, unless LIBPATHIME_REQUIRE_BACKENDS
+# is set (then it is a hard error). A summary is printed at the end.
+
+find_package(PkgConfig QUIET)
+
+# _lpi_gate(<KEY> <label> <missing-list> <hint>)
+# Disables LIBPATHIME_WITH_<KEY> (or errors, per LIBPATHIME_REQUIRE_BACKENDS).
+function(_lpi_gate key label missing hint)
+  string(REPLACE ";" ", " _m "${missing}")
+  if(LIBPATHIME_REQUIRE_BACKENDS)
+    message(FATAL_ERROR
+      "libpathime: ${label} backend is enabled but is missing: ${_m}\n  ${hint}")
+  else()
+    message(WARNING
+      "libpathime: disabling ${label} backend — missing: ${_m}\n  ${hint}")
+    set(LIBPATHIME_WITH_${key} OFF PARENT_SCOPE)
+  endif()
+endfunction()
+
+# --- Japanese: anthy-unicode. No external libraries, but its dictionary is
+#     produced by host tools compiled during the build, so cross-compilation is
+#     not supported yet. ---
+if(LIBPATHIME_WITH_ANTHY AND CMAKE_CROSSCOMPILING)
+  _lpi_gate(ANTHY "Japanese (anthy-unicode)" "native toolchain"
+    "anthy builds its dictionary with host-run codegen tools; cross-compiling needs a separate native tool build (not implemented yet).")
+endif()
+
+# --- Chinese: pyzy. Needs glib-2.0, sqlite3, and a UUID source. (Its generated
+#     tables are committed in-tree, so Python 3 is only needed for the optional
+#     runtime database — probed inside the port, not required here.) ---
+if(LIBPATHIME_WITH_PYZY)
+  set(_pyzy_missing "")
+
+  find_package(SQLite3 QUIET)
+  if(NOT SQLite3_FOUND)
+    list(APPEND _pyzy_missing "SQLite3")
+  endif()
+
+  if(PkgConfig_FOUND)
+    pkg_check_modules(GLIB QUIET glib-2.0>=2.24.0)
+  endif()
+  if(NOT GLIB_FOUND)
+    list(APPEND _pyzy_missing "glib-2.0 >= 2.24.0")
+  endif()
+
+  # UUID: libuuid on Unix; on Windows the compat shim maps to Rpcrt4 (always present).
+  if(NOT WIN32)
+    if(PkgConfig_FOUND)
+      pkg_check_modules(UUID QUIET uuid)
+    endif()
+    if(NOT UUID_FOUND)
+      list(APPEND _pyzy_missing "uuid (libuuid)")
+    endif()
+  endif()
+
+  if(_pyzy_missing)
+    _lpi_gate(PYZY "Chinese (pyzy)" "${_pyzy_missing}"
+      "Debian/Ubuntu: sudo apt-get install libglib2.0-dev libsqlite3-dev uuid-dev -- Windows: vcpkg install glib sqlite3 (uuid via the bundled Rpcrt4 shim).")
+  endif()
+endif()
+
+# --- libhangul: no external dependencies once external keyboards are disabled. ---
+
+message(STATUS "")
+message(STATUS "libpathime backends:")
+message(STATUS "  Korean   (libhangul)      : ${LIBPATHIME_WITH_HANGUL}")
+message(STATUS "  Japanese (anthy-unicode)  : ${LIBPATHIME_WITH_ANTHY}")
+message(STATUS "  Chinese  (pyzy)           : ${LIBPATHIME_WITH_PYZY}")
+message(STATUS "  Shared libraries          : ${BUILD_SHARED_LIBS}")
+message(STATUS "")
