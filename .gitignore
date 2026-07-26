@@ -1,1 +1,17 @@
 refs/
+
+# CMake build output (out-of-source builds live here)
+/build/
+build*/
+cmake-build-*/
+
+# Stray in-source CMake artifacts (in-source builds are rejected, but just in case)
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+CPackConfig.cmake
+CPackSourceConfig.cmake
+install_manifest.txt
+compile_commands.json
+CMakeUserPresets.json
