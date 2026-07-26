@@ -1,0 +1,9 @@
+[submodule "libhangul"]
+	path = libhangul
+	url = https://github.com/libhangul/libhangul
+[submodule "pyzy"]
+	path = pyzy
+	url = https://github.com/openSUSE/pyzy
+[submodule "anthy-unicode"]
+	path = anthy-unicode
+	url = https://github.com/fujiwarat/anthy-unicode
