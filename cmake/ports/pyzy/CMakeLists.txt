@@ -13,9 +13,10 @@ set(HAVE_LIBUUID 1)   # libuuid on Unix; the Rpcrt4 shim on Windows
 configure_file(config.h.in "${CMAKE_CURRENT_BINARY_DIR}/config.h" @ONLY)
 
 # --- source directory (mirrored and fixed up on Windows) --------------------
-# Three things in pyzy's sources are GCC/LP64-isms that no MSVC-style compiler
-# will accept. Rather than edit the submodule, mirror src/ into the build tree
-# and fix the copies. Everything in src/ is included with quotes from
+# Four things in pyzy's sources assume GCC and/or LP64. Three of them no
+# MSVC-style compiler will accept at all; the fourth compiles and then
+# misbehaves at runtime. Rather than edit the submodule, mirror src/ into the
+# build tree and fix the copies. Everything in src/ is included with quotes from
 # co-located files, so the mirror resolves against itself and src/ still never
 # has to go on the -I path (which would shadow <string.h> with pyzy's String.h
 # on a case-insensitive filesystem).
@@ -40,6 +41,9 @@ configure_file(config.h.in "${CMAKE_CURRENT_BINARY_DIR}/config.h" @ONLY)
 #   3. PhraseEditor.h forward-declares `class Config;` where Config.h says
 #      `struct Config` — invisible under the Itanium ABI, a link error under
 #      MSVC's class-key-sensitive mangling.
+#   4. BopomofoContext.cc casts a `const wchar_t *` to UCS-4. Correct only
+#      where wchar_t is 32-bit; where it is 16-bit the zhuyin auxiliary text
+#      silently comes out empty.
 #
 # The mirror is produced at configure time: editing pyzy/src needs a re-run of
 # cmake to take effect.
@@ -104,7 +108,40 @@ if(WIN32)
       "— the vendored source has changed shape.")
   endif()
   file(WRITE "${_pyzy_dir}/String.h" "${_str_h_patched}")
+
+  # 4. BopomofoContext.cc builds its auxiliary text by casting the table's
+  #    `const wchar_t *` straight to `unichar *` (unsigned int) and handing it
+  #    to String::operator<<, which calls g_ucs4_to_utf8. That is only ever
+  #    correct where wchar_t is 32-bit UCS-4. On Windows it is 16-bit UTF-16, so
+  #    two zhuyin letters are read as one code point far outside Unicode;
+  #    g_ucs4_to_utf8 fails, warns, and appends nothing — the preedit's phonetic
+  #    line comes up empty. Appending one code point at a time is equivalent on
+  #    Linux (every zhuyin letter is in the BMP, so the UTF-8 is identical) and
+  #    correct here. tests/pyzy/bopomofo_test.cc is what holds this honest.
+  file(READ "${_pyzy_dir}/BopomofoContext.cc" _bpmf_cc)
+  string(REPLACE
+    "m_buffer << (unichar *)m_pinyin[i]->bopomofo;"
+    [[/* Rewritten by libpathime's Windows port; see cmake/ports/pyzy for why.
+             * The original reinterpreted a UTF-16 wchar_t string as UCS-4. */
+            for (const wchar_t *bpmf_ = m_pinyin[i]->bopomofo; *bpmf_ != L'\0'; ++bpmf_)
+                m_buffer.appendUnichar ((unichar) *bpmf_);]]
+    _bpmf_cc_patched "${_bpmf_cc}")
+  if(_bpmf_cc_patched STREQUAL _bpmf_cc)
+    message(FATAL_ERROR
+      "pyzy: could not find BopomofoContext.cc's `m_buffer << (unichar *)...` "
+      "wchar_t-to-UCS-4 cast to correct — the vendored source has changed "
+      "shape. If upstream has fixed it, drop this rewrite.")
+  endif()
+  file(WRITE "${_pyzy_dir}/BopomofoContext.cc" "${_bpmf_cc_patched}")
 endif()
+
+# Anything that compiles against pyzy's *private* headers has to use the same
+# copies this library was built from, or it gets a String with a different
+# overload set and a PinyinParserTable that no compiler here accepts. tests/pyzy
+# does exactly that, so publish the choice rather than let the test tree
+# re-derive the `if(WIN32)` rule above and silently drift from it.
+set(PYZY_EFFECTIVE_SRC_DIR "${_pyzy_dir}" CACHE INTERNAL
+  "The pyzy source directory this build compiles: pyzy/src, or its rewritten Windows mirror")
 
 # --- library (source list from src/Makefile.am:libpyzy_c_sources) -----------
 set(_pyzy_srcs
@@ -148,14 +185,20 @@ find_package(SQLite3 REQUIRED)
 target_link_libraries(pyzy PRIVATE SQLite::SQLite3)
 
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(GLIB REQUIRED IMPORTED_TARGET glib-2.0>=2.24.0)
+# GLOBAL: pyzy links glib PRIVATE, but glib is in pyzy's *public* private-header
+# surface — String.h calls g_strdup_vprintf inline — so tests/pyzy needs the
+# same imported target. Without GLOBAL, pkg_check_modules scopes it to this
+# directory and the test tree would have to probe glib a second time.
+pkg_check_modules(GLIB REQUIRED IMPORTED_TARGET GLOBAL glib-2.0>=2.24.0)
 target_link_libraries(pyzy PRIVATE PkgConfig::GLIB)
 
 if(WIN32)
   # Supplies <uuid/uuid.h> + <sys/utsname.h> shims and links Rpcrt4.
   libpathime_add_win32_compat(pyzy)
 else()
-  pkg_check_modules(UUID REQUIRED IMPORTED_TARGET uuid)
+  # GLOBAL for the same reason as glib above: Util.h includes <uuid/uuid.h>
+  # unconditionally, so tests/pyzy needs whatever include path found it here.
+  pkg_check_modules(UUID REQUIRED IMPORTED_TARGET GLOBAL uuid)
   target_link_libraries(pyzy PRIVATE PkgConfig::UUID)
 endif()
 
@@ -201,11 +244,22 @@ if(PYZY_BUILD_DB_ANDROID)
     add_custom_target(pyzy-db ALL DEPENDS "${_db}/android.db")
     install(FILES "${_db}/android.db"
       DESTINATION "${CMAKE_INSTALL_DATADIR}/pyzy/db")
+    # Published for tests/pyzy: Database::open() only looks in PKGDATADIR (an
+    # install path that does not exist in a build tree) and then at "main.db"
+    # in the process's working directory, so the conversion tests have to stage
+    # this file themselves. Empty when there is no database to stage.
+    set(PYZY_ANDROID_DB "${_db}/android.db" CACHE INTERNAL
+      "Path to the android.db this build produces, or empty if it was skipped")
   else()
     message(WARNING
       "pyzy: Python 3 not found — skipping android.db (runtime conversion data). "
       "The library still builds; set PYZY_BUILD_DB_ANDROID=OFF to silence this.")
+    set(PYZY_ANDROID_DB "" CACHE INTERNAL
+      "Path to the android.db this build produces, or empty if it was skipped")
   endif()
+else()
+  set(PYZY_ANDROID_DB "" CACHE INTERNAL
+    "Path to the android.db this build produces, or empty if it was skipped")
 endif()
 
 # --- install ----------------------------------------------------------------

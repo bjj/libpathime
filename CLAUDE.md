@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `libpathime` is a new IBus input method engine library. The IME concepts are described in `docs/CONCEPTS.md`.
 
-> **Build:** a CMake build for the three submodules is in place and verified on both Linux and Windows (MSVC and clang-cl). See `BUILD.md` — its "Windows" section documents the compat layer, the generated source variants, and the known runtime limitations. The vendored submodule trees are never edited; if something needs a source change to compile on Windows, it goes through the compat headers or a configure-time generated copy.
+> **Build:** a CMake build for the three submodules is in place and verified on both Linux and Windows (MSVC and clang-cl). See `BUILD.md` — its "Windows" section documents the compat layer, the generated source variants, and the known runtime limitations, and its "Tests" section covers the suites under `tests/`. The vendored submodule trees are never edited; if something needs a source change to compile on Windows, it goes through the compat headers or a configure-time generated copy.
 
 ## Repository Structure
 
@@ -15,6 +15,7 @@ docs/                    # Documentation and project design information
   CONCEPTS.md            # Detailed description of all IME concepts
   ibus-table-spec.md     # Clean-room behavioral spec for ibus-table (source format, DB schema, engine logic)
   *-mapping.md           # Overview of how the submodule libraries relate to the concepts
+tests/                   # Test suites, one directory per backend — see BUILD.md
 refs/                    # Local reference clones — gitignored, not submodules
   ibus-hangul/           # Korean IBus engine (reference)
   ibus-anthy/            # Japanese IBus engine (reference)

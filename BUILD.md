@@ -88,9 +88,54 @@ developer command prompt, and remember to re-set `VCPKG_ROOT` afterwards.
 |--------|---------|---------|
 | `LIBPATHIME_WITH_HANGUL` / `_ANTHY` / `_PYZY` | `ON` | Enable each backend. A backend whose dependencies are missing is warned about and skipped. |
 | `LIBPATHIME_REQUIRE_BACKENDS` | `OFF` | Turn "missing dependency ⇒ skip" into a hard error (for CI). |
-| `LIBPATHIME_BUILD_TESTS` | `OFF` | Build submodule test suites where available. |
+| `LIBPATHIME_BUILD_TESTS` | `OFF` | Build the test suites — see below. |
 | `PYZY_BUILD_DB_ANDROID` | `ON` | Build pyzy's bundled Android pinyin database (needs Python 3). |
 | `BUILD_SHARED_LIBS` | `ON` | Shared vs. static submodule libraries. |
+
+## Tests
+
+```bash
+cmake --preset linux-release -DLIBPATHIME_BUILD_TESTS=ON
+cmake --build --preset linux-release
+ctest --test-dir build/linux-release --output-on-failure
+```
+
+On Windows add `-C Release` to the `ctest` line (the Visual Studio generator is
+multi-config). Tests are named `<backend>.<name>`, so `ctest -R '^anthy\.'`
+runs one backend's suite.
+
+Everything lives under `tests/<backend>/`, and each directory holds two kinds:
+
+- `<backend>.vendor*` — the submodule's own suite. None of the three upstream
+  build systems is used by this build, so the wiring is reproduced rather than
+  reused, and the vendored sources are compiled where they sit.
+- `<backend>.<name>` — tests written for libpathime. These exist to make the
+  Windows build prove it behaves like the Linux one, so all of them must build
+  and pass on both.
+
+Two vendored suites are conditional, for reasons that are worth knowing before
+reading anything into their absence:
+
+- `hangul.vendored.unittest` needs the Check framework *and* a 32-bit
+  `wchar_t`. Upstream's `test.c` compares UCS-4 output with
+  `wcscmp((const wchar_t *) …)`, which on Windows' 16-bit `wchar_t` compares
+  one character and stops — it would pass while testing almost nothing.
+  `hangul.ic` restates the same expectations against `ucschar` instead.
+- `hangul.vendored.hangul` needs iconv, which it uses only to print UCS-4 as
+  UTF-8. glibc has it; on Windows it comes from vcpkg, which glib pulls in
+  anyway.
+
+`pyzy`'s own `src/tests/basic.cc` is deliberately not wired up: its
+`DummyObserver` declares the `InputContext::Observer` callbacks with the wrong
+constness, so nothing overrides, the class stays abstract, and the file has not
+compiled in a long time. What it was written to check is covered by the tests
+in `tests/pyzy/`, which take their expected values from it.
+
+One upstream bug has no test because it cannot have one:
+`anthy_dic_util_set_personality()` aborts the process on both Linux and
+Windows — `anthy_dic_set_personality()` replaces the record and personal-dic
+cache that `anthy_dic_util_init()` installed without releasing them, and the
+orphan is freed twice at teardown. See `tests/anthy/test_dicutil.c`.
 
 ## What gets produced
 
@@ -133,10 +178,15 @@ is handled three ways:
    time (so editing a submodule needs a re-run of cmake):
    - `anthy-unicode/src-diclib/alloc.c` casts heap pointers through
      `unsigned long`, which is 32-bit under LLP64; the copy uses `uintptr_t`.
+   - `anthy-unicode/src-diclib/file_dic.c` walks paths POSIX-style and so
+     cannot create `%USERPROFILE%\.config\anthy`; the copy teaches it drive
+     letters and `\`.
    - `pyzy/src/` is mirrored whole. `PinyinParserTable.h` uses GNU
      labelled-field initialisers; `String.h` is missing `operator<<` overloads
      that only LP64 made unnecessary; `PhraseEditor.h` forward-declares
-     `class Config` where it is a `struct`, which MSVC's mangling notices.
+     `class Config` where it is a `struct`, which MSVC's mangling notices; and
+     `BopomofoContext.cc` casts a `const wchar_t *` to UCS-4, which is only
+     correct where `wchar_t` is 32 bits.
 3. **Build-time behaviour.** The codegen tools get an 8 MB stack (they
    `alloca` in loops) and run with the CRT in binary mode, because they
    `fopen(..., "w")` binary dictionaries. Generated text inputs are written
@@ -160,9 +210,10 @@ the build produces.
 - The anthy **runtime** library still opens its private-dictionary and history
   files in the CRT's default text mode (the binary-mode fix is deliberately
   scoped to the codegen executables, which own their process — a library must
-  not change `_fmode` under its host).
-- pyzy's Bopomofo path casts `wchar_t *` to UCS-4 in one place
-  (`BopomofoContext.cc`), which is wrong where `wchar_t` is 16-bit.
+  not change `_fmode` under its host). The only observed effect is that
+  `textdict`'s newline padding is written twice as long as intended; the
+  private-dictionary write/read/delete cycle round-trips correctly, and
+  `ctest -R '^anthy\.dicutil$'` covers it.
 - `cmake --install` leaves a second copy of `hangul.dll` in `lib/` — upstream's
   install rule uses one bare `DESTINATION`. The usable copy in `bin/` is added
   by this build.

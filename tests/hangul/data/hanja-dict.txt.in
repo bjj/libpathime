@@ -1,0 +1,15 @@
+# Small hanja dictionary for the hangul.vendored.hanja test.
+#
+# Format (see the HanjaTable docs in libhangul/hangul/hanja.c): UTF-8,
+# key:value:comment, one entry per line, sorted ascending by key bytes, '#'
+# introduces a comment line. Keeping the dictionary tiny and ours keeps the
+# expected output stable — driving the vendored program against the shipped
+# 6 MB hanja.txt would tie the test to data upstream is free to extend.
+#
+# The leading comment lines are not decoration: hanja_table_load() skips them
+# while building its offset index, and the first indexed entry has to still
+# point at the right place afterwards.
+가:可:comment-one
+가:家:
+가나:假名:comment-two
+한자:漢字:comment-three

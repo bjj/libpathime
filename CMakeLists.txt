@@ -56,3 +56,12 @@ endif()
 if(LIBPATHIME_WITH_PYZY)
   add_subdirectory(cmake/ports/pyzy)
 endif()
+
+# --- Tests. All test wiring — both the vendored suites and our own — lives
+# under tests/, one directory per backend, so nothing above this line has to
+# know that tests exist. Off by default: the suites need the build-time data
+# (anthy.dic, android.db) and take considerably longer than the libraries.
+if(LIBPATHIME_BUILD_TESTS)
+  enable_testing()
+  add_subdirectory(tests)
+endif()
