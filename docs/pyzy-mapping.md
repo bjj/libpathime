@@ -1,0 +1,510 @@
+# pyzy API and Concept Mapping
+
+This document maps the pyzy (libpyzy) C++ library and its IBus wrapper
+(`refs/ibus-pinyin`) to the project's canonical IME concepts defined in
+`docs/CONCEPTS.md`.
+
+## Library overview
+
+libpyzy is a C++ shared library for Chinese Pinyin and Bopomofo phonetic
+conversion. Its sole public header is `pyzy/src/InputContext.h`; the
+constants in `pyzy/src/Const.h` and the tagged-union type in
+`pyzy/src/Variant.h` are also part of the public surface. Everything else
+in `pyzy/src/` is an internal implementation detail.
+
+The conversion model is phonetic-to-phrase:
+
+1. The caller feeds raw ASCII keystrokes one character at a time via
+   `InputContext::insert(char ch)`. The library parses these into a
+   sequence of pinyin syllables (or Bopomofo symbols) and maintains a
+   cursor position within that raw input.
+2. pyzy runs phrase-lookup against a bundled SQLite database and a
+   user-phrase database, producing an ordered candidate list on demand.
+3. The candidate list is lazy: only the candidates that have been
+   explicitly requested via `hasCandidate()` or `getCandidate()` are
+   prepared. `getPreparedCandidatesSize()` returns how many have been
+   prepared so far.
+4. Results are decomposed into three named text segments — `selectedText`,
+   `conversionText`, `restText` — plus an `auxiliaryText` string. These
+   represent the parts of the preedit as the user selects candidates in
+   sequence.
+5. The library fires state-change notifications synchronously through a
+   virtual `InputContext::Observer` interface. The caller overrides this
+   class to receive callbacks.
+
+Three input modes are supported, selected at `InputContext::create()` time:
+`FULL_PINYIN`, `DOUBLE_PINYIN`, and `BOPOMOFO`. Conversion options
+(typo-correction rules, fuzzy-pinyin pairs, Bopomofo keyboard layout,
+double-pinyin schema, simplified/traditional mode, special-phrase lookup)
+are set per-context via `setProperty()` using the `PropertyName` enum and
+`Variant` wrapper type.
+
+---
+
+## API concept mapping
+
+| CONCEPTS.md concept | pyzy API element |
+|---|---|
+| **Client** | The code that owns a `PyZy::InputContext::Observer` subclass and holds the `InputContext*` pointer. pyzy has no built-in notion of a client; the caller is the client. |
+| **Engine** | `PyZy::InputContext` is the engine object. There is no separate factory or engine registry; the factory method is `InputContext::create()`. |
+| **Input context** | `PyZy::InputContext*` — created by `InputContext::create(InputType, Observer*)`, destroyed by `delete`. Each instance carries independent composition state. |
+| **Key event** | No key-event type exists in pyzy. The caller decomposes key events itself and calls individual mutation methods (`insert(char)`, `removeCharBefore()`, `moveCursorLeft()`, etc.). |
+| **Handled / Unhandled** | Each mutation method returns `bool`: `true` if the operation changed state (approximately "handled"), `false` if it had no effect. `insert()` returns `false` for invalid or overlong input. There is no concept of forwarding an unhandled event. |
+| **Forward key event** | Not present. pyzy never asks the caller to deliver a key event to a downstream recipient. |
+| **Composition data** | The combination of `selectedText()`, `conversionText()`, `restText()`, and `auxiliaryText()` accessors, plus the lazy candidate list. These are delivered via separate `Observer` callbacks rather than as a single composite value. |
+| **Preedit text** | Decomposed into three `std::string` segments returned by `selectedText()`, `conversionText()`, and `restText()`. The internal `Preedit` struct (in `pyzy/src/PhoneticContext.h`) holds `selected_text`, `candidate_text`, and `rest_text`. The full preedit string must be assembled by concatenation. `preeditTextChanged(InputContext*)` is the notification callback. |
+| **Auxiliary text** | `auxiliaryText()` returns a `std::string`. `auxiliaryTextChanged(InputContext*)` is the notification callback. |
+| **Candidate list** | Accessed via `hasCandidate(size_t index)` and `getCandidate(size_t index, Candidate& output)`. `Candidate` is a struct with `std::string text` and `CandidateType type` (`NORMAL_PHRASE`, `USER_PHRASE`, `SPECIAL_PHRASE`). The list is unbounded and lazily populated. `candidatesChanged(InputContext*)` is the notification callback. `getPreparedCandidatesSize()` returns how many entries have been materialized. |
+| **Select candidate** | `selectCandidate(size_t index)` — 0-origin absolute index into the current candidate list. Returns `bool`. If selecting the candidate exhausts the remaining input, pyzy fires `commitText` automatically. Otherwise it updates the three preedit segments and fires `preeditTextChanged`. |
+| **Surrounding text** | Not present. pyzy has no API to accept or use surrounding text from the client. |
+| **Commit text** | `Observer::commitText(InputContext*, const std::string&)` — fires when pyzy decides to emit finalized text. The caller can also force a commit by calling `InputContext::commit(CommitType)` directly (`TYPE_RAW`, `TYPE_PHONETIC`, or `TYPE_CONVERTED`). |
+| **Delete surrounding text** | Not present. pyzy never issues a delete-surrounding-text request. |
+| **Focus** | Not present. pyzy has no focus-in / focus-out lifecycle callbacks. |
+| **Activation** | Not present. pyzy has no enable / disable callbacks. |
+| **Reset** | `InputContext::reset()` — discards all transient composition state and returns to empty. Does not commit; the caller must commit explicitly first if it wants to preserve the preedit. |
+| **Negotiation** | Partially covered by `setProperty(PropertyName, Variant)`. The four properties are `PROPERTY_CONVERSION_OPTION` (unsigned int bitmask), `PROPERTY_DOUBLE_PINYIN_SCHEMA` (unsigned int), `PROPERTY_BOPOMOFO_SCHEMA` (unsigned int), and `PROPERTY_MODE_SIMP` (bool). There is no capability negotiation, no field-purpose hints, and no behavioral-policy exchange. |
+
+---
+
+## What the library provides
+
+pyzy covers the following parts of a working Pinyin/Bopomofo IME engine
+directly:
+
+**Phonetic parsing.** `insert(char ch)` accepts printable ASCII and
+internally parses the accumulated string into a `PinyinArray` (or
+Bopomofo symbol sequence for `BOPOMOFO` mode). The cursor within the raw
+input string is tracked by `cursor()`.
+
+**Phrase lookup and ranking.** The internal `PhraseEditor` queries a
+bundled SQLite phrase database and a user-phrase history database,
+returning ranked candidates. The user-phrase history is updated
+automatically when the user selects candidates, improving future
+suggestions.
+
+**Lazy candidate enumeration.** Candidates are prepared on demand through
+`hasCandidate()` and `getCandidate()`. The caller controls how many are
+fetched. `getPreparedCandidatesSize()` lets the caller avoid re-fetching
+already-materialized candidates.
+
+**Candidate type tagging.** Each `Candidate` carries a `CandidateType`
+(`NORMAL_PHRASE`, `USER_PHRASE`, `SPECIAL_PHRASE`) so the wrapper can
+distinguish provenance.
+
+**Three-segment preedit decomposition.** `selectedText()` is the portion
+the user has confirmed by selecting candidates, `conversionText()` is the
+candidate currently being shown for the next phonetic segment, and
+`restText()` is the unconverted tail. This decomposition conveys the
+display-position concept from `CONCEPTS.md` in structural form: the
+boundary between `selectedText` and `conversionText` is the preedit
+display position.
+
+**Auxiliary text.** For Bopomofo contexts the auxiliary text echoes the
+phonetic symbols being composed. For Pinyin contexts it may contain
+supplemental information about the current input.
+
+**Conversion options.** The bitmask `PROPERTY_CONVERSION_OPTION` (flags
+from `Const.h`) controls incomplete-pinyin matching, typo-correction rules
+(nine `PINYIN_CORRECT_*` flags), and fuzzy-pinyin pairs (fourteen
+`PINYIN_FUZZY_*` flags). These can be changed at any time via
+`setProperty()`.
+
+**Special phrases.** A user-editable phrase table (`phrases.txt` under the
+configured config directory) supports date/time macros and other special
+expansions. Enabled by `PROPERTY_SPECIAL_PHRASE`.
+
+**Simplified/Traditional selection.** `PROPERTY_MODE_SIMP` (bool)
+switches the output character repertoire between simplified and traditional
+Chinese.
+
+**Cursor navigation and editing within the input buffer.** The library
+provides `moveCursorLeft()`, `moveCursorRight()`, `moveCursorLeftByWord()`,
+`moveCursorRightByWord()`, `moveCursorToBegin()`, `moveCursorToEnd()`,
+`removeCharBefore()`, `removeCharAfter()`, `removeWordBefore()`,
+`removeWordAfter()`. These all return `bool` indicating whether the
+operation changed state.
+
+**Candidate focus without selection.** `focusCandidate(size_t)`,
+`focusCandidatePrevious()`, `focusCandidateNext()` — these move a
+"focus" cursor within the candidate list and update the preedit segments to
+show the currently focused candidate's conversion text, without committing.
+`focusedCandidate()` returns the current focus index.
+
+**User-phrase history management.** `resetCandidate(size_t index)` removes
+a specific candidate from the user-phrase history.
+
+**Unselect.** `unselectCandidates()` undoes any candidate selection,
+returning to the unconverted state.
+
+**Initialization and teardown.** `InputContext::init()` (or
+`init(user_cache_dir, user_config_dir)`) must be called once before
+creating any context. `InputContext::finalize()` must be called before
+program exit. These are process-global operations.
+
+---
+
+## What the IBus wrapper adds
+
+The IBus wrapper in `refs/ibus-pinyin/src/` provides everything that is
+required to connect pyzy to an IBus engine but that pyzy does not supply.
+
+### Key-event routing and the mode-switching dispatcher
+
+`PinyinEngine` in `PYPinyinEngine.h/.cc` is the top-level IBus engine
+class. It receives `processKeyEvent(guint keyval, guint keycode, guint
+modifiers)` from IBus and routes each event to one of five mode-specific
+editors held in `m_editors[MODE_LAST]`:
+
+- `MODE_INIT` — normal Pinyin or Bopomofo input, handled by
+  `FullPinyinEditor`, `DoublePinyinEditor`, or `BopomofoEditor`.
+- `MODE_PUNCT` — Chinese punctuation picker, handled by `PunctEditor`.
+- `MODE_RAW` — raw Latin pass-through, handled by `RawEditor`.
+- `MODE_ENGLISH` — English word input (entered by pressing `v`), handled
+  by `EnglishEditor`.
+- `MODE_EXTENSION` — Lua-scripted extension (entered by pressing `i`),
+  handled by `ExtEditor`.
+
+The dispatcher in `PinyinEngine::processKeyEvent()` inspects the modifier
+mask, current mode, and key value to decide which editor handles the event
+and whether to switch modes. It also handles the Shift-release toggle
+(switching Chinese/English input mode) and `Ctrl+Shift+F` (toggling
+simplified/traditional).
+
+pyzy has no concept of these modes. The entire mode dispatcher is wrapper
+logic.
+
+### Raw key-event decomposition
+
+`PinyinEditor::processKeyEvent()` in `PYPinyinEditor.cc` breaks the
+incoming keyval into categories: Pinyin letters (`a`–`z`), digits
+(`0`–`9`, `KP_0`–`KP_9`), punctuation, Space, and function keys. For each
+category it calls the appropriate method on `m_context` (the
+`PyZy::InputContext*`) or manages the lookup table directly.
+
+pyzy's `insert(char ch)` only accepts a single ASCII character; it never
+sees IBus key codes, modifiers, or special keys. The entire key-to-action
+mapping is wrapper logic.
+
+### The Editor / PhoneticEditor class hierarchy
+
+`Editor` (`PYEditor.h`) is the base class for all mode editors. It holds a
+set of C++11 `signal<>` objects (defined in `PYSignal.h`) that replace
+direct IBus calls. Signals are fired instead of calling IBus API directly,
+and `PinyinEngine::connectEditorSignals()` wires them to the corresponding
+`Engine` methods (`updatePreeditText`, `commitText`, etc.).
+
+`PhoneticEditor` (`PYPhoneticEditor.h/.cc`) inherits `Editor` and owns the
+`PyZy::InputContext*` (`m_context`) and `PinyinObserver` (`m_observer`).
+It bridges pyzy Observer callbacks to IBus update calls and also owns the
+IBus `LookupTable` (`m_lookup_table`).
+
+`PinyinEditor` adds Pinyin-specific key processing (number keys for
+candidate selection in page, comma/period and minus/equal for paging,
+apostrophe disambiguation).
+
+`BopomofoEditor` adds Bopomofo-specific key processing: a guide-key mode
+(`m_select_mode`), nine configurable select-key layouts
+(`bopomofo_select_keys`), auxiliary KP and F-key selection, and candidate
+label coloring that dims labels when not in select mode.
+
+### The PinyinObserver bridge
+
+`PinyinObserver` (`PYPinyinObserver.h/.cc`) subclasses
+`PyZy::InputContext::Observer` and forwards each callback to the
+corresponding `PhoneticEditor` update method:
+
+| pyzy callback | PhoneticEditor method called |
+|---|---|
+| `commitText` | `commitCallback(String)` |
+| `inputTextChanged` | `updateInputText()` |
+| `cursorChanged` | `updateCursor()` |
+| `preeditTextChanged` | `updatePreeditText()` |
+| `auxiliaryTextChanged` | `updateAuxiliaryText()` |
+| `candidatesChanged` | `updateLookupTable()` |
+
+### Preedit assembly with IBus attributes
+
+`PhoneticEditor::updatePreeditText()` assembles the full preedit string by
+concatenating `selectedText() + conversionText() + restText()`. It then
+attaches IBus text attributes:
+
+- A single-underline attribute across the whole string.
+- A foreground color (`0x00000000`, black) and background highlight
+  (`0x00c8c8f0`, pale blue) on the `conversionText` segment to mark the
+  active conversion region.
+
+The IBus preedit cursor is set to `selectedText().utf8Length()`, placing it
+at the start of the conversion segment.
+
+None of this attribute logic exists in pyzy. pyzy returns plain
+`std::string` values.
+
+### Lookup-table management and pagination
+
+`PhoneticEditor::fillLookupTableByPage()` fetches one page of candidates
+at a time from pyzy by calling `m_context->getCandidate(i, candidate)` in
+a loop. It also applies per-candidate foreground colors based on
+`CandidateType`: blue (`0x000000ef`) for `USER_PHRASE`, green
+(`0x0000ef00`) for `SPECIAL_PHRASE`.
+
+`pageUp()` and `pageDown()` operate on the wrapper's `m_lookup_table`
+(IBus `LookupTable`) via `m_lookup_table.pageUp()`/`pageDown()` without
+calling back into pyzy. `cursorUp()` and `cursorDown()` move the IBus
+cursor within the already-fetched page. Only when paging down past the last
+fetched candidate does the wrapper call `fillLookupTableByPage()` again to
+materialize more candidates from pyzy.
+
+`selectCandidateInPage(guint i)` converts a page-relative index to an
+absolute index using `(cursor_pos / page_size) * page_size + i` and then
+calls `m_context->selectCandidate(absolute_index)`.
+
+The `m_dont_update_preedit` flag in `PhoneticEditor` suppresses preedit
+updates during `reset()` when there is no conversion in progress, avoiding
+a flash of stale preedit text.
+
+### The PinyinProperties mode flags
+
+`PinyinProperties` (`PYPinyinProperties.h/.cc`) maintains four runtime
+mode flags not present in pyzy:
+
+- `m_mode_chinese` — whether Chinese input is active (as opposed to
+  English pass-through). Toggled by Shift-release.
+- `m_mode_full` — full-width versus half-width alphanumeric output.
+- `m_mode_full_punct` — full-width versus half-width punctuation.
+- `m_mode_simp` — simplified versus traditional Chinese. This one is
+  mirrored into pyzy via `setProperty(PROPERTY_MODE_SIMP, ...)` when it
+  changes, and applied to a new context when `setContext()` is called.
+
+These flags are also exposed as IBus `Property` objects (language bar
+buttons) via `PropList m_props`, with SVG icons. pyzy has no concept of
+mode flags, language-bar properties, or icons.
+
+### Full/half-width output conversion
+
+`HalfFullConverter` (`PYHalfFullConverter.h/.cc`) converts ASCII printable
+characters to their full-width Unicode equivalents (U+FF01–U+FF5E range).
+`PhoneticEditor::commitCallback()` applies this conversion to every
+character of the commit text when `m_mode_full` is active.
+`FallbackEditor::processKeyEvent()` similarly converts directly typed
+characters. pyzy commits `std::string` values without any width conversion.
+
+### Chinese punctuation substitution
+
+`FallbackEditor` (`PYFallbackEditor.h/.cc`) handles all key events when
+the active editor has no buffered input, and also handles direct character
+input in English mode. It performs Chinese punctuation substitution: `!`
+→ `！`, `.` → `。`, `,` → `，`, paired `'` → `''`/`''`, paired `"` →
+`""`/`""`, etc., with separate tables for simplified and traditional
+Chinese. This logic depends on `m_props.modeFullPunct()` and
+`m_props.modeSimp()`, and tracks `m_prev_committed_char` to handle the
+special case of `.` after a digit. pyzy provides none of this punctuation
+logic.
+
+### Config propagation to pyzy contexts
+
+`Config` (`PYConfig.h/.cc`) reads IBus GSettings keys (page size,
+double-pinyin schema, fuzzy-pinyin flags, Bopomofo layout, etc.) and
+propagates changes to all live `InputContext*` instances it tracks in
+`m_contexts`. `addContext()` / `removeContext()` register and unregister
+contexts with the `Config`. `updateContext(PropertyName, Variant)` iterates
+over `m_contexts` and calls `setProperty()` on each one. This creates an
+"all contexts share config changes" model. pyzy itself has no config
+object; every property must be pushed in by the caller.
+
+### IBus lifecycle hooks with no pyzy equivalent
+
+- `Engine::focusIn()` — re-registers IBus properties and may swap the
+  active editor. No pyzy call is made.
+- `Engine::focusOut()` — calls `reset()` on all editors, which calls
+  `m_context->reset()`. pyzy reset semantics are the same, but the
+  focus-out trigger is entirely wrapper logic.
+- `Engine::enable()` — calls `m_props.reset()` to restore default mode
+  flags. No pyzy call.
+- `Engine::disable()` — empty in the pinyin engine. No pyzy call.
+- `Engine::propertyActivate()` — handles language-bar button clicks by
+  toggling mode flags via `PinyinProperties`. Only `PROPERTY_MODE_SIMP`
+  changes are forwarded into pyzy.
+- `Engine::candidateClicked()` — routes mouse clicks on the candidate
+  window to `selectCandidateInPage()`.
+- `Engine::pageUp()`, `pageDown()`, `cursorUp()`, `cursorDown()` —
+  IBus hooks for scroll-wheel and keyboard paging; these manipulate the
+  wrapper's `LookupTable` and call `fillLookupTableByPage()` if needed.
+  pyzy has no concept of pages.
+
+---
+
+## Impedance mismatches
+
+### 1. Key events versus character insertion
+
+**Project concept:** The engine receives a key event (logical key, physical
+key, modifier state) and returns whether it was handled.
+
+**pyzy provides:** `insert(char ch)` takes a single printable ASCII
+character and returns `bool`. There is no key-event type. The caller must
+decode each key event into the appropriate mutation call (insert, move
+cursor, delete, commit, reset, etc.) before touching pyzy.
+
+**Bridge required:** A complete key-to-action dispatcher must be written
+by the integrator. This is exactly what `PinyinEditor::processKeyEvent()`
+and `PhoneticEditor::processFunctionKey()` implement. The dispatcher is not
+trivial: it must handle modifiers, key release events, mode selection,
+cursor movement, page navigation, and candidate selection keys, none of
+which pyzy is aware of.
+
+### 2. Composition data as separate callbacks versus one composite value
+
+**Project concept:** Composition data is one value containing preedit text,
+auxiliary text, and a candidate list. It is emitted atomically after each
+operation.
+
+**pyzy provides:** Six independent callbacks (`inputTextChanged`,
+`cursorChanged`, `preeditTextChanged`, `auxiliaryTextChanged`,
+`candidatesChanged`, `commitText`) that fire separately and in sequence
+during a single `insert()` or other operation. The preedit text itself is
+split across three separate `std::string` accessors
+(`selectedText()`, `conversionText()`, `restText()`).
+
+**Bridge required:** The integrator must either accumulate all callbacks
+that arrive during one operation and emit a single composite update
+afterward, or accept that composition data is delivered in parts. The
+ibus-pinyin wrapper does not aggregate; each callback triggers a separate
+IBus update call immediately. For a library that promises one atomic
+composition-data value per operation, a buffering layer is needed.
+
+### 3. Candidate list: lazy/paged versus complete and flat
+
+**Project concept:** The candidate list is the complete ordered list of
+alternatives. The client paginates without engine involvement. The engine
+provides absolute positions. The client must not select from an obsolete
+list.
+
+**pyzy provides:** A lazy, on-demand list. The total size is not known in
+advance. `hasCandidate(i)` and `getCandidate(i, out)` materialize entries
+one at a time. `getPreparedCandidatesSize()` returns how many have been
+fetched so far. `candidatesChanged` fires when the list is regenerated (but
+does not indicate the new total size).
+
+**Bridge required:** To expose a complete flat candidate list as
+CONCEPTS.md requires, the integrator must either pre-fetch all candidates
+eagerly (potentially expensive for large databases) or accept that the
+"complete list" concept is approximated by fetching on demand. The
+ibus-pinyin wrapper approximates by fetching one page at a time and
+fetching more pages as the user pages down.
+
+### 4. Candidate selection is index-into-full-list but pyzy's model is session-accumulated
+
+**Project concept:** `selectCandidate` takes an absolute position in the
+most-recently-supplied candidate list.
+
+**pyzy provides:** `selectCandidate(size_t index)` takes an absolute
+0-origin index into the current candidate list and advances the selected
+portion of the preedit. If the remaining input is exhausted, `commitText`
+fires automatically. If not, the selected text grows and the candidate list
+is regenerated for the next phonetic segment. The index is absolute within
+the current candidate query, not across multiple selection steps.
+
+**Bridge required:** No bridging is needed for the index itself, but the
+integrator must understand that each `selectCandidate` call advances the
+conversion state and the next `candidatesChanged` callback brings a new
+list for the next phonetic segment — the same index value may refer to a
+different candidate after the first selection.
+
+### 5. Surrounding text: not present
+
+**Project concept:** The client can supply surrounding text for
+context-sensitive conversion, reconversion, or deletion. The engine may
+request `deleteSurroundingText`.
+
+**pyzy provides:** No surrounding-text API. There is no method to supply
+context text, no API to request deletion of client text, and no
+reconversion facility.
+
+**Bridge required:** Any feature depending on surrounding text must be
+implemented entirely outside pyzy. The integrator must accept that pyzy
+cannot use surrounding context.
+
+### 6. Focus and activation lifecycle: not present
+
+**Project concept:** The engine is informed when an input context gains or
+loses focus, and when the engine becomes active or inactive for that
+context.
+
+**pyzy provides:** No focus or activation callbacks on `InputContext`. The
+only lifecycle events pyzy knows about are `reset()` (clear state) and
+destruction.
+
+**Bridge required:** The integrator is responsible for deciding what to do
+on focus-out (typically: call `reset()` or `commit(TYPE_CONVERTED)`), on
+focus-in (typically: nothing, or re-register display state), on activation
+(initialize the context, push current config), and on deactivation
+(optionally commit or reset). The ibus-pinyin wrapper calls `reset()` on
+all editors in `focusOut()` and re-registers language-bar properties in
+`focusIn()`.
+
+### 7. Negotiation: not present except for conversion options
+
+**Project concept:** Capabilities, field information, behavioral policies,
+and engine options are exchanged through negotiation.
+
+**pyzy provides:** Four properties settable via `setProperty()`:
+`PROPERTY_CONVERSION_OPTION`, `PROPERTY_DOUBLE_PINYIN_SCHEMA`,
+`PROPERTY_BOPOMOFO_SCHEMA`, `PROPERTY_SPECIAL_PHRASE`,
+`PROPERTY_MODE_SIMP`. There is no capability query mechanism, no field-type
+hint, no behavioral-policy exchange, and no protocol versioning.
+
+**Bridge required:** Engine options that map to pyzy properties can be
+delivered via `setProperty()`. All other negotiation concepts (client
+capabilities, input purpose/hints, behavioral policies such as what to do
+on focus-out) must be managed entirely by the integrator above pyzy.
+
+### 8. Commit text: auto-fired versus caller-controlled
+
+**Project concept:** Commit text is an explicit engine output; after
+committing, the engine supplies whatever composition data should remain.
+
+**pyzy provides:** `commitText` fires automatically from within
+`selectCandidate()` when the last phonetic segment is covered, or can be
+requested explicitly via `commit(CommitType)`. The `CommitType` controls
+whether the raw input, phonetic symbols, or converted text is emitted.
+After an automatic commit from `selectCandidate`, pyzy resets its context
+internally; after a caller-initiated `commit()`, pyzy also resets.
+
+**Bridge required:** The integrator must handle both the auto-fire path
+(callback arrives during a `selectCandidate()` call) and the explicit path
+(caller calls `commit()`). In both cases the callback arrives synchronously
+within the mutation call, before that call returns. The integrator must not
+assume commit text arrives only in a separate event loop turn.
+
+### 9. Forward key event: not present
+
+**Project concept:** The engine may request the client to process a key
+event as an explicit output.
+
+**pyzy provides:** No mechanism to forward a key event. pyzy only emits
+text (via `commitText`) and state changes (via the other five callbacks).
+
+**Bridge required:** If the host IME framework (such as IBus) requires
+forward-key-event capability (for example to pass through unhandled keys
+after a commit), the integrator must implement this entirely outside pyzy
+using the host framework's own API.
+
+### 10. Plain-text rule: pyzy output is plain but preedit is structurally split
+
+**Project concept:** All composition data is plain Unicode text. The
+candidate list contains only text entries, with no labels, comments, or
+type annotations.
+
+**pyzy provides:** `commitText` and `auxiliaryText()` are plain
+`std::string`. `selectedText()`, `conversionText()`, and `restText()` are
+plain `std::string` segments. However, each `Candidate` carries a
+`CandidateType` field (`NORMAL_PHRASE`, `USER_PHRASE`, `SPECIAL_PHRASE`)
+that is metadata beyond plain text.
+
+**Bridge required:** The integrator can ignore `CandidateType` and expose
+only `Candidate::text` to satisfy the plain-text rule. The ibus-pinyin
+wrapper uses the type to apply colored text attributes in the IBus lookup
+table; a plain-text integrator would drop this. The three-part preedit
+decomposition must be re-joined into a single string, with the boundary
+between `selectedText` and `conversionText` used to derive the preedit
+display position concept from CONCEPTS.md.
