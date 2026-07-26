@@ -104,6 +104,9 @@ On Windows add `-C Release` to the `ctest` line (the Visual Studio generator is
 multi-config). Tests are named `<backend>.<name>`, so `ctest -R '^anthy\.'`
 runs one backend's suite.
 
+The suite passes on Linux (19 tests) and on Windows under both MSVC and
+clang-cl (18 — see `hangul.vendored.unittest` below for the missing one).
+
 Everything lives under `tests/<backend>/`, and each directory holds two kinds:
 
 - `<backend>.vendor*` — the submodule's own suite. None of the three upstream
@@ -117,10 +120,12 @@ Two vendored suites are conditional, for reasons that are worth knowing before
 reading anything into their absence:
 
 - `hangul.vendored.unittest` needs the Check framework *and* a 32-bit
-  `wchar_t`. Upstream's `test.c` compares UCS-4 output with
-  `wcscmp((const wchar_t *) …)`, which on Windows' 16-bit `wchar_t` compares
-  one character and stops — it would pass while testing almost nothing.
-  `hangul.ic` restates the same expectations against `ucschar` instead.
+  `wchar_t`, so in practice it runs on Linux and not on Windows. Upstream's
+  `test.c` compares UCS-4 output with `wcscmp((const wchar_t *) …)`, which on
+  Windows' 16-bit `wchar_t` compares one character and stops — it would pass
+  while testing almost nothing. `hangul.ic` restates the same expectations
+  against `ucschar` instead, so nothing is lost on Windows but the vendored
+  suite itself.
 - `hangul.vendored.hangul` needs iconv, which it uses only to print UCS-4 as
   UTF-8. glibc has it; on Windows it comes from vcpkg, which glib pulls in
   anyway.
@@ -161,8 +166,9 @@ On Windows the anthy family is built **static** regardless of
 
 Verified on Windows 11 with Visual Studio 2022 (MSVC 19.44) and with clang-cl
 19 + Ninja, x64, against vcpkg's glib 2.88 and sqlite3 3.53. Both presets
-produce identical `anthy.dic` and `android.db`, and the built anthy converts
-correctly against its generated dictionary.
+produce identical `anthy.dic` and `android.db`, and both pass the full test
+suite — which is the real check that the workarounds below preserve Linux
+behaviour rather than merely compiling.
 
 Nothing under `libhangul/`, `anthy-unicode/` or `pyzy/` is edited. Portability
 is handled three ways:
