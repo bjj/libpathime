@@ -47,6 +47,7 @@ The `refs/` directory contains IBus engine implementations and table data to stu
 
 ## Documentation
 
+- `PLAN.md` — current working plan. Captures the cross-cutting design findings from the mapping review and the open questions for the next step (defining the library's main data structures). Start here for "what's next."
 - `docs/CONCEPTS.md` — defines the canonical IME concepts (engine, client, composition, etc.) that `libpathime` will implement
 - `docs/ibus-table-spec.md` — complete behavioral specification for ibus-table: source `.txt` file format, compiled SQLite schema, key-event state machine, candidate sorting, and clean-room implementation notes for a C++ port
-- `docs/*-mapping.md` — per-library notes mapping each submodule's API to the concepts
+- `docs/*-mapping.md` — per-library notes mapping each submodule's API to the concepts. Verified against the actual submodule source (see cited file/line references throughout); each ends with an "Impedance mismatches" section.
