@@ -31,7 +31,9 @@
     {
       "name": "windows-msvc",
       "displayName": "Windows · MSVC (Visual Studio 2022)",
+      "description": "Needs VCPKG_ROOT set and `vcpkg install glib sqlite3` for pyzy (uuid comes from the bundled Rpcrt4 shim). Pass -DCMAKE_INSTALL_PREFIX here rather than to `cmake --install --prefix`: libhangul bakes absolute install paths at configure time. See BUILD.md.",
       "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
       "binaryDir": "${sourceDir}/build/${presetName}",
       "condition": {
         "type": "equals",
@@ -39,13 +41,13 @@
         "rhs": "Windows"
       },
       "cacheVariables": {
-        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
-        "__comment_deps": "pyzy needs GLib + SQLite3: run `vcpkg install glib sqlite3` (uuid is provided by the bundled Rpcrt4 shim). Set VCPKG_ROOT before configuring."
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
       }
     },
     {
       "name": "windows-ninja",
       "displayName": "Windows · Ninja + clang-cl",
+      "description": "Run from a Visual Studio developer command prompt — and re-set VCPKG_ROOT afterwards, because vcvars points it at the vcpkg bundled with Visual Studio.",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/${presetName}",
       "condition": {

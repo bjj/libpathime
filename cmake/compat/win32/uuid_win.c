@@ -10,9 +10,10 @@
 #include <windows.h>
 #include <rpc.h>
 #include <stdio.h>
+#include <string.h>
 
 void
-uuid_generate(uuid_t out)
+uuid_generate(libpathime_uuid_t out)
 {
     UUID u;
     /* UuidCreate lays the 128 bits out with mixed endianness across its
@@ -23,7 +24,7 @@ uuid_generate(uuid_t out)
 }
 
 static void
-uuid_format(const uuid_t uu, char *out, const char *fmt)
+uuid_format(const libpathime_uuid_t uu, char *out, const char *fmt)
 {
     sprintf(out,
             fmt,
@@ -32,14 +33,14 @@ uuid_format(const uuid_t uu, char *out, const char *fmt)
 }
 
 void
-uuid_unparse_lower(const uuid_t uu, char *out)
+uuid_unparse_lower(const libpathime_uuid_t uu, char *out)
 {
     uuid_format(uu, out,
         "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x");
 }
 
 void
-uuid_unparse(const uuid_t uu, char *out)
+uuid_unparse(const libpathime_uuid_t uu, char *out)
 {
     uuid_unparse_lower(uu, out);
 }

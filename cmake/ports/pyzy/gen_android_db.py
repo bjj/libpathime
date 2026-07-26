@@ -18,9 +18,15 @@ def main():
     android_dir, rawdict, out_db, index_sql = sys.argv[1:5]
 
     # create_db.py does `from pydict import *` etc., so run it from its own dir.
+    # The SQL it prints is full of Chinese, and neither end of the pipe may fall
+    # back to the locale encoding: PYTHONIOENCODING forces the child's stdout to
+    # UTF-8 (it would otherwise be cp936/cp1252 on Windows and raise), and
+    # encoding= forces our side to decode it the same way.
+    env = dict(os.environ, PYTHONIOENCODING="utf-8")
     proc = subprocess.run(
         [sys.executable, os.path.join(android_dir, "create_db.py"), rawdict],
-        cwd=android_dir, capture_output=True, text=True, check=True,
+        cwd=android_dir, capture_output=True, text=True, encoding="utf-8",
+        env=env, check=True,
     )
 
     if os.path.exists(out_db):

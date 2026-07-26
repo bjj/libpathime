@@ -14,11 +14,29 @@
 extern "C" {
 #endif
 
-typedef unsigned char uuid_t[16];
+/* The Windows SDK's <rpcdce.h> (pulled in by <windows.h>) does
+ *     #ifndef UUID_DEFINED
+ *     #define UUID_DEFINED
+ *     typedef GUID UUID;
+ *     #ifndef uuid_t
+ *     #define uuid_t UUID
+ *     #endif
+ *     #endif
+ * A plain `typedef unsigned char uuid_t[16]` here does not satisfy that
+ * `#ifndef`, so rpcdce.h would macro-rewrite every later `uuid_t` to `UUID`.
+ * Declare the real type under its own name and expose `uuid_t` as a macro, so
+ * rpcdce.h stands down and the libuuid meaning wins whichever header comes
+ * first. */
+typedef unsigned char libpathime_uuid_t[16];
 
-void uuid_generate(uuid_t out);
-void uuid_unparse_lower(const uuid_t uu, char *out); /* out: >= 37 bytes */
-void uuid_unparse(const uuid_t uu, char *out);
+#ifdef uuid_t
+#undef uuid_t
+#endif
+#define uuid_t libpathime_uuid_t
+
+void uuid_generate(libpathime_uuid_t out);
+void uuid_unparse_lower(const libpathime_uuid_t uu, char *out); /* out: >= 37 bytes */
+void uuid_unparse(const libpathime_uuid_t uu, char *out);
 
 #ifdef __cplusplus
 }

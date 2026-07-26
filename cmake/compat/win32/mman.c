@@ -18,6 +18,7 @@ mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset)
     HANDLE fh, mapping;
     DWORD  page_prot, view_access;
     void  *view;
+    unsigned long long off64;
 
     (void) addr;
     (void) flags; /* filemap.c only ever passes MAP_SHARED */
@@ -38,9 +39,12 @@ mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset)
     if (mapping == NULL)
         return MAP_FAILED;
 
+    /* MSVC's off_t is a 32-bit long, so widen before splitting the offset:
+     * `offset >> 32` on a 32-bit type is undefined behaviour (and warns). */
+    off64 = (unsigned long long) offset;
     view = MapViewOfFile(mapping, view_access,
-                         (DWORD)((offset >> 32) & 0xFFFFFFFF),
-                         (DWORD)(offset & 0xFFFFFFFF),
+                         (DWORD)((off64 >> 32) & 0xFFFFFFFFULL),
+                         (DWORD)(off64 & 0xFFFFFFFFULL),
                          length);
 
     /* The view keeps the mapping alive after the handle is closed, so we can

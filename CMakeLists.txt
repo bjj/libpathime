@@ -39,6 +39,12 @@ if(LIBPATHIME_WITH_HANGUL)
   set(LIBHANGUL_SOVERSION_PATCH 0)
   add_subdirectory(libhangul/hangul)
   add_library(libpathime::hangul ALIAS hangul)
+  # Upstream's install() gives a single bare DESTINATION, which on Windows puts
+  # the DLL in lib/ alongside its import library — where the loader will never
+  # look. Add a copy in bin/ so the installed tree is actually runnable.
+  if(WIN32 AND BUILD_SHARED_LIBS)
+    install(FILES $<TARGET_FILE:hangul> DESTINATION ${CMAKE_INSTALL_BINDIR})
+  endif()
 endif()
 
 # --- Japanese: anthy-unicode has no CMake — use our native port. ---

@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `libpathime` is a new IBus input method engine library. The IME concepts are described in `docs/CONCEPTS.md`.
 
+> **Build:** a CMake build for the three submodules is in place and verified on both Linux and Windows (MSVC and clang-cl). See `BUILD.md` — its "Windows" section documents the compat layer, the generated source variants, and the known runtime limitations. The vendored submodule trees are never edited; if something needs a source change to compile on Windows, it goes through the compat headers or a configure-time generated copy.
+
 ## Repository Structure
 
 ```
