@@ -228,9 +228,13 @@ const Expected kExpected[] = {
     {PATHIME_OPT_MAX_CANDIDATES, "max-candidates", PATHIME_OPTION_INT,
      kA | kP | kB | kT, false, PATHIME_DEFAULT_MAX_CANDIDATES, 1, INT64_MAX, 0, ""},
 
-    /* "BOOL, default true. Anthy, Pinyin, Bopomofo, Table." */
+    /* "BOOL, default true. Anthy, Table." Pinyin and Bopomofo are absent, and
+     * the absence is deliberate rather than an oversight in the engine list:
+     * pyzy learns inside its selection and commit calls with no switch to
+     * withhold, and its learned data is process-global while this option is
+     * per-context. The option's last paragraph says so. */
     {PATHIME_OPT_LEARNING, "learning", PATHIME_OPTION_BOOL,
-     kA | kP | kB | kT, false, 1, 0, 0, 0, ""},
+     kA | kT, false, 1, 0, 0, 0, ""},
 
     /* "ENUM of pathime_width_t, default PATHIME_WIDTH_HALF. Anthy, Pinyin,
      * Bopomofo, Table." */
@@ -1355,6 +1359,38 @@ void test_unsupported_options()
     PT_CHECK_STATUS(pathime_engine_get_option_bool(&hangul, PATHIME_OPT_LEARNING, &flag),
                     PATHIME_ERROR_UNSUPPORTED);
 
+    /*
+     * And Pinyin and Bopomofo refuse it too, which is the less obvious half:
+     * they are converting engines that do learn, so a client would reasonably
+     * expect the option to be there. It is refused because pyzy offers no way
+     * to withhold the learning commit and keeps its learned data
+     * process-globally, while this option is per-context. Refusing is the
+     * point — silently accepting a value that changed nothing would leave a
+     * client believing it had turned learning off.
+     */
+    pathime_engine pinyin;
+    pinyin.id = PATHIME_ENGINE_PINYIN;
+    pathime_engine bopomofo;
+    bopomofo.id = PATHIME_ENGINE_BOPOMOFO;
+
+    PT_CHECK_STATUS(pathime_engine_set_option_bool(&pinyin, PATHIME_OPT_LEARNING, false),
+                    PATHIME_ERROR_UNSUPPORTED);
+    PT_CHECK_STATUS(pathime_engine_get_option_bool(&pinyin, PATHIME_OPT_LEARNING, &flag),
+                    PATHIME_ERROR_UNSUPPORTED);
+    PT_CHECK_STATUS(pathime_engine_set_option_bool(&bopomofo, PATHIME_OPT_LEARNING, false),
+                    PATHIME_ERROR_UNSUPPORTED);
+    PT_CHECK_STATUS(pathime_engine_get_option_bool(&bopomofo, PATHIME_OPT_LEARNING, &flag),
+                    PATHIME_ERROR_UNSUPPORTED);
+
+    /* Anthy still has it — the contrast is what makes the refusal above a
+     * statement about pyzy rather than about learning in general. */
+    PT_CHECK_STATUS(pathime_engine_set_option_bool(&anthy, PATHIME_OPT_LEARNING, false),
+                    PATHIME_OK);
+    PT_CHECK_STATUS(pathime_engine_get_option_bool(&anthy, PATHIME_OPT_LEARNING, &flag),
+                    PATHIME_OK);
+    PT_CHECK(!flag);
+    PT_CHECK_STATUS(pathime_engine_reset_option(&anthy, PATHIME_OPT_LEARNING), PATHIME_OK);
+
     /* And in the other direction: every engine-prefixed option belongs to one
      * engine and is refused by the rest. */
     PT_CHECK_STATUS(
@@ -1373,9 +1409,8 @@ void test_unsupported_options()
         PATHIME_ERROR_UNSUPPORTED);
 
     /* pyzy supplies two engine ids, and the header scopes special-phrases to
-     * both of them and nothing else. */
-    pathime_engine bopomofo;
-    bopomofo.id = PATHIME_ENGINE_BOPOMOFO;
+     * both of them and nothing else. (`bopomofo` is declared above, with the
+     * learning checks.) */
     PT_CHECK_STATUS(
         pathime_engine_set_option_bool(&bopomofo, PATHIME_OPT_SPECIAL_PHRASES, false),
         PATHIME_OK);

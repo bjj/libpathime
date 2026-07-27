@@ -32,8 +32,9 @@
  *     plain std::string and rejects every character outside [a-z'].
  *   - PATHIME_OPT_PINYIN_SHOW_RAW. pyzy's auxiliary text is already structured
  *     (PinyinContext.cc:160-208) and has no switch for showing the raw keys.
- *   - PATHIME_OPT_LEARNING. See apply_options(): pyzy has no public way to
- *     withhold the learning commit.
+ *   - PATHIME_OPT_LEARNING. pyzy has no public way to withhold the learning
+ *     commit, so the option reports itself unsupported for both pyzy ids
+ *     rather than accepting a value it would ignore. See apply_options().
  */
 
 #include "engines/pyzy/pyzy_backend.h"
@@ -424,17 +425,19 @@ void PyzyContext::apply_options(const OptionReader &options)
     }
 
     /*
-     * TODO(impl): PATHIME_OPT_LEARNING has no honest implementation here. pyzy
-     * learns unconditionally on its commit path — PhraseEditor::commit() is
-     * reached from inside selectCandidate() and commit(), neither of which
-     * takes a flag — and the public header exposes no switch, only
-     * resetCandidate() to unlearn one entry after the fact. The user database
-     * is process-global besides (Finding 3), so even a hack could not be
-     * per-context, which this option is. Either the option reports itself
-     * unsupported for these two engines, or the library implements it by
-     * pointing pyzy's user-cache directory at a scratch location and
-     * discarding it — a change to pyzy_global_init()'s contract, not to this
-     * function. Left undone rather than silently ignored.
+     * PATHIME_OPT_LEARNING is deliberately not consulted here, and there is
+     * nothing missing: src/options.cc excludes both pyzy ids from that option's
+     * engine set, so a client trying to set it gets PATHIME_ERROR_UNSUPPORTED
+     * and never reaches this function with an expectation to disappoint.
+     *
+     * The reason it cannot be implemented: pyzy learns unconditionally on its
+     * commit path — PhraseEditor::commit() is reached from inside
+     * selectCandidate() and commit(), neither of which takes a flag — and the
+     * public header exposes no switch, only resetCandidate() to unlearn one
+     * entry after the fact. The user database is process-global besides
+     * (Finding 3), so even a hack could not be per-context, which this option
+     * is. Reporting unsupported is the decision; see the descriptor comment in
+     * src/options.cc for the alternative that was turned down.
      */
 }
 

@@ -172,7 +172,23 @@ constexpr OptionDescriptor kOptions[] = {
      */
     make_int("max-candidates", kConverting, PATHIME_DEFAULT_MAX_CANDIDATES, 1, INT64_MAX),
 
-    make_bool("learning", kConverting, true),
+    /*
+     * "Anthy, Table" and not kConverting, which is what it used to be. pyzy is
+     * excluded deliberately, and the exclusion is the whole decision recorded
+     * in TODO.md §4a: pyzy learns *inside* selectCandidate() and commit() via
+     * PhraseEditor::commit(), with no public switch to withhold — only
+     * resetCandidate() to unlearn one entry afterwards. Anthy is implementable
+     * because anthy_commit_segment() is a separate call the adapter can skip.
+     *
+     * The rejected alternative was pointing pyzy's user database at a
+     * disposable directory when learning is off. It was turned down because it
+     * does not answer the second mismatch: this option is per-context, and
+     * pyzy's learned data is process-global, so two contexts disagreeing about
+     * learning could not both be honoured whatever the directory. Reporting
+     * unsupported is the honest answer; PATHIME_ERROR_UNSUPPORTED at the setter
+     * tells a client the truth, where silently ignoring the value would not.
+     */
+    make_bool("learning", kAnthy | kTable, true),
     make_enum("latin-width", kConverting, PATHIME_WIDTH_HALF,
               enum_mask(PATHIME_WIDTH_FULL + 1)),
     make_enum("punctuation-width", kConverting, PATHIME_WIDTH_FULL,

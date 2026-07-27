@@ -356,22 +356,22 @@ is implemented and tested end to end (`api.engine_hangul`, `api.engine_anthy`,
   order, and the snapshot-invalidation rule in one go.
 - **`PATHIME_ANTHY_TYPING_KANA`.** Marked, and declines every key rather than
   silently falling through to romaji.
-- **`PATHIME_OPT_LEARNING` on pyzy — decided, not yet applied.** The header says
-  the library implements it for anthy and pyzy "by withholding the learning
-  commit". That works for anthy — `anthy_commit_segment` is a separate call we
-  can skip — but pyzy learns *inside* `selectCandidate()`/`commit()` via
-  `PhraseEditor::commit()`, and its public header exposes no switch, only
-  `resetCandidate()` to unlearn one entry afterwards.
+- ~~**`PATHIME_OPT_LEARNING` on pyzy.**~~ **Done (2026-07-27.)** The header used
+  to promise the library implemented it for anthy and pyzy "by withholding the
+  learning commit". True for anthy, where `anthy_commit_segment` is a separate
+  call the adapter skips; false for pyzy, which learns *inside*
+  `selectCandidate()`/`commit()` via `PhraseEditor::commit()` with no public
+  switch, only `resetCandidate()` to unlearn one entry afterwards.
 
-  **Decision (2026-07-27): report it unsupported on pyzy.** The rejected
-  alternative was redirecting pyzy's user-cache directory from
-  `pyzy_global_init()`. That was turned down because it does not fix the second
-  mismatch: the option is per-context while pyzy's user database is
-  process-global, so two contexts disagreeing about learning would still be
-  unrepresentable — the redirect would buy a half-true implementation at the
-  cost of a changed global-init contract. Unsupported is the honest report.
-  **To do:** widen the option's engine set to exclude pyzy in `src/options.cc`,
-  and amend the header to promise anthy only.
+  Resolved by **reporting it unsupported on pyzy**: the descriptor row in
+  `src/options.cc` is now `kAnthy | kTable`, and the header's engine list and
+  last paragraph say so. The rejected alternative was redirecting pyzy's
+  user-cache directory from `pyzy_global_init()`; it was turned down because it
+  does not fix the *second* mismatch — the option is per-context while pyzy's
+  user database is process-global, so two contexts disagreeing about learning
+  would still be unrepresentable. Pinned by `core.options`, both in the
+  descriptor cross-check and as an explicit setter refusal on each pyzy id with
+  anthy as the contrast case.
 - ~~**pyzy's availability cannot be detected.**~~ **Done (2026-07-27.)**
   `pyzy_database_present()` in `src/engines/pyzy/pyzy_backend.cc` runs in front
   of `PyZy::InputContext::init()` and mirrors `Database::open()`'s four

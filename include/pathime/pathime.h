@@ -1072,18 +1072,26 @@ typedef enum pathime_option {
     PATHIME_OPT_MAX_CANDIDATES = 0,
 
     /**
-     * BOOL, default true. Anthy, Pinyin, Bopomofo, Table.
+     * BOOL, default true. Anthy, Table.
      *
      * Whether the engine adapts to what the user chooses — the learned
      * frequencies and phrases that make a candidate the user picked last time
      * appear sooner. Turning it off means nothing is written to the data
      * directory for this engine.
      *
-     * Only the table engine has a native switch for this. Anthy and pyzy learn
-     * unconditionally on their commit paths, so for those the library
-     * implements the option by withholding the learning commit.
+     * Only the table engine has a native switch for this. Anthy learns on a
+     * separate commit call, so there the library implements the option by
+     * withholding that call.
      *
      * Hangul does not implement it: libhangul has no learning to disable.
+     *
+     * Pinyin and Bopomofo do not implement it either, and report themselves
+     * unsupported rather than accept a value they would ignore. Two things
+     * prevent it. pyzy learns *inside* the selection and commit calls with no
+     * public switch to withhold, offering only a way to unlearn one entry
+     * afterwards; and its learned data is process-global, while this option is
+     * per-context, so two contexts disagreeing about learning could not both
+     * be honoured. Rather than half-implement it, the library says no.
      */
     PATHIME_OPT_LEARNING = 1,
 
