@@ -12,7 +12,8 @@
  * process-global state, and a library has no business changing it under its
  * host. It is compiled straight into the codegen executables instead, which
  * own their process. (Consequence: the anthy *runtime* library still opens its
- * private-dictionary files in text mode on Windows — see BUILD.md.)
+ * private-dictionary files in text mode on Windows — see
+ * docs/windows-port.md.)
  *
  * Only compiled on WIN32.
  */

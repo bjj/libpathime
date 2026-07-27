@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Three backends wrap vendored submodules (libhangul, anthy-unicode, pyzy). A fourth, the table-driven engine behind `PATHIME_ENGINE_TABLE`, is **ours to write**: `ibus-table` is Python and cannot be linked against, so it serves as the reference feature set only, and `docs/ibus-table-spec.md` is the specification we implement. It does not exist yet — `LIBPATHIME_WITH_TABLE` defaults OFF and is refused if turned on — but it is a real engine for API-design purposes. See `TODO.md` §4.
 
-> **Build:** a CMake build for the three submodules is in place and verified on both Linux and Windows (MSVC and clang-cl). The library itself and the first vertical slice of all three adapters are implemented and tested end to end; `TODO.md` §4a is what that slice left. See `BUILD.md` — its "Windows" section documents the compat layer, the generated source variants, and the known runtime limitations, and its "Tests" section covers the suites under `tests/`. The vendored submodule trees are never edited; if something needs a source change to compile on Windows, it goes through the compat headers or a configure-time generated copy. NOTE! If you are on Linux, you are in a sbx environment on Windows. Build in `/tmp` to avoid issues with symlinks and case-insensitivity.
+> **Build:** a CMake build for the three submodules is in place and verified on both Linux and Windows (MSVC and clang-cl). The library itself and the first vertical slice of all three adapters are implemented and tested end to end; `TODO.md` §4a is what that slice left. `BUILD.md` is how to build; `docs/testing.md` covers the suites under `tests/`; `docs/windows-port.md` documents the compat layer, the generated source variants, and the known runtime limitations. The vendored submodule trees are never edited; if something needs a source change to compile on Windows, it goes through the compat headers or a configure-time generated copy. NOTE! If you are on Linux, you are in a sbx environment on Windows. Build in `/tmp` to avoid issues with symlinks and case-insensitivity.
 
 ## Repository Structure
 
@@ -19,13 +19,15 @@ include/pathime/         # Public C API
 docs/                    # Documentation and project design information
   CONCEPTS.md            # Detailed description of all IME concepts
   ibus-table-spec.md     # Clean-room behavioral spec for ibus-table (source format, DB schema, engine logic)
+  testing.md             # The test suites: how to run them, and what is deliberate about them
+  windows-port.md        # How the Windows port works, and its known limitations
   *-mapping.md           # Overview of how the submodule libraries relate to the concepts
   *-options.md           # Per-library option inventories, for the options design round
 src/                     # Library implementation; the map is docs/source-layout.md
   backend.h              # The seam between core and adapters
   composition.h          # The structured composition model core and adapters share
   engines/               # One adapter directory per backend, plus table/ for the future table engine
-tests/                   # Test suites: one per backend, plus api/ and core/ — see BUILD.md
+tests/                   # Test suites: one per backend, plus api/ and core/ — see docs/testing.md
 refs/                    # Local reference clones — gitignored, not submodules
   ibus-hangul/           # Korean IBus engine (reference)
   ibus-anthy/            # Japanese IBus engine (reference)
@@ -68,7 +70,9 @@ The `refs/` directory contains IBus engine implementations and table data to stu
   which choices are settled versus deliberately open. Read it before adding or
   moving implementation code.
 - `docs/ibus-table-spec.md` — the specification for our own table engine, derived clean-room from ibus-table: source `.txt` file format, compiled SQLite schema, key-event state machine, candidate sorting, and implementation notes for the C++ port
-- `docs/*-mapping.md` — per-library notes mapping each submodule's API to the concepts. Verified against the actual submodule source (see cited file/line references throughout); each ends with an "Impedance mismatches" section.
+- `docs/testing.md` — the test suites: how to run them, what each of the four kinds is for, how the engine tests reach their runtime data, and which registrations are conditional. Read it before concluding a missing test is a bug.
+- `docs/windows-port.md` — how the Windows port works: the compat layer, the generated source variants, the build-time behaviour, and the known runtime limitations.
+- `docs/*-mapping.md` — per-library notes mapping each submodule's API to the concepts. Verified against the actual submodule source (see cited file/line references throughout); each ends with an "Impedance mismatches" section. `anthy-mapping.md` also carries the rationale for anthy being built static on Windows and the one-anthy-per-module rule that follows from it.
 - `docs/*-options.md` — per-library inventories of configurable options, gathered for the not-yet-held negotiation/options design round.
 
 ## How we work
@@ -98,4 +102,4 @@ same habits should carry into the implementation:
   no segment navigation or resizing, and no exposure of anthy's multi-segment
   nature all follow from it.
 - **Never edit the vendored submodule trees.** Windows fixes go through the
-  compat headers or a configure-time generated copy; see `BUILD.md`.
+  compat headers or a configure-time generated copy; see `docs/windows-port.md`.

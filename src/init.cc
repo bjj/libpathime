@@ -89,8 +89,8 @@ const char *env_or_null(const char *name)
  * Windows note: std::getenv reads the environment in the active code page,
  * while this string is promised to be UTF-8. A profile path outside that code
  * page therefore needs _wgetenv plus a conversion; that is a compat-layer
- * concern (BUILD.md) and is left until an adapter forces the question, since
- * nothing yet opens the path.
+ * concern (docs/windows-port.md) and is left until an adapter forces the
+ * question, since nothing yet opens the path.
  */
 std::string default_data_dir()
 {

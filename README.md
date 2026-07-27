@@ -95,11 +95,14 @@ that caused it returns. The API is synchronous throughout and starts no threads.
 themselves — that they still behave the same after being built this way,
 particularly on Windows. `tests/api` and `tests/core` test `libpathime`:
 the public header driven exactly as a client would drive it, end to end
-against each engine, plus the core's own units.
+against each engine, plus the core's own units. `docs/testing.md` is how to run
+them.
 
 ## Documentation
 
-- `BUILD.md` — how to build and test
+- `BUILD.md` — how to build
+- `docs/testing.md` — how to run the tests
 - `docs/CONCEPTS.md` — definition of terms: engine, client, composition, candidates
 - `include/pathime/pathime.h` — the API, documented in full
 - `docs/source-layout.md` — the map of `src/`
+- `docs/windows-port.md` — how the Windows port works, and its limitations

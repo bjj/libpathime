@@ -2,8 +2,9 @@
 #
 # Compiles the three vendored input-method submodules (libhangul,
 # anthy-unicode, pyzy) and the libpathime library itself, on both Linux and
-# Windows. The library is a stubbed skeleton so far — see
-# docs/source-layout.md for its layout and intent.
+# Windows. See docs/source-layout.md for the library's layout, BUILD.md for
+# how to drive this build, and docs/windows-port.md for what the Windows side
+# of it is doing.
 #
 # Layout:
 #   cmake/               helper modules + Windows compat shims
@@ -90,10 +91,9 @@ install(FILES "${PROJECT_BINARY_DIR}/include/pathime/config.h"
               "${CMAKE_CURRENT_SOURCE_DIR}/include/pathime/pathime.h"
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pathime")
 
-# --- The library itself: the `pathime` target, stubbed skeleton so far. It
-# carries the public include directories and the PATHIME_BUILD/PATHIME_STATIC
-# definitions — the former standalone libpathime::headers interface target is
-# folded into it and retired, as TODO.md §5 called for.
+# --- The library itself: the `pathime` target. It carries the public include
+# directories and the PATHIME_BUILD/PATHIME_STATIC definitions, so a consumer
+# that links libpathime::pathime needs no further wiring.
 add_subdirectory(src)
 
 # --- Tests. All test wiring — both the vendored suites and our own — lives

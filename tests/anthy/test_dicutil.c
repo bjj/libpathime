@@ -8,9 +8,9 @@
  * strlen(line). That accounting is only correct when the bytes the stream
  * yields are the bytes on disk — which on Windows is exactly what the CRT's
  * default text mode breaks, in both directions (a written '\n' becomes two
- * bytes, and a read "\r\n" becomes one). See BUILD.md, "Known Windows
- * limitations": the binary-mode fix was scoped to the codegen executables,
- * because a library must not change _fmode under its host process.
+ * bytes, and a read "\r\n" becomes one). See docs/windows-port.md, "Known
+ * runtime limitations": the binary-mode fix was scoped to the codegen
+ * executables, because a library must not change _fmode under its host process.
  *
  * So this test is deliberately pointed straight at that gap. Each phase tears
  * the library down and brings it back up, so every read has to come off disk —

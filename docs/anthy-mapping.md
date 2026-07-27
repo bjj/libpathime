@@ -369,3 +369,47 @@ if it wants to support immediate conversion.
 entirely by the ibus-anthy wrapper in `__update_anthy_convert_chars`. A libpathime binding must
 generate equivalent status information itself, or omit it and rely on the client to derive
 similar information from the candidate list.
+
+---
+
+## Why the anthy family is built static on Windows
+
+anthy's three public libraries share global data across the library boundary:
+the splitter reads `anthy_wt_all` / `anthy_wt_none`, which `src-worddic` owns
+and initialises at runtime. Windows can only import a data symbol through
+`__declspec(dllimport)` in the declaring header, and duplicating the definition
+per DLL would give each copy its own uninitialised state. Building the family
+static avoids the question entirely, and has the side benefit that the codegen
+tools have no DLLs to locate when the build runs them. `BUILD_SHARED_LIBS` does
+not override this; libhangul and pyzy still produce DLLs.
+
+### The consequence: one anthy per module
+
+A shared `libpathime` absorbs a *private copy* of anthy, and anthy's
+configuration and initialised-once flags are process-global — the conf database
+in `src-diclib/conf.c`, `is_init_ok` in `src-main/main.c`, `dic_init_count` in
+`src-worddic/word_dic.c`. So on Windows any other module in the process that
+also links anthy gets a **second, independent anthy**: its
+`anthy_conf_override()` calls are invisible to libpathime's copy, and
+`anthy_init()` runs twice against two sets of state.
+
+ELF hides this by resolving both to a single definition, so the same code can
+pass on Linux and fail on Windows with no source difference at all — which is
+exactly how it was found, in `api.engine_anthy`.
+
+**Nothing that links `libpathime` may therefore also link anthy.** Where such
+code needs to point anthy at data, it must do so the way an installation would:
+through anthy's own conf file, named by the `CONFFILE` environment variable.
+`docs/testing.md` describes how the API tests do it. Programs that link anthy
+and *not* libpathime — everything under `tests/anthy/` — have exactly one copy
+and may keep calling `anthy_conf_override()`.
+
+`pathime_init_params_t::data_dir` is unaffected. It reaches anthy as
+`anthy_conf_override("XDG_CONFIG_HOME", data_dir)` *inside* the library, so it
+lands in the copy that matters, and the per-user state
+(`<data_dir>/anthy/last-record2_*`, the private dictionary, the lock file) is
+created there on Windows as it is on Linux — including creating a multi-level,
+backslash-separated `data_dir` from nothing, which works because of the
+generated Windows `file_dic.c` described in `docs/windows-port.md`. The
+directory is created when the first *context* is created, not by
+`pathime_init()`.

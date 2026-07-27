@@ -51,7 +51,7 @@ option(LIBPATHIME_WITH_PYZY   "Build the Chinese (pyzy) backend"            ON)
 # a peer of the vendored libraries rather than a wrapper around one. It is not
 # written yet, hence OFF — turning it on is gated in LibpathimeDependencies.
 option(LIBPATHIME_WITH_TABLE  "Build the table-driven backend (not implemented yet)" OFF)
-option(LIBPATHIME_BUILD_TESTS "Build submodule test suites where available" OFF)
+option(LIBPATHIME_BUILD_TESTS "Build the test suites: libpathime's own, plus each submodule's where available" OFF)
 
 # When ON, a backend whose dependencies are missing is a hard error instead of
 # being silently skipped. Useful for CI that must build every backend.

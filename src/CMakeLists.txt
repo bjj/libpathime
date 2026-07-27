@@ -50,10 +50,10 @@ endif()
 # LIBPATHIME_WITH_* options that build the backends themselves. Core files
 # compile regardless and branch on <pathime/config.h> where they must.
 #
-# Only the link libraries are wired here. The vendor *include* wiring for
-# anthy and pyzy (port config dirs, generated forwarding headers) is not
-# replicated yet — when an adapter first includes a vendor header, lift the
-# already-solved pattern from tests/<backend>/CMakeLists.txt.
+# Each block wires both the link libraries and the include path the adapter
+# needs to reach that backend's *public* headers — never its internal ones,
+# which is what separates these blocks from the equivalents under
+# tests/<backend>/CMakeLists.txt.
 
 if(LIBPATHIME_WITH_HANGUL)
   target_sources(pathime PRIVATE engines/hangul/hangul_backend.cc)
