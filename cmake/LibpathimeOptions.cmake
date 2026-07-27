@@ -41,10 +41,16 @@ include(GNUInstallDirs)
 
 option(BUILD_SHARED_LIBS "Build submodule libraries as shared libraries" ON)
 
-# --- Backend selection. Each maps to one vendored submodule. ---
+# --- Backend selection. The first three map to one vendored submodule each. ---
 option(LIBPATHIME_WITH_HANGUL "Build the Korean (libhangul) backend"        ON)
 option(LIBPATHIME_WITH_ANTHY  "Build the Japanese (anthy-unicode) backend"  ON)
 option(LIBPATHIME_WITH_PYZY   "Build the Chinese (pyzy) backend"            ON)
+
+# The table-driven backend is not a submodule: ibus-table is Python, so it
+# cannot be wrapped, and our own table engine (docs/ibus-table-spec.md) will be
+# a peer of the vendored libraries rather than a wrapper around one. It is not
+# written yet, hence OFF — turning it on is gated in LibpathimeDependencies.
+option(LIBPATHIME_WITH_TABLE  "Build the table-driven backend (not implemented yet)" OFF)
 option(LIBPATHIME_BUILD_TESTS "Build submodule test suites where available" OFF)
 
 # When ON, a backend whose dependencies are missing is a hard error instead of

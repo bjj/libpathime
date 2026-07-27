@@ -26,6 +26,10 @@ Not started:
 - Any implementation. `src/` is empty; there is no `libpathime` library target
   yet, only the `libpathime::headers` interface target that carries the two
   include directories.
+- The table-driven engine. `PATHIME_ENGINE_TABLE` exists in the header and
+  `LIBPATHIME_WITH_TABLE` exists in the build, but the option defaults OFF and
+  is forced off with an explanatory warning if requested, because there is no
+  code behind it. See §4.
 
 ---
 
@@ -38,7 +42,11 @@ have no API surface at all:
   full-width vs. half-width, kana input mode, dictionary selection, prediction
   behaviour. Per-backend inventories already exist in `docs/*-options.md`
   (libhangul, anthy, pyzy, ibus-table), each ending in a cross-cutting section
-  aimed at this step. They have not been reconciled into a single API.
+  aimed at this step. They have not been reconciled into a single API. The
+  table engine is in scope for this round even though it is unwritten: which
+  table a `PATHIME_ENGINE_TABLE` engine loads has to be an option, and its
+  table-defined/user-preference split (`docs/ibus-table-options.md`) is the
+  strongest test of whatever mechanism is chosen.
 - **Negotiation** — how options are set and queried, how unsupported options are
   reported, protocol versioning. `docs/CONCEPTS.md` §Negotiation sketches the
   shape; nothing is in the header.
@@ -138,18 +146,43 @@ than re-deriving.
    the flat API value.
 2. **Where the romaji/kana and key-dispatch layer lives** — one shared front end,
    or per-engine.
-3. **Whether ibus-table becomes a fourth backend.** `docs/ibus-table-spec.md` is
-   a complete clean-room behavioural spec written for a C++ port, and
-   `docs/ibus-table-options.md` inventories its options, but there is no
-   `PATHIME_ENGINE_*` for it and it is not a submodule. Decide before the
-   options round, since a table engine's option space is unlike the other three.
 
 Resolved by the API round, recorded so they are not reopened: candidates are
 active-region-only (greedy, no segment navigation); lazy enumeration is hidden
 behind `pathime_context_set_max_candidates()`; the canonical text unit is UTF-8
 with all positions in Unicode scalar values.
 
-## 4. Loose ends
+Resolved since: **the table engine is ours to write** — see §4.
+
+## 4. The table engine
+
+`ibus-table` cannot be a backend. It is Python, so there is nothing to link
+against; what it offers is a proven feature set, not a library. It is the
+reference we trust for the table-driven methods we want (Cangjie, Wubi, and the
+rest), and `refs/ibus-table-chinese` supplies real tables to test against.
+
+The decision: **libpathime implements its own table engine**, a peer of the
+vendored submodules rather than a wrapper around one. `docs/ibus-table-spec.md`
+is already the specification for it — source `.txt` format, compiled SQLite
+schema, key-event state machine, candidate sorting — and
+`docs/ibus-table-options.md` is its option inventory.
+
+What that means for the API work now:
+
+- `PATHIME_ENGINE_TABLE` is in the header. One id covers every table-driven
+  method, because they differ only in the table loaded; table selection will be
+  an engine option, from the options round, not a separate enum entry.
+- `PATHIME_WITH_TABLE` is in the generated `config.h`, currently always 0, and
+  `pathime_has_engine(PATHIME_ENGINE_TABLE)` will be false until there is code.
+- `LIBPATHIME_WITH_TABLE` defaults OFF. Turning it on is gated in
+  `cmake/LibpathimeDependencies.cmake` with a warning naming the missing piece
+  as the implementation itself, so nobody mistakes it for a missing dependency.
+
+So the options round can treat table as a real fourth engine and design against
+it; nothing is blocked on writing it. Implementation follows the spec, after the
+adapter layer for the three backends that do exist.
+
+## 5. Loose ends
 
 - **pyzy schedules its user-database save through glib.** `Database` uses
   `g_timeout_add` and a `GTimer` (`pyzy/src/Database.h:98-101`). That is not a

@@ -5,6 +5,11 @@ data as `ibus-table` and exposes the input behavior of those tables through the 
 `docs/CONCEPTS.md`. It is a clean-room behavioral specification derived by studying the reference
 implementation in `refs/ibus-table`; no code is copied.
 
+This is a specification we implement, not a library we wrap. `ibus-table` is self-contained Python,
+so there is nothing to link against — the table engine (`PATHIME_ENGINE_TABLE`) is written inside
+`libpathime` as a peer of the vendored backends. It does not exist yet; `LIBPATHIME_WITH_TABLE`
+defaults OFF and refuses to be enabled until it does. See `TODO.md` §4.
+
 The document has one organizing goal: **connect the data, the text-input behavior, and our
 concepts.** Three kinds of information are kept distinct throughout:
 

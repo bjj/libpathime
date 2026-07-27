@@ -64,10 +64,19 @@ endif()
 
 # --- libhangul: no external dependencies once external keyboards are disabled. ---
 
+# --- Table-driven: our own engine, not a submodule. There are no sources to
+#     compile yet, so an explicit -DLIBPATHIME_WITH_TABLE=ON cannot be honoured;
+#     say so rather than configuring a target that would build nothing. ---
+if(LIBPATHIME_WITH_TABLE)
+  _lpi_gate(TABLE "table-driven" "the engine implementation itself"
+    "The table engine is specified in docs/ibus-table-spec.md but not written yet; src/ has no table sources to build.")
+endif()
+
 message(STATUS "")
 message(STATUS "libpathime backends:")
 message(STATUS "  Korean   (libhangul)      : ${LIBPATHIME_WITH_HANGUL}")
 message(STATUS "  Japanese (anthy-unicode)  : ${LIBPATHIME_WITH_ANTHY}")
 message(STATUS "  Chinese  (pyzy)           : ${LIBPATHIME_WITH_PYZY}")
+message(STATUS "  Table    (libpathime)     : ${LIBPATHIME_WITH_TABLE}")
 message(STATUS "  Shared libraries          : ${BUILD_SHARED_LIBS}")
 message(STATUS "")

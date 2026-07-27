@@ -17,6 +17,15 @@ Per-backend dependencies:
 | Korean (libhangul)     | nothing beyond a C compiler |
 | Japanese (anthy-unicode) | nothing external; its dictionary is built by host tools at build time (so cross-compiling is not yet supported) |
 | Chinese (pyzy)         | `glib-2.0 ≥ 2.24`, `sqlite3`, a UUID provider (`libuuid` on Unix; the bundled Rpcrt4 shim on Windows), plus Python 3 for the optional `android.db` |
+| Table-driven           | nothing — but there is nothing to build yet either; see below |
+
+The table-driven backend (`PATHIME_ENGINE_TABLE`: Wubi, Cangjie, Stroke5,
+Zhuyin, …) has no submodule. `ibus-table`, the reference implementation, is
+Python and cannot be linked against, so this engine is written in `libpathime`
+itself against the specification in `docs/ibus-table-spec.md`. That code does
+not exist yet, so `LIBPATHIME_WITH_TABLE` defaults to `OFF` and turning it on
+is refused at configure time with a warning naming the implementation — not a
+dependency — as what is missing.
 
 Linux (Debian/Ubuntu): `sudo apt-get install build-essential cmake ninja-build pkg-config libglib2.0-dev libsqlite3-dev uuid-dev`
 
@@ -87,6 +96,7 @@ developer command prompt, and remember to re-set `VCPKG_ROOT` afterwards.
 | Option | Default | Meaning |
 |--------|---------|---------|
 | `LIBPATHIME_WITH_HANGUL` / `_ANTHY` / `_PYZY` | `ON` | Enable each backend. A backend whose dependencies are missing is warned about and skipped. |
+| `LIBPATHIME_WITH_TABLE` | `OFF` | The table-driven backend. Not implemented yet; forced back off (or a hard error under `LIBPATHIME_REQUIRE_BACKENDS`) if enabled. |
 | `LIBPATHIME_REQUIRE_BACKENDS` | `OFF` | Turn "missing dependency ⇒ skip" into a hard error (for CI). |
 | `LIBPATHIME_BUILD_TESTS` | `OFF` | Build the test suites — see below. |
 | `PYZY_BUILD_DB_ANDROID` | `ON` | Build pyzy's bundled Android pinyin database (needs Python 3). |

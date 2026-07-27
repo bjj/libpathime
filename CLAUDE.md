@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `libpathime` is a new IBus input method engine library. The IME concepts are described in `docs/CONCEPTS.md`.
 
+Three backends wrap vendored submodules (libhangul, anthy-unicode, pyzy). A fourth, the table-driven engine behind `PATHIME_ENGINE_TABLE`, is **ours to write**: `ibus-table` is Python and cannot be linked against, so it serves as the reference feature set only, and `docs/ibus-table-spec.md` is the specification we implement. It does not exist yet — `LIBPATHIME_WITH_TABLE` defaults OFF and is refused if turned on — but it is a real engine for API-design purposes. See `TODO.md` §4.
+
 > **Build:** a CMake build for the three submodules is in place and verified on both Linux and Windows (MSVC and clang-cl). See `BUILD.md` — its "Windows" section documents the compat layer, the generated source variants, and the known runtime limitations, and its "Tests" section covers the suites under `tests/`. The vendored submodule trees are never edited; if something needs a source change to compile on Windows, it goes through the compat headers or a configure-time generated copy.
 
 ## Repository Structure
@@ -49,7 +51,7 @@ The `refs/` directory contains IBus engine implementations and table data to stu
 
 - **ibus-hangul**: C engine wrapping `libhangul`; straightforward single-library integration
 - **ibus-anthy**: Python/GObject Introspection engine wrapping `anthy-unicode` — pinned to `bjj/ibus-anthy` @ `0962741`
-- **ibus-table**: Self-contained Python engine; no external IM library dependency
+- **ibus-table**: Self-contained Python engine; no external IM library dependency — which is exactly why we reimplement it rather than wrap it (see `docs/ibus-table-spec.md`)
 - **ibus-pinyin**: C++ engine wrapping `pyzy`; most complex, supports Pinyin and Bopomofo
 - **ibus-table-chinese**: Chinese input method table sources (Wubi, Cangjie, Stroke5, Zhuyin, etc.) for use as test data
 
@@ -58,7 +60,7 @@ The `refs/` directory contains IBus engine implementations and table data to stu
 - `TODO.md` — unfinished business: the design rounds not yet held, the adapter-layer constraints, the open questions, and the known loose ends. Start here for "what's next."
 - `docs/CONCEPTS.md` — defines the canonical IME concepts (engine, client, composition, etc.) that `libpathime` implements
 - `include/pathime/pathime.h` — the public C API for the core input loop. Settled. Kept in lockstep with `docs/CONCEPTS.md`; the two do not disagree, so neither carries a list of deviations from the other.
-- `docs/ibus-table-spec.md` — complete behavioral specification for ibus-table: source `.txt` file format, compiled SQLite schema, key-event state machine, candidate sorting, and clean-room implementation notes for a C++ port
+- `docs/ibus-table-spec.md` — the specification for our own table engine, derived clean-room from ibus-table: source `.txt` file format, compiled SQLite schema, key-event state machine, candidate sorting, and implementation notes for the C++ port
 - `docs/*-mapping.md` — per-library notes mapping each submodule's API to the concepts. Verified against the actual submodule source (see cited file/line references throughout); each ends with an "Impedance mismatches" section.
 - `docs/*-options.md` — per-library inventories of configurable options, gathered for the not-yet-held negotiation/options design round.
 

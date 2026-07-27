@@ -4,6 +4,11 @@ This document catalogs every *configuration option* exposed by `ibus-table` at t
 input for deciding what `libpathime` should expose as options (common across engines vs.
 engine-specific). It is pure fact-finding — no libpathime API or UI design is proposed here.
 
+`libpathime` implements its own table engine rather than wrapping `ibus-table`, which is Python
+(`docs/ibus-table-spec.md`, `TODO.md` §4). So this catalog is not a survey of a foreign
+configuration surface we must accommodate: it is the option space of a first-class engine of ours,
+and the options round is free to keep, rename, or drop any of it.
+
 Sources: `refs/ibus-table` (engine source, GSettings schema) and `refs/ibus-table-chinese` (real
 table data, used to see which options tables actually set). `docs/ibus-table-spec.md` already
 documents the source `.txt` format, compiled SQLite schema, and engine behavior in full; this

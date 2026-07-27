@@ -57,12 +57,19 @@ if(LIBPATHIME_WITH_PYZY)
   add_subdirectory(cmake/ports/pyzy)
 endif()
 
+# --- Table-driven (Wubi, Cangjie, Stroke5, Zhuyin, …): no submodule to build.
+# ibus-table, the feature-complete reference for these methods, is Python and
+# so cannot be wrapped; the engine described by docs/ibus-table-spec.md will be
+# written here instead, as a peer of the vendored libraries. Nothing exists to
+# compile yet, so LIBPATHIME_WITH_TABLE defaults OFF and is forced off by
+# LibpathimeDependencies if requested. No add_subdirectory() until src/ has it.
+
 # --- Generated public header: include/pathime/config.h ---
 # Records which backends survived the dependency gating above, so clients can
 # #if them out. Placed under the binary dir's own include/pathime/ so that
 # adding that one directory to a consumer's include path resolves
 # <pathime/config.h> exactly as the installed layout will.
-foreach(_lpi_backend HANGUL ANTHY PYZY)
+foreach(_lpi_backend HANGUL ANTHY PYZY TABLE)
   if(LIBPATHIME_WITH_${_lpi_backend})
     set(PATHIME_WITH_${_lpi_backend} 1)
   else()

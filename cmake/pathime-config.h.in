@@ -24,6 +24,13 @@
 #define PATHIME_WITH_PYZY   @PATHIME_WITH_PYZY@
 
 /*
+ * The table-driven engine (PATHIME_ENGINE_TABLE). Unlike the three above it
+ * wraps no vendored submodule — it is implemented in this library — and it is
+ * not written yet, so this is 0 in every build for now.
+ */
+#define PATHIME_WITH_TABLE  @PATHIME_WITH_TABLE@
+
+/*
  * Defined to 1 when this library was built as a static archive. The installed
  * CMake target also puts -DPATHIME_STATIC on consumers, which is what drives
  * the PATHIME_API import/export decision in pathime.h; this macro exists so
