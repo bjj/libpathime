@@ -380,8 +380,42 @@ is implemented and tested end to end (`api.engine_hangul`, `api.engine_anthy`,
   no-double-commit on end, and the stale-snapshot recovery. Both guards were
   mutation-tested: removing the end-of-composition guard produces `한한` and
   removing the pre-flight check produces `ㅎ하한`, and the tests catch each.
-- **`PATHIME_ANTHY_TYPING_KANA`.** Marked, and declines every key rather than
-  silently falling through to romaji.
+- ~~**`PATHIME_ANTHY_TYPING_KANA`.**~~ **Done (2026-07-27.)**
+  `RomajiComposer::insert_kana()`. One key, one kana, with the dakuten and
+  handakuten keys folding into the kana before them where a voiced form exists
+  and standing alone where none does — both halves being ibus-anthy's
+  `KanaSegment::append()`.
+
+  Simpler than the romaji machine because kana entry has nothing to pend:
+  every key resolves on the spot, so `pending_` stays empty for the whole mode
+  and `kana_` alone is the state. Whether the previous kana takes a mark is a
+  property of that kana, so it is read off the last scalar rather than tracked
+  — ibus-anthy keeps an `is_finished()` flag for it, and the flag is derivable.
+
+  The table is ibus-anthy's `kana_typing_rule_static`, whose own comment calls
+  it a port of scim-anthy's `101kana.sty`: the JIS kana arrangement over
+  **US-101 key positions**. That is exactly what `KeyEvent::position_key()`
+  already gives, so it transcribed with no remapping and a client never has to
+  say what keyboard is attached. 94 of its 95 rows are here; the missing one is
+  `'¥' -> ー`, the JIS ¥-vs-ろ case §5 records as unrepresentable, and nothing
+  is lost by it because `'|'` gives ー from the US backslash position anyway.
+
+  **Verified against the reference, not just spot-checked.** All 94 reachable
+  rows and all 25 dakuten/handakuten pairs were driven through
+  `pathime_context_process_key()` and diffed against `tables.py`: zero
+  mismatches, no extra keys accepted, no table key declined. Worth redoing if
+  the tables are ever edited; the note is in `romaji.cc`'s file comment.
+
+  One refactor came with it: the US-QWERTY position-plus-Shift recombination
+  moved from the hangul adapter into `keys.cc` as `us_layout_char()`, because
+  libhangul is no longer the only backend that dispatches on where a key is.
+  Including `keys.h` there also surfaced a duplicate `is_chorded()` in the
+  hangul adapter, now removed.
+
+  Covered in `api.engine_anthy`: the layout, both marks, a mark with no voiced
+  form, a leading mark, backspace, and a full かんじ -> 漢字 conversion typed
+  off the kana positions — the last being the one that shows the typing method
+  chooses only how a reading is entered and nothing downstream of it.
 - ~~**`PATHIME_OPT_LEARNING` on pyzy.**~~ **Done (2026-07-27.)** The header used
   to promise the library implemented it for anthy and pyzy "by withholding the
   learning commit". True for anthy, where `anthy_commit_segment` is a separate
@@ -460,6 +494,11 @@ Three smaller header/implementation divergences, all pinned down by tests:
   US-QWERTY keysym and neither key exists on that layout, so anthy's one
   keycode-dependent case is lost. Accepted: it is kana-hardware-only and
   irrelevant to the phone-keyboard target.
+
+  Kana entry landed since and it costs exactly one table row there too —
+  `'¥' -> ー` is the single entry of `kana_typing_rule_static` that could not
+  be transcribed. It costs nothing in practice: ー is still typeable from the
+  US backslash position, which the same table maps to it.
 - **Thread-safety is a documented requirement, not an enforced one.** Nothing
   detects overlapping calls. If that proves to be a common client bug, a debug
   build could catch it cheaply with a non-recursive in-call flag per context.

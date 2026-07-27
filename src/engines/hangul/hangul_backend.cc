@@ -35,6 +35,7 @@
 #include <hangul.h>
 
 #include "composition.h"
+#include "keys.h"
 #include "utf8.h"
 
 namespace pathime {
@@ -95,93 +96,29 @@ const HangulKeyboard *resolve_keyboard(int64_t layout)
  * KeyEvent to ASCII
  * ======================================================================== */
 
-/**
- * The US-QWERTY shifted form of @a c, or @a c unchanged when the key has no
- * shifted form.
- *
- * Upper-casing the letters is the part everyone remembers, and on the two-set
- * layouts it is the only part that matters: their tables map letters and
- * nothing else. It is not sufficient in general. libhangul's tables are
- * indexed by the US-QWERTY character *after* shift, not by a base key plus a
- * flag, and the three-set layouts populate the symbol positions too — on
- * Sebeolsik 390 the '<' entry (that is, Shift+comma) yields '2'. Sending ','
- * there because Shift only ever meant toupper() would silently type the wrong
- * character, so the whole shift row is spelled out.
- */
-int shifted_ascii(int c)
-{
-    if (c >= 'a' && c <= 'z') {
-        return c - 'a' + 'A';
-    }
-    static const char kUnshifted[] = "`1234567890-=[]\\;',./";
-    static const char kShifted[]   = "~!@#$%^&*()_+{}|:\"<>?";
-    static_assert(sizeof(kUnshifted) == sizeof(kShifted),
-                  "the two halves of the US-QWERTY shift row must line up "
-                  "position for position; the lookup below indexes one with an "
-                  "offset found in the other");
-    if (c != '\0') {
-        const char *p = std::strchr(kUnshifted, c);
-        if (p != nullptr && *p != '\0') {
-            return kShifted[p - kUnshifted];
-        }
-    }
-    return c;
-}
-
 /** Returned by ascii_for_key() for a key that must never reach libhangul. */
 constexpr int kNotAscii = -1;
 
 /**
  * The single int hangul_ic_process() wants, or kNotAscii.
  *
- * Position, not character. KeyEvent::position_key() is layout_key — the
- * physical key as the keysym it would produce *unmodified* on US QWERTY —
- * falling back to the keysym when the client has no physical key to report.
- * That is exactly libhangul's input model: Hangul composition is defined by
- * where the key is, which is the entire reason layout_key exists in the API.
+ * The position-and-shift recombination itself is keys.cc's us_layout_char():
+ * libhangul is not the only backend that dispatches on where a key is rather
+ * than what it prints — PATHIME_ANTHY_TYPING_KANA does too — so the US-QWERTY
+ * shift table lives in the key layer with the rest of that knowledge.
  *
- * Shift is then folded back in as case, because libhangul has no modifier
- * argument at all. CapsLock is undone only on the fallback path: layout_key is
- * by construction the unmodified keysym, so no lock can have reached it, while
- * a keysym carries whatever capitalization the client's layout applied. This
- * is the same correction ibus-hangul makes, for the same reason
- * (docs/libhangul-mapping.md, "CapsLock compensation").
- *
- * Anything outside printable ASCII is refused here rather than passed through.
- * hangul_keyboard_map_to_char() would answer 0 for an out-of-range key and the
- * jamo path would tolerate it, but hangul_ic_process_romaja() calls isupper()
- * on the raw argument (hangulinputcontext.c:1100-1101), and isupper() outside
- * unsigned char is undefined. The range check is a correctness requirement on
- * the romaja layout, not tidiness.
+ * What stays here is the range refusal, which is a libhangul requirement
+ * rather than tidiness. hangul_keyboard_map_to_char() would answer 0 for an
+ * out-of-range key and the jamo path would tolerate it, but
+ * hangul_ic_process_romaja() calls isupper() on the raw argument
+ * (hangulinputcontext.c:1100-1101), and isupper() outside unsigned char is
+ * undefined. us_layout_char() answers 0 for exactly the keys that must not get
+ * that far, so the two conditions are the same one.
  */
 int ascii_for_key(const KeyEvent &key)
 {
-    const uint32_t k = key.position_key();
-    if (k < 0x20 || k > 0x7e) {
-        return kNotAscii;
-    }
-
-    int c = static_cast<int>(k);
-
-    if (key.layout_key == 0 && key.has(PATHIME_MOD_CAPS)) {
-        if (c >= 'a' && c <= 'z') {
-            c = c - 'a' + 'A';
-        } else if (c >= 'A' && c <= 'Z') {
-            c = c - 'A' + 'a';
-        }
-    }
-
-    if (key.has(PATHIME_MOD_SHIFT)) {
-        c = shifted_ascii(c);
-    }
-    return c;
-}
-
-/** True for a chord the client owns: Control, Alt or Super held. */
-bool is_chorded(const KeyEvent &key)
-{
-    return key.has(PATHIME_MOD_CONTROL) || key.has(PATHIME_MOD_ALT) ||
-           key.has(PATHIME_MOD_SUPER);
+    const char c = us_layout_char(key);
+    return c == 0 ? kNotAscii : static_cast<int>(c);
 }
 
 /** Drop the last Unicode scalar value from @a text, which must be valid UTF-8. */

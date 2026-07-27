@@ -1280,6 +1280,20 @@ typedef enum pathime_option {
      * both state machines belong to this library; the option chooses between
      * them. It resets because a pending romaji fragment has no meaning once the
      * keys are read as kana.
+     *
+     * The two read a key event differently, and a client must supply
+     * pathime_key_event_t::layout_key for the second to work. Romaji entry
+     * reads the character, because the user is spelling; kana entry reads the
+     * *position*, because the user is striking a key whose kana legend the
+     * client's keymap has no way to report. The arrangement is the standard JIS
+     * kana layout mapped onto US-QWERTY positions, so a client never has to
+     * describe the attached keyboard — but a client that leaves layout_key zero
+     * gets the keysym instead, and on a non-US layout that will be the wrong
+     * kana.
+     *
+     * Under kana entry the dakuten and handakuten keys combine with the kana
+     * before them rather than standing alone, where one exists: か followed by
+     * ゛is が. Where none exists the mark stays a character of its own.
      */
     PATHIME_OPT_ANTHY_TYPING_METHOD = 13,
 

@@ -77,6 +77,30 @@ uint32_t keysym_to_scalar(uint32_t keysym);
  */
 char keysym_to_ascii(uint32_t keysym);
 
+/**
+ * The US-QWERTY character printed on the key @a key names, with Shift applied
+ * — or 0 for anything that is not a printable ASCII position.
+ *
+ * Position, then character. KeyEvent::position_key() is layout_key, the
+ * physical key expressed as the keysym it would produce *unmodified* on US
+ * QWERTY, falling back to the keysym when the client reported no physical key.
+ * Shift is folded back in here because layout_key is unmodified by
+ * construction, so an engine that dispatches on position has to recombine the
+ * two itself — which the public header says in as many words.
+ *
+ * CapsLock is undone only on the fallback path. layout_key can carry no lock,
+ * having never had one applied; a keysym carries whatever capitalization the
+ * client's layout produced, and an engine reading position wants the key, not
+ * the lock state. This is the correction ibus-hangul makes for the same reason
+ * (docs/libhangul-mapping.md, "CapsLock compensation").
+ *
+ * Shared rather than per-adapter because it is a fact about US QWERTY and not
+ * about any one backend: libhangul dispatches on key position, and so does
+ * PATHIME_ANTHY_TYPING_KANA, whose table is scim-anthy's 101kana — the JIS
+ * kana arrangement laid over US-101 key positions. Two callers of one rule.
+ */
+char us_layout_char(const KeyEvent &key);
+
 }  // namespace pathime
 
 #endif /* LIBPATHIME_SRC_KEYS_H */

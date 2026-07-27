@@ -75,6 +75,16 @@ int main(void)
 #define KA    "\xE3\x81\x8B"  /* か U+304B */
 #define JI    "\xE3\x81\x98"  /* じ U+3058 */
 
+/* PATHIME_ANTHY_TYPING_KANA. The US-101 positions these sit on, per
+ * scim-anthy's 101kana table: a=ち, k=の, t=か, f=は, e=い, Shift-2='@'=゛,
+ * '['=゜. */
+#define CHI         "\xE3\x81\xA1"  /* ち U+3061 */
+#define NO_KANA     "\xE3\x81\xAE"  /* の U+306E */
+#define GA          "\xE3\x81\x8C"  /* が U+304C */
+#define PA          "\xE3\x81\xB1"  /* ぱ U+3071 */
+#define I_KANA      "\xE3\x81\x84"  /* い U+3044 */
+#define VOICED_MARK "\xE3\x82\x9B"  /* ゛U+309B */
+
 /* にほん / にほn — "nihon" finished, and mid-typing with the n still pending. */
 #define NIHON         NI HO N
 #define NIHON_PENDING NI HO "n"
@@ -174,9 +184,17 @@ static void log_reset(client_log_t *log)
     memset(log, 0, sizeof(*log));
 }
 
-/* Press one printable US-QWERTY key: keysym and layout_key are the same for an
- * unshifted ASCII key. anthy is a character engine, not a positional one —
- * layout_key is never consulted — but a client supplies it anyway. */
+/*
+ * Press one printable US-QWERTY key: keysym and layout_key are the same for an
+ * unshifted ASCII key.
+ *
+ * Which of the two anthy consults depends on the typing method, and that is
+ * not a wrinkle but the point of having both. Romaji entry reads the
+ * *character*, because the user is spelling; PATHIME_ANTHY_TYPING_KANA reads
+ * the *position*, because the user is striking a kana whose legend the
+ * client's keymap cannot report. A client supplies both and neither mode has
+ * to ask what kind of keyboard is attached.
+ */
 static bool press(pathime_context_t *ctx, uint32_t keysym)
 {
     pathime_key_event_t event;
@@ -185,6 +203,41 @@ static bool press(pathime_context_t *ctx, uint32_t keysym)
     event.struct_size = sizeof(event);
     event.keysym = keysym;
     event.layout_key = keysym;
+    PT_CHECK_STATUS(pathime_context_process_key(ctx, &event, &handled), PATHIME_OK);
+    return handled;
+}
+
+/*
+ * Press a shifted key, given the *unshifted* US-QWERTY character on it.
+ *
+ * This is the shape the public header fixes: layout_key is the key unmodified,
+ * the shift state is in modifiers, and an engine that cares about position
+ * recombines the two itself. So Shift-2 is layout_key '2' with PATHIME_MOD_SHIFT
+ * — which the kana table reads as the '@' position — and keysym is the '@' the
+ * client's layout actually produced.
+ */
+static bool press_shift(pathime_context_t *ctx, char unshifted)
+{
+    static const char kUnshifted[] = "`1234567890-=[]\\;',./";
+    static const char kShifted[]   = "~!@#$%^&*()_+{}|:\"<>?";
+    pathime_key_event_t event;
+    bool handled = false;
+    const char *p = strchr(kUnshifted, unshifted);
+    uint32_t shifted;
+
+    if (p != NULL && *p != '\0') {
+        shifted = (uint32_t)(unsigned char)kShifted[p - kUnshifted];
+    } else if (unshifted >= 'a' && unshifted <= 'z') {
+        shifted = (uint32_t)(unshifted - 'a' + 'A');
+    } else {
+        shifted = (uint32_t)(unsigned char)unshifted;
+    }
+
+    memset(&event, 0, sizeof(event));
+    event.struct_size = sizeof(event);
+    event.keysym = shifted;
+    event.layout_key = (uint32_t)(unsigned char)unshifted;
+    event.modifiers = PATHIME_MOD_SHIFT;
     PT_CHECK_STATUS(pathime_context_process_key(ctx, &event, &handled), PATHIME_OK);
     return handled;
 }
@@ -671,29 +724,90 @@ static void test_options(pathime_engine_t *engine)
     }
 
     /*
-     * KNOWN GAP, asserted as it actually behaves and not as it should.
+     * PATHIME_ANTHY_TYPING_KANA: one key, one kana, off the US-101 positions.
      *
-     * PATHIME_ANTHY_TYPING_KANA is a marked TODO(impl) in the adapter
-     * (src/engines/anthy/romaji.cc): kana entry is a separate state machine
-     * over a separate table and has not been written, so the branch declines
-     * every key. Declining is deliberate — falling through to the romaji
-     * machine would give the user kana, just not the ones their keycaps
-     * promised, and the option would look implemented.
-     *
-     * So: the option sets, and then nothing composes. When kana entry lands,
-     * this block is the one that has to change.
+     * The table is scim-anthy's 101kana — the JIS kana arrangement laid over a
+     * US keyboard — so 'a' is ち and 'k' is の, which is what a JIS keycap in
+     * that position reads. Nothing here is romaji: "ka" would be か if these
+     * keys were being spelled, and it is ちの because they are being struck.
      */
     PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_ANTHY_TYPING_METHOD,
                                                    PATHIME_ANTHY_TYPING_KANA),
                     PATHIME_OK);
     log_reset(&log);
-    PT_CHECK(!press(ctx, 'a'));
-    PT_CHECK(!press(ctx, 'k'));
-    check_str("kana entry composes nothing yet", preedit_of(ctx), "");
-    PT_CHECK(log.changed_count == 0);
-    PT_CHECK(log.commit_count == 0);
+    PT_CHECK(press(ctx, 'a'));
+    PT_CHECK(press(ctx, 'k'));
+    check_str("kana entry types kana directly", preedit_of(ctx), CHI NO_KANA);
+    PT_CHECK_STATUS(pathime_context_reset(ctx), PATHIME_OK);
 
-    /* Switching back restores the romaji machine, so the gap is confined to
+    /*
+     * The dakuten key folds into the kana before it. 't' is か and Shift-2
+     * reaches the '@' position, which types ゛— so the pair is が, one
+     * character rather than two.
+     */
+    PT_CHECK(press(ctx, 't'));
+    check_str("kana: t is か", preedit_of(ctx), KA);
+    PT_CHECK(press_shift(ctx, '2'));
+    check_str("kana: か plus dakuten is が", preedit_of(ctx), GA);
+    PT_CHECK_STATUS(pathime_context_reset(ctx), PATHIME_OK);
+
+    /* Handakuten likewise, on the '[' position: 'f' is は, so は゜ is ぱ. */
+    PT_CHECK(press(ctx, 'f'));
+    PT_CHECK(press(ctx, '['));
+    check_str("kana: は plus handakuten is ぱ", preedit_of(ctx), PA);
+    PT_CHECK_STATUS(pathime_context_reset(ctx), PATHIME_OK);
+
+    /*
+     * A mark after a kana that takes none stands alone rather than being
+     * dropped, which is ibus-anthy's behaviour: its append() falls through to
+     * a new segment built from the same key. 'e' is い, which has no voiced
+     * form, so the ゛stays visible as its own character.
+     */
+    PT_CHECK(press(ctx, 'e'));
+    PT_CHECK(press_shift(ctx, '2'));
+    check_str("kana: mark alone after い", preedit_of(ctx), I_KANA VOICED_MARK);
+    PT_CHECK_STATUS(pathime_context_reset(ctx), PATHIME_OK);
+
+    /* And a mark with nothing before it is simply the mark. */
+    PT_CHECK(press_shift(ctx, '2'));
+    check_str("kana: leading mark", preedit_of(ctx), VOICED_MARK);
+    PT_CHECK_STATUS(pathime_context_reset(ctx), PATHIME_OK);
+
+    /*
+     * Backspace removes one kana. There is no second granularity here the way
+     * there is in romaji mode, because kana entry never leaves an unresolved
+     * prefix — every key resolves on the spot.
+     */
+    PT_CHECK(press(ctx, 't'));
+    PT_CHECK(press_shift(ctx, '2'));
+    check_str("kana/bs: が", preedit_of(ctx), GA);
+    PT_CHECK(press(ctx, PATHIME_KEY_BACKSPACE));
+    check_str("kana/bs: が removed whole", preedit_of(ctx), "");
+    PT_CHECK_STATUS(pathime_context_reset(ctx), PATHIME_OK);
+
+    /*
+     * And the whole point: kana typed this way converts. The front end feeds
+     * anthy the same hiragana whichever method produced it, so everything
+     * downstream — segmentation, the candidate list, commit — is the machinery
+     * the romaji cases above already exercised.
+     *
+     * かんじ off the kana positions is t-y-d-Shift2: か, ん, し, and the
+     * dakuten that turns し into じ. The same reading "kanji" spells out in
+     * romaji earlier in this file, and it converts to the same 漢字 — which is
+     * the assertion, because it shows the typing method chooses only how the
+     * reading is entered and nothing about what happens to it afterwards.
+     */
+    PT_CHECK(press(ctx, 't'));
+    PT_CHECK(press(ctx, 'y'));
+    PT_CHECK(press(ctx, 'd'));
+    PT_CHECK(press_shift(ctx, '2'));
+    check_str("kana: かんじ typed as kana", preedit_of(ctx), KANJI_KANA);
+    PT_CHECK(press(ctx, PATHIME_KEY_SPACE));
+    check_str("kana: converts to 漢字", preedit_of(ctx), KANJI);
+    PT_CHECK(pathime_context_composition(ctx)->candidate_count > 1);
+    PT_CHECK_STATUS(pathime_context_reset(ctx), PATHIME_OK);
+
+    /* Switching back restores the romaji machine, so the mode is confined to
      * that one value rather than latching. */
     PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_ANTHY_TYPING_METHOD,
                                                    PATHIME_ANTHY_TYPING_ROMAJI),

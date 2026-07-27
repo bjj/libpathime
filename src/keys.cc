@@ -5,6 +5,7 @@
 #include "keys.h"
 
 #include <cstddef>
+#include <cstring>
 
 namespace pathime {
 
@@ -105,6 +106,54 @@ char keysym_to_ascii(uint32_t keysym)
         return 0;
     }
     return static_cast<char>(scalar);
+}
+
+namespace {
+
+/** The character a US-QWERTY key produces with Shift held. */
+char shifted_ascii(char c)
+{
+    if (c >= 'a' && c <= 'z') {
+        return static_cast<char>(c - 'a' + 'A');
+    }
+    static const char kUnshifted[] = "`1234567890-=[]\\;',./";
+    static const char kShifted[]   = "~!@#$%^&*()_+{}|:\"<>?";
+    static_assert(sizeof(kUnshifted) == sizeof(kShifted),
+                  "the two halves of the US-QWERTY shift row must line up "
+                  "position for position; the lookup below indexes one with an "
+                  "offset found in the other");
+    if (c != '\0') {
+        const char *p = std::strchr(kUnshifted, c);
+        if (p != nullptr && *p != '\0') {
+            return kShifted[p - kUnshifted];
+        }
+    }
+    return c;
+}
+
+}  // namespace
+
+char us_layout_char(const KeyEvent &key)
+{
+    const uint32_t k = key.position_key();
+    if (k < 0x20u || k > 0x7Eu) {
+        return 0;
+    }
+
+    char c = static_cast<char>(k);
+
+    if (key.layout_key == 0 && key.has(PATHIME_MOD_CAPS)) {
+        if (c >= 'a' && c <= 'z') {
+            c = static_cast<char>(c - 'a' + 'A');
+        } else if (c >= 'A' && c <= 'Z') {
+            c = static_cast<char>(c - 'A' + 'a');
+        }
+    }
+
+    if (key.has(PATHIME_MOD_SHIFT)) {
+        c = shifted_ascii(c);
+    }
+    return c;
 }
 
 }  // namespace pathime

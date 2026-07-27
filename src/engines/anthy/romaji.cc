@@ -5,8 +5,12 @@
  * Where the data came from
  * ---------------------------------------------------------------------------
  *
- * The three tables below are ibus-anthy's, transcribed mechanically from
- * refs/ibus-anthy/engine/python3/tables.py rather than retyped:
+ * The tables below are ibus-anthy's, transcribed mechanically from
+ * refs/ibus-anthy/engine/python3/tables.py rather than retyped, and checked
+ * back against it through the public API afterwards: every one of the 94
+ * reachable kana rows and all 25 dakuten pairs were typed through
+ * pathime_context_process_key() and compared to the Python source, with no
+ * mismatches. That check is worth repeating if these are ever edited.
  *
  *   kRomajiTable  romaji_typing_rule_static (tables.py:25), all 233 entries.
  *   kSymbolTable  symbol_rule (tables.py:263), minus the entries that cannot
@@ -17,6 +21,11 @@
  *                 TODO.md §5 records as unrepresentable.
  *   kScriptTable  hiragana_katakana_table (tables.py:594), the per-scalar
  *                 projection behind PATHIME_OPT_ANTHY_KANA_SCRIPT.
+ *   kKanaTable    kana_typing_rule_static (tables.py:372) and, with it,
+ *   kVoicedKana   kana_voiced_consonant_no_rule (tables.py:484) and
+ *   kSemiVoiced-  kana_semi_voiced_consonant_no_rule (tables.py:507) — the
+ *   Kana          three behind PATHIME_ANTHY_TYPING_KANA. See their own
+ *                 comment for why the ¥ row is the one that could not come.
  *
  * The other two of ibus-anthy's five romaji tables are *not* here.
  * romaji_double_consonat_typing_rule (tables.py:314) and
@@ -482,6 +491,204 @@ const ScriptRow kScriptTable[] = {
 };
 
 /* ---------------------------------------------------------------------------
+ * The kana-entry tables (PATHIME_ANTHY_TYPING_KANA)
+ *
+ * kKanaTable is ibus-anthy's kana_typing_rule_static (tables.py:372), which
+ * its own comment calls "a port of 101kana.sty from scim-anthy": the JIS kana
+ * arrangement laid over **US-101 key positions**. That is exactly the input
+ * this library has — KeyEvent::position_key() is a US-QWERTY keysym — so the
+ * table transcribes with no remapping, and a client never has to tell us what
+ * kind of keyboard is attached.
+ *
+ * 94 of its 95 rows are here. The missing one is '¥' -> ー, whose key is not
+ * ASCII and does not exist on US QWERTY at all: the JIS ¥-vs-ろ case TODO.md
+ * §5 records as unrepresentable. Nothing else is lost — '|' already gives ー
+ * from the US backslash position, so the character remains typeable.
+ *
+ * kVoicedKana and kSemiVoicedKana are kana_voiced_consonant_no_rule and
+ * kana_semi_voiced_consonant_no_rule (tables.py:484, 507). ibus-anthy builds a
+ * combined rule at startup by pasting each of these onto whichever key
+ * produces U+309B or U+309C in the active table (kana.py:_init_kana_voiced_
+ * consonant_rule); that indirection exists to support user-customized tables,
+ * which we do not have, so the two tables are used directly and the dakuten
+ * key is recognised by the kana it produces rather than by its position.
+ * ------------------------------------------------------------------------- */
+
+struct KanaRow {
+    char key;
+    const char *kana;
+};
+
+/* Sorted by ASCII code, for reading only. */
+const KanaRow kKanaTable[] = {
+    { '!',   "\xE3\x81\xAC" },  /* ぬ */
+    { '"',   "\xE3\x81\xB5" },  /* ふ */
+    { '#',   "\xE3\x81\x81" },  /* ぁ */
+    { '$',   "\xE3\x81\x85" },  /* ぅ */
+    { '%',   "\xE3\x81\x87" },  /* ぇ */
+    { '&',   "\xE3\x81\x89" },  /* ぉ */
+    { '\'',  "\xE3\x82\x83" },  /* ゃ */
+    { '(',   "\xE3\x82\x85" },  /* ゅ */
+    { ')',   "\xE3\x82\x87" },  /* ょ */
+    { '*',   "\xE3\x83\xB6" },  /* ヶ */
+    { '+',   "\xE3\x82\x8C" },  /* れ */
+    { ',',   "\xE3\x81\xAD" },  /* ね */
+    { '-',   "\xE3\x81\xBB" },  /* ほ */
+    { '.',   "\xE3\x82\x8B" },  /* る */
+    { '/',   "\xE3\x82\x81" },  /* め */
+    { '0',   "\xE3\x82\x8F" },  /* わ */
+    { '1',   "\xE3\x81\xAC" },  /* ぬ */
+    { '2',   "\xE3\x81\xB5" },  /* ふ */
+    { '3',   "\xE3\x81\x82" },  /* あ */
+    { '4',   "\xE3\x81\x86" },  /* う */
+    { '5',   "\xE3\x81\x88" },  /* え */
+    { '6',   "\xE3\x81\x8A" },  /* お */
+    { '7',   "\xE3\x82\x84" },  /* や */
+    { '8',   "\xE3\x82\x86" },  /* ゆ */
+    { '9',   "\xE3\x82\x88" },  /* よ */
+    { ':',   "\xE3\x81\x91" },  /* け */
+    { ';',   "\xE3\x82\x8C" },  /* れ */
+    { '<',   "\xE3\x80\x81" },  /* 、 */
+    { '=',   "\xE3\x81\xBB" },  /* ほ */
+    { '>',   "\xE3\x80\x82" },  /* 。 */
+    { '?',   "\xE3\x83\xBB" },  /* ・ */
+    { '@',   "\xE3\x82\x9B" },  /* ゛ */
+    { 'A',   "\xE3\x81\xA1" },  /* ち */
+    { 'B',   "\xE3\x81\x93" },  /* こ */
+    { 'C',   "\xE3\x81\x9D" },  /* そ */
+    { 'D',   "\xE3\x81\x97" },  /* し */
+    { 'E',   "\xE3\x81\x83" },  /* ぃ */
+    { 'F',   "\xE3\x82\x8E" },  /* ゎ */
+    { 'G',   "\xE3\x81\x8D" },  /* き */
+    { 'H',   "\xE3\x81\x8F" },  /* く */
+    { 'I',   "\xE3\x81\xAB" },  /* に */
+    { 'J',   "\xE3\x81\xBE" },  /* ま */
+    { 'K',   "\xE3\x81\xAE" },  /* の */
+    { 'L',   "\xE3\x82\x8A" },  /* り */
+    { 'M',   "\xE3\x82\x82" },  /* も */
+    { 'N',   "\xE3\x81\xBF" },  /* み */
+    { 'O',   "\xE3\x82\x89" },  /* ら */
+    { 'P',   "\xE3\x81\x9B" },  /* せ */
+    { 'Q',   "\xE3\x81\x9F" },  /* た */
+    { 'R',   "\xE3\x81\x99" },  /* す */
+    { 'S',   "\xE3\x81\xA8" },  /* と */
+    { 'T',   "\xE3\x83\xB5" },  /* ヵ */
+    { 'U',   "\xE3\x81\xAA" },  /* な */
+    { 'V',   "\xE3\x82\x90" },  /* ゐ */
+    { 'W',   "\xE3\x81\xA6" },  /* て */
+    { 'X',   "\xE3\x81\x95" },  /* さ */
+    { 'Y',   "\xE3\x82\x93" },  /* ん */
+    { 'Z',   "\xE3\x81\xA3" },  /* っ */
+    { '[',   "\xE3\x82\x9C" },  /* ゜ */
+    { '\\',  "\xE3\x82\x8D" },  /* ろ */
+    { ']',   "\xE3\x82\x80" },  /* む */
+    { '^',   "\xE3\x81\xB8" },  /* へ */
+    { '_',   "\xE3\x82\x8D" },  /* ろ */
+    { '`',   "\xE3\x82\x9B" },  /* ゛ */
+    { 'a',   "\xE3\x81\xA1" },  /* ち */
+    { 'b',   "\xE3\x81\x93" },  /* こ */
+    { 'c',   "\xE3\x81\x9D" },  /* そ */
+    { 'd',   "\xE3\x81\x97" },  /* し */
+    { 'e',   "\xE3\x81\x84" },  /* い */
+    { 'f',   "\xE3\x81\xAF" },  /* は */
+    { 'g',   "\xE3\x81\x8D" },  /* き */
+    { 'h',   "\xE3\x81\x8F" },  /* く */
+    { 'i',   "\xE3\x81\xAB" },  /* に */
+    { 'j',   "\xE3\x81\xBE" },  /* ま */
+    { 'k',   "\xE3\x81\xAE" },  /* の */
+    { 'l',   "\xE3\x82\x8A" },  /* り */
+    { 'm',   "\xE3\x82\x82" },  /* も */
+    { 'n',   "\xE3\x81\xBF" },  /* み */
+    { 'o',   "\xE3\x82\x89" },  /* ら */
+    { 'p',   "\xE3\x81\x9B" },  /* せ */
+    { 'q',   "\xE3\x81\x9F" },  /* た */
+    { 'r',   "\xE3\x81\x99" },  /* す */
+    { 's',   "\xE3\x81\xA8" },  /* と */
+    { 't',   "\xE3\x81\x8B" },  /* か */
+    { 'u',   "\xE3\x81\xAA" },  /* な */
+    { 'v',   "\xE3\x81\xB2" },  /* ひ */
+    { 'w',   "\xE3\x81\xA6" },  /* て */
+    { 'x',   "\xE3\x81\x95" },  /* さ */
+    { 'y',   "\xE3\x82\x93" },  /* ん */
+    { 'z',   "\xE3\x81\xA4" },  /* つ */
+    { '{',   "\xE3\x80\x8C" },  /* 「 */
+    { '|',   "\xE3\x83\xBC" },  /* ー */
+    { '}',   "\xE3\x80\x8D" },  /* 」 */
+    { '~',   "\xE3\x82\x92" },  /* を */
+};
+
+/* U+309B KATAKANA-HIRAGANA VOICED SOUND MARK and U+309C, its semi-voiced
+ * counterpart — what the '@' and '[' positions produce, and the two the
+ * combining rules below key on. Named rather than spelled inline because they
+ * are compared against table output, not against a key. */
+const char kVoicedMark[]     = "\xE3\x82\x9B";
+const char kSemiVoicedMark[] = "\xE3\x82\x9C";
+
+struct KanaPair {
+    const char *plain;
+    const char *marked;
+};
+
+const KanaPair kVoicedKana[] = {
+    { "\xE3\x81\x8B", "\xE3\x81\x8C" },  /* か -> が */
+    { "\xE3\x81\x8D", "\xE3\x81\x8E" },  /* き -> ぎ */
+    { "\xE3\x81\x8F", "\xE3\x81\x90" },  /* く -> ぐ */
+    { "\xE3\x81\x91", "\xE3\x81\x92" },  /* け -> げ */
+    { "\xE3\x81\x93", "\xE3\x81\x94" },  /* こ -> ご */
+    { "\xE3\x81\x95", "\xE3\x81\x96" },  /* さ -> ざ */
+    { "\xE3\x81\x97", "\xE3\x81\x98" },  /* し -> じ */
+    { "\xE3\x81\x99", "\xE3\x81\x9A" },  /* す -> ず */
+    { "\xE3\x81\x9B", "\xE3\x81\x9C" },  /* せ -> ぜ */
+    { "\xE3\x81\x9D", "\xE3\x81\x9E" },  /* そ -> ぞ */
+    { "\xE3\x81\x9F", "\xE3\x81\xA0" },  /* た -> だ */
+    { "\xE3\x81\xA1", "\xE3\x81\xA2" },  /* ち -> ぢ */
+    { "\xE3\x81\xA4", "\xE3\x81\xA5" },  /* つ -> づ */
+    { "\xE3\x81\xA6", "\xE3\x81\xA7" },  /* て -> で */
+    { "\xE3\x81\xA8", "\xE3\x81\xA9" },  /* と -> ど */
+    { "\xE3\x81\xAF", "\xE3\x81\xB0" },  /* は -> ば */
+    { "\xE3\x81\xB2", "\xE3\x81\xB3" },  /* ひ -> び */
+    { "\xE3\x81\xB5", "\xE3\x81\xB6" },  /* ふ -> ぶ */
+    { "\xE3\x81\xB8", "\xE3\x81\xB9" },  /* へ -> べ */
+    { "\xE3\x81\xBB", "\xE3\x81\xBC" },  /* ほ -> ぼ */
+};
+
+const KanaPair kSemiVoicedKana[] = {
+    { "\xE3\x81\xAF", "\xE3\x81\xB1" },  /* は -> ぱ */
+    { "\xE3\x81\xB2", "\xE3\x81\xB4" },  /* ひ -> ぴ */
+    { "\xE3\x81\xB5", "\xE3\x81\xB7" },  /* ふ -> ぷ */
+    { "\xE3\x81\xB8", "\xE3\x81\xBA" },  /* へ -> ぺ */
+    { "\xE3\x81\xBB", "\xE3\x81\xBD" },  /* ほ -> ぽ */
+};
+
+/** The kana a US-QWERTY character types, or nullptr if that key types none. */
+const char *kana_lookup(char key)
+{
+    for (const KanaRow &row : kKanaTable) {
+        if (row.key == key) return row.kana;
+    }
+    return nullptr;
+}
+
+/**
+ * @a plain with a dakuten or handakuten applied, or nullptr if it takes none.
+ *
+ * The set that takes one is small and closed — か-row through は-row for
+ * voiced, は-row alone for semi-voiced — so "takes one" is a lookup and not a
+ * property to compute. う is deliberately absent, matching the reference: う゛
+ * is written as two characters and ibus-anthy leaves it that way.
+ */
+const char *voiced_form(const std::string &plain, bool semi)
+{
+    const KanaPair *table = semi ? kSemiVoicedKana : kVoicedKana;
+    const size_t count = semi ? (sizeof(kSemiVoicedKana) / sizeof(*kSemiVoicedKana))
+                              : (sizeof(kVoicedKana) / sizeof(*kVoicedKana));
+    for (size_t i = 0; i < count; ++i) {
+        if (plain == table[i].plain) return table[i].marked;
+    }
+    return nullptr;
+}
+
+/* ---------------------------------------------------------------------------
  * Lookups
  * ------------------------------------------------------------------------- */
 
@@ -763,22 +970,80 @@ void RomajiComposer::step(char c, const RomajiSettings &settings)
     }
 }
 
+/**
+ * PATHIME_ANTHY_TYPING_KANA: one key, one kana.
+ *
+ * Much simpler than the romaji machine, and the reason is that kana entry has
+ * nothing to pend. Every key either types a kana outright or modifies the one
+ * before it, so there is never an unresolved prefix — `pending_` stays empty
+ * for the whole of this mode, and `kana_` alone is the state. That is also why
+ * this takes no RomajiSettings: none of the seven applies. The script
+ * projection still runs on the way out, in display(), because it is a property
+ * of the output rather than of the machine.
+ *
+ * In particular the period and symbol styles do not apply. In romaji mode
+ * PATHIME_OPT_ANTHY_PERIOD_STYLE decides what "." produces because the key is
+ * ambiguous; here the layout has already decided — "." is る and 。 is on
+ * Shift-. — so honouring the option would override the keycap the user is
+ * looking at. ibus-anthy reaches the same place by a different route: its
+ * style options are applied in the romaji segment class, and KanaSegment does
+ * not inherit them.
+ *
+ * The dakuten rule is the only stateful part, and it reads the state rather
+ * than storing it: whether the previous kana can take a mark is a property of
+ * that kana, so the last scalar of `kana_` is all that has to be consulted.
+ * ibus-anthy keeps an is_finished() flag per segment for the same purpose; the
+ * flag is derivable, so it is derived.
+ */
+bool RomajiComposer::insert_kana(const KeyEvent &key)
+{
+    /*
+     * Position, not character — us_layout_char(), the same recombination
+     * libhangul's adapter uses. It has to be position: a kana keyboard's
+     * legends are precisely what a client's keymap will not report, and the
+     * table is indexed by where the key is on a US-101 board.
+     */
+    const char c = us_layout_char(key);
+    if (c == 0) {
+        return false;
+    }
+
+    const char *typed = kana_lookup(c);
+    if (typed == nullptr) {
+        return false;
+    }
+
+    /*
+     * A dakuten or handakuten key combines with the kana before it when that
+     * kana takes one, and otherwise stands alone as its own character. Both
+     * halves are ibus-anthy's KanaSegment::append(): it looks the pair up in
+     * the combined rule and, failing that, starts a new segment from the key —
+     * which resolves through the same table to the bare mark.
+     */
+    const bool is_voiced = std::strcmp(typed, kVoicedMark) == 0;
+    const bool is_semi_voiced = std::strcmp(typed, kSemiVoicedMark) == 0;
+    if ((is_voiced || is_semi_voiced) && !kana_.empty()) {
+        const size_t scalars = utf8_scalar_count(kana_.data(), kana_.size());
+        const size_t offset = utf8_byte_offset(kana_.data(), kana_.size(), scalars - 1);
+        if (offset != kUtf8NoPosition) {
+            const std::string last = kana_.substr(offset);
+            const char *marked = voiced_form(last, is_semi_voiced);
+            if (marked != nullptr) {
+                kana_.resize(offset);
+                kana_ += marked;
+                return true;
+            }
+        }
+    }
+
+    kana_ += typed;
+    return true;
+}
+
 bool RomajiComposer::insert(const KeyEvent &key, const RomajiSettings &settings)
 {
     if (settings.method == PATHIME_ANTHY_TYPING_KANA) {
-        /* TODO(impl): kana entry — striking kana directly rather than spelling
-         * them, ibus-anthy's kana.KanaSegment (kana.py) with the JIS kana
-         * layout and its dakuten/handakuten combining over the preceding kana.
-         * It is a separate state machine over a separate table, and it needs
-         * layout_key rather than keysym since a kana keyboard's legends are
-         * exactly what a client's layout will not report.
-         *
-         * Declining every key is deliberate and is the whole behaviour of this
-         * branch: PATHIME_ANTHY_TYPING_KANA composes nothing at all until that
-         * is written. Falling through to the romaji machine would be worse —
-         * the user would get kana, just not the ones the keycaps promised, and
-         * the option would look implemented. */
-        return false;
+        return insert_kana(key);
     }
 
     const char c = keysym_to_ascii(key.keysym);

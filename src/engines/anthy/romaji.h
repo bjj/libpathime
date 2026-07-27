@@ -8,8 +8,16 @@
  * entry), not the conversion table: ibus-anthy's schema ships exactly one
  * romaji table — the MS-IME/ATOK/etc. variants named in its comments were
  * never written — so there is no table choice to offer yet (TODO.md §1).
- * Thumb-shift entry was cut. The reference state machine is ibus-anthy's
- * (refs/ibus-anthy, Python).
+ * Thumb-shift entry was cut. The reference state machines are ibus-anthy's
+ * (refs/ibus-anthy, Python): romaji.py for one, kana.py for the other.
+ *
+ * The two machines differ in what they read off a key, and the difference is
+ * not incidental. Romaji entry reads the *character*, because the user is
+ * spelling a syllable out. Kana entry reads the *position*, because the user
+ * is striking a key whose kana legend no client keymap will report — so it
+ * goes through KeyEvent::position_key() and keys.cc's us_layout_char(), the
+ * same recombination libhangul's adapter uses, over a table indexed by US-101
+ * positions.
  *
  * This lives with the anthy adapter rather than in src/ because only
  * Japanese needs a composing front end before its backend sees input — the
@@ -163,6 +171,16 @@ private:
 
     /** Feed one already-lowercased ASCII character to the resolver. */
     void step(char c, const RomajiSettings &settings);
+
+    /**
+     * PATHIME_ANTHY_TYPING_KANA's whole state machine: one key, one kana, with
+     * the dakuten and handakuten keys folding into the kana before them.
+     *
+     * Takes no settings because none of them applies — kana entry has no
+     * pending prefix for latin_with_shift to interrupt, and the layout rather
+     * than the period/symbol options decides what a punctuation key produces.
+     */
+    bool insert_kana(const KeyEvent &key);
 
     std::string kana_;     /**< Resolved, always hiragana. */
     std::string pending_;  /**< Latin typed but not yet resolved, as typed. */
