@@ -57,6 +57,44 @@ if(LIBPATHIME_WITH_PYZY)
   add_subdirectory(cmake/ports/pyzy)
 endif()
 
+# --- Generated public header: include/pathime/config.h ---
+# Records which backends survived the dependency gating above, so clients can
+# #if them out. Placed under the binary dir's own include/pathime/ so that
+# adding that one directory to a consumer's include path resolves
+# <pathime/config.h> exactly as the installed layout will.
+foreach(_lpi_backend HANGUL ANTHY PYZY)
+  if(LIBPATHIME_WITH_${_lpi_backend})
+    set(PATHIME_WITH_${_lpi_backend} 1)
+  else()
+    set(PATHIME_WITH_${_lpi_backend} 0)
+  endif()
+endforeach()
+if(BUILD_SHARED_LIBS)
+  set(PATHIME_BUILT_STATIC 0)
+else()
+  set(PATHIME_BUILT_STATIC 1)
+endif()
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/cmake/pathime-config.h.in"
+               "${PROJECT_BINARY_DIR}/include/pathime/config.h"
+               @ONLY)
+install(FILES "${PROJECT_BINARY_DIR}/include/pathime/config.h"
+              "${CMAKE_CURRENT_SOURCE_DIR}/include/pathime/pathime.h"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pathime")
+
+# The library itself does not exist yet; this interface target carries the two
+# include directories (source tree for pathime.h, binary tree for config.h) so
+# that anything added later — or a test that just #includes the header — gets
+# both without repeating the paths.
+add_library(pathime_public_headers INTERFACE)
+add_library(libpathime::headers ALIAS pathime_public_headers)
+target_include_directories(pathime_public_headers INTERFACE
+  "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+  "$<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>"
+  "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
+if(NOT BUILD_SHARED_LIBS)
+  target_compile_definitions(pathime_public_headers INTERFACE PATHIME_STATIC)
+endif()
+
 # --- Tests. All test wiring — both the vendored suites and our own — lives
 # under tests/, one directory per backend, so nothing above this line has to
 # know that tests exist. Off by default: the suites need the build-time data

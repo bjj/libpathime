@@ -30,9 +30,20 @@ The engine returns:
 * composition data
 * commit text requests
 * delete surrounding text requests
-* forward key event requests
 
 Each input context has independent composition state.
+
+All engine output produced while handling a client call is delivered before
+that call completes, on the calling thread. The interface is synchronous
+throughout.
+
+Independent composition state does not imply independent concurrency. Input
+methods are conventionally built on libraries with process-global conversion
+state — shared dictionaries, caches, and scratch working memory — so two calls
+that overlap in time are unsafe even when they concern different input contexts
+using different engines. This model therefore requires that calls never overlap.
+It does not require them to come from one particular thread; only that they are
+serialized. A single dedicated input thread is the ordinary way to satisfy this.
 
 # Participants
 
@@ -78,7 +89,6 @@ An input context normally has its own:
 * composition data
 * surrounding text
 * focus state
-* activation state
 * negotiated capabilities and options
 
 Creating an input context begins the lifetime of this per-destination state. Destroying the input context ends that lifetime.
@@ -93,13 +103,42 @@ The same engine may serve many input contexts simultaneously. State that depends
 
 A **key event** represents a key press sent by the client to the engine.
 
-A key event may contain information such as:
+A key event contains:
 
-* the logical key
-* the physical key
+* the logical key — the character or named key the client's layout produced
+* the physical key — which key position was pressed, independent of layout
 * modifier state
 
-The exact representation is an API design detail. Conceptually, the engine is given an opportunity to process the event and must report whether it was handled.
+These three are independent descriptions of the same press, not inputs to a
+calculation the engine performs. The logical key already has every
+transformation the client's layout applies: pressing Shift and Q reports the
+logical key `Q`, together with a Shift modifier, and the engine may neither
+derive `Q` from `q` because Shift was reported nor infer Shift because the
+logical key is uppercase. The physical key is likewise reported unmodified, so
+that an engine defined by key position can combine position and modifiers on its
+own terms.
+
+Modifier state exists mainly so that engines can decline what is not theirs. A
+key chorded with a control, alt, or command modifier is a client command, and an
+engine reports it unhandled rather than absorbing it. Where a modifier does
+affect composition it is because the engine recombines it with the physical key,
+as Hangul does to reach a doubled jamo.
+
+The set of logical keys is open-ended, and an engine is not expected to
+recognize all of them. An unrecognized key is not an error; it is simply
+unhandled.
+
+The physical key is optional. Clients with no physical keyboard, such as
+on-screen and predictive keyboards, omit it, and every engine must work without
+it. It exists because some input methods are defined by key position rather
+than by character: Hangul composition assigns jamo to positions, so a client
+using a non-US layout must report position for those assignments to be correct.
+
+Key releases are not part of this model. Engines see key presses only. This
+excludes input methods that depend on release timing, such as thumb-shift
+(Nicola) kana layouts.
+
+Conceptually, the engine is given an opportunity to process the event and must report whether it was handled.
 
 ## Handled
 
@@ -109,29 +148,13 @@ When a key event is handled, the client must not also process the original event
 
 A key event is **unhandled** when the engine declines responsibility for it. The client may then process the original event normally.
 
-Handled status applies to the original incoming event. It is separate from any commit text, composition data, or forward key event produced while processing that event.
+Handled status applies to the original incoming event. It is separate from any commit text or composition data produced while processing that event. An engine may absorb a key into its composition state, emit the resulting text, and still report the event unhandled.
+
+Because engine output is delivered before the key-processing call completes, an unhandled event is already correctly ordered against any commit text or composition change the same event produced. The client applies the engine's output first and then processes the key by its normal path.
 
 **IBus and Fcitx note:** IBus key processing returns a Boolean result indicating whether the engine successfully processed the key. Fcitx expresses the equivalent behavior by accepting its key-event object. This document calls that result *handled*. ([Intelligent Input Bus][2])
 
-## Forward key event
-
-A **forward key event** is an explicit request from the engine for the client to receive a key event.
-
-Forwarding is not the same as reporting the original event as unhandled:
-
-* An unhandled event continues through the client's normal processing path
-* A forwarded event is an output produced by the engine
-
-A forwarded event may be:
-
-* a delayed version of an earlier event
-* a transformed event
-* an event generated by the engine
-* an event that must be delivered after other engine output
-
-The client should treat the forwarded event as a new event delivered by the engine and should avoid sending it back through the same engine in a way that creates a loop.
-
-**IBus and Fcitx note:** IBus exposes a forward key event operation from the engine to the client. Fcitx similarly allows an input context to send a key event to its client. ([Intelligent Input Bus][1])
+Both frameworks additionally provide a *forward key event* operation, by which the engine asks the client to receive a key event as engine output rather than declining the original. Its purpose is to order a declined key against other output when the handled result is reported asynchronously. This model has no such operation: the interface is synchronous, so ordering is already guaranteed, and forwarding is unevenly implemented across client toolkits. Input methods that depend on delivering delayed, transformed, or engine-generated keys are therefore outside this model.
 
 # Composition
 
@@ -223,6 +246,10 @@ Candidates may represent:
 
 The candidate list is the complete logical list available for selection. It is not divided into engine-defined pages.
 
+Every candidate in a list is an alternative for the same span of input: the leftmost portion of the composition that is not yet settled. There is never more than one span under consideration at a time, and the client does not choose which span that is. This is what makes selection greedy — see *Select candidate*.
+
+An engine whose underlying source enumerates alternatives lazily, or without a knowable total, bounds the list at a negotiated maximum and presents the bounded result as the complete list. The client is never required to request more candidates in order to display or paginate what it has. Raising the bound only appends; it never reorders or renumbers candidates already supplied.
+
 Each candidate consists only of its plain text. The core model does not attach:
 
 * labels
@@ -260,6 +287,10 @@ For example, if the client displays candidates 20 through 29 as its third page, 
 
 Candidate navigation is performed entirely by the client. The engine receives only the completed selection.
 
+Selection resolves the composition greedily, from the beginning toward the end. Choosing a candidate settles the portion of the composition that candidate covers, advances the preedit display position past it, and produces a fresh candidate list for whatever input remains. When nothing remains, the engine commits.
+
+The client therefore never navigates between, or adjusts the boundaries of, the divisions an engine may use internally to segment the input. Engines whose underlying conversion is multi-segment expose only the region currently being resolved. Segment navigation and segment resizing are outside this model.
+
 The client must not select a position from an obsolete candidate list after newer composition data has been received.
 
 **IBus note:** IBus candidate selection is engine-specific and controlled via key press events rather than an API. This is undesirable. ([Intelligent Input Bus][2])
@@ -288,7 +319,7 @@ Surrounding text may be used for:
 
 This model does not expose a client text selection. It therefore has no selection anchor. The insertion position is included only to divide the supplied text into text before and after the point of input; it is not an IME display-caret concept.
 
-Availability of surrounding text is negotiated. A client that cannot or should not expose surrounding text may report that it is unsupported.
+Availability of surrounding text is negotiated. A client that cannot or should not expose surrounding text simply does not supply it. An engine that cannot operate without it declares that as a requirement, and the pairing is rejected when the input context is created rather than failing silently later.
 
 **IBus and Fcitx note:** Both IBus and Fcitx surrounding-text representations include a cursor position and a separate anchor position for representing selections. This model retains only one insertion position and ignores selection. ([Intelligent Input Bus][2])
 
@@ -324,6 +355,10 @@ The range is described by:
 
 A negative offset refers to text before the insertion position. A positive offset refers to text after it.
 
+The frame of reference is the surrounding text the client most recently supplied, and the origin is the insertion position reported with it — not wherever the client's insertion point may have moved since. An engine may only ask to delete text it can actually see, so the requested range always lies within the supplied surrounding text. A client whose document has changed since it last reported surrounding text is therefore free to ignore the request instead of deleting something else.
+
+Deletion is ordered ahead of any commit text produced by the same client call, so that the range is always relative to the document as the engine last saw it rather than to the result of a commit the client has just applied.
+
 This operation may be used for:
 
 * reconversion
@@ -344,39 +379,22 @@ The concrete API must define the Unicode unit used for offsets and counts, such 
 
 **Focus** indicates whether an input context currently corresponds to the client destination receiving input.
 
-Focus is a property of the client and its input context. It does not by itself determine whether a particular engine is active.
+Focus is a property of the client and its input context.
 
 The client informs the engine when the input context:
 
 * gains focus
 * loses focus
 
-Focus changes allow the engine to preserve, discard, commit, or otherwise manage composition state according to negotiated behavior.
+Focus gates input and nothing else. An unfocused input context does not accept key events or candidate selections; reading composition data, supplying surrounding text, changing settings, and resetting all remain available.
 
-No particular commit or reset behavior is implied solely by the word *focus*. Such behavior must be defined by the engine contract or negotiation.
+Losing focus neither commits nor discards. Composition state is preserved unchanged, so regaining focus resumes exactly where the user left off, and the engine produces no output as a result of the transition itself. A client that wants the preedit finalized or abandoned when the user leaves a field performs that itself, before dropping focus. Making this a fixed rule rather than negotiated behavior keeps a text field's contents a decision the client owns, which matters because engines disagree: some underlying libraries flush their pending syllable on focus loss and others ignore focus entirely.
 
-**IBus and Fcitx note:** IBus exposes separate focus-in and focus-out notifications. Fcitx input contexts also explicitly gain and lose focus. Fcitx engine activation may occur in connection with focus, but activation and focus remain distinguishable concepts in this model. ([Intelligent Input Bus][2])
+An input context begins its lifetime unfocused.
 
-## Activation
+**IBus and Fcitx note:** IBus exposes separate focus-in and focus-out notifications. Fcitx input contexts also explicitly gain and lose focus. ([Intelligent Input Bus][2])
 
-**Activation** indicates whether the engine is selected and enabled for an input context.
-
-An input context may have focus while the engine is inactive, for example when:
-
-* direct keyboard input is selected
-* another engine is selected
-* input-method processing is disabled for that field
-
-Activation and focus are independent:
-
-* A focused input context may have an inactive engine
-* An active engine may retain state for an input context that temporarily lacks focus
-
-The client or hosting system informs the engine when it becomes active or inactive for an input context.
-
-Activation or deactivation does not inherently imply a commit or reset unless the engine contract or negotiation specifies one.
-
-**IBus and Fcitx note:** IBus calls the corresponding lifecycle operations enable and disable. Fcitx calls its engine hooks activate and deactivate. Fcitx's default deactivation implementation calls reset, but this document treats that as a policy rather than part of the definition of deactivation. ([Intelligent Input Bus][2])
+Both frameworks also carry an *activation* concept — IBus enable/disable, Fcitx activate/deactivate — indicating whether the engine is selected and enabled for a context, independently of focus. This model does not. A client that wants direct keyboard input, or that has selected another engine, stops sending key events to the input context; no separate state is required to express it.
 
 ## Reset
 
@@ -386,7 +404,7 @@ After a reset, the engine should produce empty composition data unless it has a 
 
 Reset does not commit preedit text. An engine that needs to preserve text must issue commit text explicitly before or as part of handling the reset.
 
-Reset does not destroy the input context. Negotiated information and other persistent per-context settings may remain in effect.
+Reset does not destroy the input context. Negotiated information and other persistent per-context settings remain in effect.
 
 Reset may be requested when:
 
@@ -410,23 +428,33 @@ Negotiated information may include:
 
 ### Client capabilities
 
-Examples include whether the client supports:
+Which operations the client supports, such as:
 
-* composition data
-* surrounding text
-* delete surrounding text
-* forwarded key events
-* particular ordering guarantees
-* optional protocol extensions
+* displaying composition data
+* supplying surrounding text
+* deleting surrounding text
+
+A client declares these by implementing the corresponding operations, not by
+describing them separately. An operation the client has not implemented is one
+it does not support. There is no capability description that can disagree with
+what the client actually does.
 
 ### Engine requirements
 
 The engine may indicate that it:
 
-* wants surrounding text
-* may request deletion
+* requires surrounding text
+* requires the ability to delete surrounding text
 * requires a particular key representation
 * supports optional language or conversion features
+
+Requirements travel from engine to client, which is the direction that carries
+information: the client cannot know what a given input method needs, and an
+engine may need more in some configurations than others.
+
+Requirements are checked when an input context is created. Pairing an engine
+with a client that lacks a required operation is an error at that point, rather
+than a silent loss of engine output later.
 
 ### Input purpose and hints
 
@@ -469,13 +497,12 @@ These are data exchanged with the engine. This core model does not define a menu
 
 Negotiation may define policies such as:
 
-* what happens to preedit text when focus is lost
-* whether state persists while the engine is inactive
+* the maximum size of a candidate list
 * how unsupported operations are reported
 * protocol versioning
 * extension support
 
-**IBus and Fcitx note:** IBus represents client display and surrounding-text abilities as capability flags, while input purpose and hints are exposed separately as content type. Fcitx uses a larger capability-flag set containing both client features and field-purpose hints. Both frameworks also have separate property or configuration systems. This model groups the information relevant to the library boundary under negotiation and excludes any prescribed configuration UI. ([Intelligent Input Bus][4])
+**IBus and Fcitx note:** IBus represents client display and surrounding-text abilities as capability flags, while input purpose and hints are exposed separately as content type. Fcitx uses a larger capability-flag set containing both client features and field-purpose hints. Those flags exist largely to divide responsibility between the engine and a separate panel component. This model has no such division — the client presents everything — so it has no client capability flags, and describes client support by which operations the client implements. Both frameworks also have separate property or configuration systems; this model groups the information relevant to the library boundary under negotiation and excludes any prescribed configuration UI. ([Intelligent Input Bus][4])
 
 # Plain-text rule
 
@@ -518,6 +545,7 @@ The following are outside this model:
 * candidate labels and shortcut keys
 * candidate comments and actions
 * candidate layout or orientation
+* segment navigation and segment resizing
 * rich or attributed text
 * status areas and language bars
 * property menus
@@ -525,6 +553,9 @@ The following are outside this model:
 * engine discovery and engine switching
 * handwriting input
 * virtual-keyboard presentation
+* forwarded key events
+* engine activation state, as distinct from focus
+* key release events
 
 These may be useful features of a complete input-method framework, but they are not required to define the engine library interface described by this document.
 
@@ -537,10 +568,9 @@ The canonical terms used by this documentation are:
 | **Client**                  | The owner of the editable text and presentation.                    |
 | **Engine**                  | The implementation of input and conversion logic.                   |
 | **Input context**           | Per-client-destination engine state and negotiated information.     |
-| **Key event**               | A key press or release offered to the engine.                       |
+| **Key event**               | A key press offered to the engine.                                  |
 | **Handled**                 | The engine has accepted responsibility for the original key event.  |
 | **Unhandled**               | The client may process the original key event normally.             |
-| **Forward key event**       | An explicit engine request to deliver a key event to the client.    |
 | **Composition data**        | Preedit text, auxiliary text, and the candidate list.               |
 | **Preedit text**            | Provisional text that has not been committed.                       |
 | **Auxiliary text**          | Supplemental plain text associated with the composition.            |
@@ -550,7 +580,6 @@ The canonical terms used by this documentation are:
 | **Commit text**             | Insert finalized text into the client.                              |
 | **Delete surrounding text** | Delete client text using an offset and character count.             |
 | **Focus**                   | Whether the input context is currently receiving client input.      |
-| **Activation**              | Whether the engine is selected and enabled for the input context.   |
 | **Reset**                   | Discard transient composition state without destroying the context. |
 | **Negotiation**             | Exchange capabilities, field information, options, and policies.    |
 

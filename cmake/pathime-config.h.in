@@ -1,0 +1,34 @@
+/*
+ * libpathime — build configuration. GENERATED FILE, DO NOT EDIT.
+ *
+ * Written by CMake from cmake/pathime-config.h.in into the build tree and
+ * installed alongside pathime.h. It records the choices that were made when
+ * this particular copy of the library was built, so that a client can compile
+ * out paths the library cannot serve.
+ *
+ * Everything here is a compile-time constant describing the build. For the
+ * corresponding runtime queries against the library actually loaded, see
+ * pathime_version() and pathime_has_engine().
+ */
+
+#ifndef PATHIME_CONFIG_H
+#define PATHIME_CONFIG_H
+
+/*
+ * Backend availability. Each is defined to 1 or 0 — always defined, so use
+ * #if, not #ifdef. A 0 here guarantees the corresponding pathime_engine_id_t
+ * cannot be created by this build.
+ */
+#define PATHIME_WITH_HANGUL @PATHIME_WITH_HANGUL@
+#define PATHIME_WITH_ANTHY  @PATHIME_WITH_ANTHY@
+#define PATHIME_WITH_PYZY   @PATHIME_WITH_PYZY@
+
+/*
+ * Defined to 1 when this library was built as a static archive. The installed
+ * CMake target also puts -DPATHIME_STATIC on consumers, which is what drives
+ * the PATHIME_API import/export decision in pathime.h; this macro exists so
+ * that clients not using our CMake package can reach the same conclusion.
+ */
+#define PATHIME_BUILT_STATIC @PATHIME_BUILT_STATIC@
+
+#endif /* PATHIME_CONFIG_H */
