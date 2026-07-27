@@ -18,10 +18,12 @@
 #ifndef LIBPATHIME_SRC_ENGINE_H
 #define LIBPATHIME_SRC_ENGINE_H
 
+#include <memory>
 #include <vector>
 
 #include <pathime/pathime.h>
 
+#include "backend.h"
 #include "options.h"
 
 namespace pathime {
@@ -71,12 +73,13 @@ struct pathime_engine {
      */
     std::vector<pathime_context_t *> contexts;
 
-    /*
-     * TODO(impl): the backend's engine-level state — the one thing an adapter
-     * owns at this layer — goes here as whatever handle backend.h ends up
-     * defining. Its shape waits on the composition representation
-     * (TODO.md §3, question 1); see backend.h.
+    /**
+     * The adapter's engine-level state: loaded dictionaries, compiled tables,
+     * user history — whatever this input method shares across its contexts.
+     * Null only for an engine whose backend could not be built, which
+     * pathime_engine_create() refuses to hand out.
      */
+    std::unique_ptr<pathime::EngineBackend> backend;
 };
 
 #endif /* LIBPATHIME_SRC_ENGINE_H */

@@ -6,10 +6,13 @@
  * backend.h, and the file compiles identically whatever the PATHIME_WITH_*
  * macros say. That is why it is real rather than stubbed — the descriptor
  * table, the two-level store, the validation order and the resolution order
- * are all decidable from include/pathime/pathime.h alone. The two things that
- * genuinely need an adapter — pushing a resolved value at the backend, and
- * tier 3, the table's own declaration — are marked TODO(impl) at the exact
- * point they slot in.
+ * are all decidable from include/pathime/pathime.h alone.
+ *
+ * A resolved value reaches its adapter through ContextBackend::options_changed()
+ * (see commit_change), which exists because a mid-composition change has to be
+ * felt now rather than at the next keystroke, of which there may be none. What
+ * remains marked TODO(impl) is tier 3 — the value a table file itself declares
+ * — which has nothing behind it until the table engine is written (TODO.md §4).
  *
  * Three things worth knowing before editing:
  *
@@ -38,6 +41,7 @@
 #include "context.h"
 #include "engine.h"
 #include "init.h"
+#include "utf8.h"
 
 namespace pathime {
 
@@ -214,12 +218,33 @@ constexpr OptionDescriptor kOptions[] = {
     make_enum("pinyin-scheme", kPinyin, PATHIME_PINYIN_SCHEME_FULL,
               enum_mask(PATHIME_PINYIN_SCHEME_DOUBLE_XHE + 1), true),
     /*
-     * Both FLAGS options default to every bit. Scoped to Pinyin on reasoning
-     * that was not traced all the way through pyzy's bopomofo-to-pinyin tables
-     * (TODO.md §1, "One claim to re-check"); widening `engines` later is
-     * additive and harmless, so the narrower claim is the safe one to ship.
+     * Both FLAGS options default to every bit. Their engine sets differ, and
+     * the difference was measured rather than reasoned — this is TODO.md §1's
+     * "One claim to re-check", answered while writing the pyzy adapter by
+     * tracing bopomofo_table (PinyinParserTable.h:6622, 479 rows) into the
+     * pinyin_table entries it points at, and confirming the result
+     * behaviourally.
+     *
+     * Fuzzy *is* reachable from bopomofo: 61 of those rows carry a
+     * PINYIN_FUZZY_* bit across 16 distinct bits, and check_flags
+     * (PinyinParser.cc:34-49) makes parseBopomofo stop at a syllable whose bit
+     * is clear. Typing ㄈㄨㄥ parses as "fong" and yields 红 with
+     * PATHIME_PINYIN_FUZZY_F_H set, and as "fu" with ㄥ stranded when it is
+     * clear. So it is kPyzy — both ids the one backend supplies — not kPinyin.
+     * Not kChinese: the table engine takes its own key sequences, not pinyin
+     * spellings, and has nothing for these bits to mean.
+     *
+     * Correction is not reachable: zero rows of bopomofo_table reach an entry
+     * carrying a PINYIN_CORRECT_* bit. The original reasoning holds for this
+     * one — corrections are Latin typing slips, and there is no bopomofo
+     * spelling to slip in.
+     *
+     * Both options keep their PATHIME_OPT_PINYIN_ prefix and their place in the
+     * header's Pinyin section even though fuzzy now reaches bopomofo too. The
+     * name describes what the rules are *about* — alternate pinyin spellings —
+     * and bopomofo reaches them only by being parsed into pinyin first.
      */
-    make_flags("pinyin-fuzzy", kPinyin,
+    make_flags("pinyin-fuzzy", kPyzy,
                static_cast<int64_t>(flags_mask(PATHIME_PINYIN_FUZZY_ING_IN)),
                flags_mask(PATHIME_PINYIN_FUZZY_ING_IN)),
     make_flags("pinyin-correction", kPinyin,
@@ -267,74 +292,6 @@ static_assert(kOptionCount == static_cast<size_t>(PATHIME_OPT_TABLE_PINYIN_FALLB
 
 /* OptionDescriptor::engines is a uint32_t bitmask; see engine_bit(). */
 static_assert(kEngineCount <= 32, "engine ids no longer fit OptionDescriptor::engines");
-
-/* ---------------------------------------------------------------------------
- * UTF-8
- *
- * TODO(impl): this belongs in utf8.cc. src/utf8.h is deliberately still empty —
- * its types wait on the encoding-boundary design (docs/source-layout.md,
- * Finding 4) — and adding a signature to it now would pre-empt that round for
- * the sake of one option check. Move this there when utf8.h lands, and delete
- * it from here; there should be exactly one UTF-8 scanner in the library.
- * ------------------------------------------------------------------------- */
-
-/**
- * Validate a NUL-terminated UTF-8 string and count its scalar values.
- *
- * Strict: overlong encodings, surrogates and anything above U+10FFFF are
- * rejected, because an option string is stored, handed back to the client, and
- * in the table engine's case compared against table data. NUL cannot occur
- * mid-string here — the value is NUL-terminated, which is the form the header
- * uses for "short discrete values that name something".
- */
-bool utf8_scan(const char *text, size_t *out_scalars)
-{
-    static const uint32_t kLowest[5] = {0, 0, 0x80, 0x800, 0x10000};
-
-    const unsigned char *p = reinterpret_cast<const unsigned char *>(text);
-    size_t scalars = 0;
-
-    while (*p != 0) {
-        const unsigned char lead = *p;
-        size_t len;
-        uint32_t cp;
-
-        if (lead < 0x80) {
-            len = 1;
-            cp = lead;
-        } else if ((lead & 0xE0) == 0xC0) {
-            len = 2;
-            cp = lead & 0x1Fu;
-        } else if ((lead & 0xF0) == 0xE0) {
-            len = 3;
-            cp = lead & 0x0Fu;
-        } else if ((lead & 0xF8) == 0xF0) {
-            len = 4;
-            cp = lead & 0x07u;
-        } else {
-            return false;  /* continuation byte or 5-byte lead */
-        }
-
-        /* A NUL inside the sequence fails the continuation test, so this never
-         * reads past the terminator. */
-        for (size_t i = 1; i < len; i++) {
-            if ((p[i] & 0xC0) != 0x80) {
-                return false;
-            }
-            cp = (cp << 6) | (p[i] & 0x3Fu);
-        }
-
-        if (cp < kLowest[len] || cp > 0x10FFFFu || (cp >= 0xD800u && cp <= 0xDFFFu)) {
-            return false;
-        }
-
-        p += len;
-        scalars++;
-    }
-
-    *out_scalars = scalars;
-    return true;
-}
 
 /* ---------------------------------------------------------------------------
  * Setter kinds
@@ -547,25 +504,38 @@ pathime_status_t store_string(OptionStore &store, pathime_option_t option, const
  * has not overridden @a option is affected — that is what "resolution is late"
  * means in practice, and it is why engine setters are not callback-safe.
  */
+/**
+ * Hand a context's backend the news that a resolved option moved. Split out
+ * because both the per-context path and the engine-level broadcast need it,
+ * and because a context with no backend — which every hand-built test context
+ * is — must be a no-op rather than a crash.
+ */
+void notify_options_changed(pathime_context_t *ctx)
+{
+    if (ctx->backend == nullptr) {
+        return;
+    }
+    const ContextOptions options(ctx);
+    ctx->output.clear();
+    ctx->backend->options_changed(options, &ctx->model, &ctx->output);
+}
+
 pathime_status_t commit_change(pathime_engine_t *engine,
                                pathime_context_t *ctx,
                                const OptionDescriptor *desc,
                                pathime_option_t option)
 {
     /*
-     * TODO(impl): apply the resolved value to the backend. Nothing crosses
-     * backend.h yet, so a set stores the value and stops — the descriptor, the
-     * store and the getters are all correct, and only the engine's behaviour
-     * does not follow yet. This becomes a call into the adapter's option hook
-     * (one per affected context for a per-context setting such as the hangul
-     * combination flags or anthy's typing method, once on the engine's own
-     * backend state for the shared ones), taking the value resolve_number() /
-     * resolve_string() reports for that context. Its signature waits on
-     * backend.h (TODO.md §3, question 1).
-     *
      * TODO(impl): PATHIME_OPT_TABLE_FILE additionally resolves and compiles the
      * named table here, sharing the compiled result across every context naming
      * the same path, and it is where tier 3 becomes readable.
+     *
+     * Everything else reaches the backend through ContextBackend's
+     * options_changed() hook below, which each affected context is given before
+     * its composition is re-assembled. There is no engine-level equivalent and
+     * no engine-level state to update: an engine holds dictionaries and tables,
+     * not a conversion in progress, so an engine-level set is felt entirely
+     * through the contexts it resolves for.
      */
 
     if (ctx != nullptr) {
@@ -579,6 +549,15 @@ pathime_status_t commit_change(pathime_engine_t *engine,
              */
             return pathime_context_reset(ctx);
         }
+        /*
+         * Tell the backend before re-assembling. Without this a mid-composition
+         * change is stored and reported by the getters but not felt: the header
+         * promises a change takes effect immediately, and for a backend holding
+         * a converted result that means re-deriving now rather than at the next
+         * keystroke.
+         */
+        notify_options_changed(ctx);
+
         /*
          * Force the dispatch: the effective value changed for this context, so
          * its client's view of the composition is replaced even though the
@@ -614,6 +593,7 @@ pathime_status_t commit_change(pathime_engine_t *engine,
                 first_error = status;
             }
         } else {
+            notify_options_changed(affected);
             refresh_composition(affected, true);
         }
     }
@@ -968,7 +948,7 @@ pathime_status_t option_check_string(pathime_option_t option,
     }
 
     size_t scalars = 0;
-    if (!utf8_scan(value, &scalars)) {
+    if (!utf8_validate_z(value, &scalars)) {
         return PATHIME_ERROR_INVALID_ARGUMENT;
     }
 

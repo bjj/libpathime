@@ -12,10 +12,11 @@
  *  - the engine level of the two-level option store (the machinery itself is
  *    options.cc's).
  *
- * The handle lifecycle here is real, including the success path that nothing
- * can currently reach: the registry is honestly empty, because a backend being
- * compiled in is not the same as an adapter existing to drive it, so every
- * creation is PATHIME_ERROR_UNKNOWN_ENGINE until src/engines/ has code.
+ * The registry is the one place that knows which engine ids this build can
+ * actually supply, and it is deliberately not a table of function pointers:
+ * the arms are #if-gated so an id whose backend was compiled out falls through
+ * to the same default as a value that is not an engine id at all, which is the
+ * answer a caller wants in both cases.
  *
  * Allocation discipline is init.cc's: std::bad_alloc is caught at the boundary
  * and becomes PATHIME_ERROR_OUT_OF_MEMORY, rather than new(std::nothrow),
@@ -24,10 +25,13 @@
 
 #include <pathime/pathime.h>
 
+#include <memory>
 #include <new>
 
+#include "backend.h"
 #include "engine.h"
 #include "init.h"
+#include "options.h"
 
 namespace pathime {
 
@@ -53,47 +57,36 @@ bool engine_available(pathime_engine_id_t id)
      * BOPOMOFO, since the phonetic scheme is fixed when its context is created
      * — so a per-id switch is the registry's real shape, not a per-macro one.
      *
-     * Every arm answers false today. Turning an adapter on is then the
-     * one-line change each TODO(impl) names, and nothing else here moves.
+     * Being compiled in is necessary but not sufficient. backend_ready() is
+     * the second half: it reports whether that backend's process-global
+     * prerequisites actually came up during pathime_init() — anthy's
+     * dictionary, pyzy's database — which is precisely the case the header
+     * has this query answer false for. Hangul's hook cannot fail, so for it
+     * this is always true once initialized.
      */
     switch (id) {
 #if PATHIME_WITH_HANGUL
     case PATHIME_ENGINE_HANGUL:
-        /* TODO(impl): libhangul is linked in, but src/engines/hangul has no
-         * adapter yet. Replace with the hangul adapter's availability query —
-         * which will be an unconditional true, because hangul is the one
-         * backend with no process-global prerequisite to fail: its nine
-         * built-in layouts are static tables, and hangul_init() exists only
-         * under ENABLE_EXTERNAL_KEYBOARDS, which this build turns off. See the
-         * matching note in init.cc's pathime_init(). */
-        return false;
+        return backend_ready(id);
 #endif
 
 #if PATHIME_WITH_ANTHY
     case PATHIME_ENGINE_ANTHY:
-        /* TODO(impl): replace with the anthy adapter's availability query —
-         * anthy_init() having succeeded and its dictionaries having opened,
-         * which is the one prerequisite here that genuinely fails at runtime. */
-        return false;
+        return backend_ready(id);
 #endif
 
 #if PATHIME_WITH_PYZY
     case PATHIME_ENGINE_PINYIN:
     case PATHIME_ENGINE_BOPOMOFO:
-        /* TODO(impl): replace with the pyzy adapter's availability query —
-         * PyZy::InputContext::init() having succeeded, i.e. the shared SQLite
-         * database opened. Both ids are answered together on purpose: one
-         * backend, one prerequisite, two phonetic schemes. */
-        return false;
+        return backend_ready(id);
 #endif
 
 #if PATHIME_WITH_TABLE
     case PATHIME_ENGINE_TABLE:
-        /* TODO(impl): replace with the table engine's own readiness. Unlike
-         * the three above it wraps no submodule — it is ours to write, to
-         * docs/ibus-table-spec.md — and needs no global prerequisite, so this
-         * becomes an unconditional true once the engine exists (a context
-         * without a resolved PATHIME_OPT_TABLE_FILE simply produces nothing).
+        /* TODO(impl): the table engine is ours to write, to
+         * docs/ibus-table-spec.md, and needs no global prerequisite — so this
+         * becomes an unconditional true once it exists (a context without a
+         * resolved PATHIME_OPT_TABLE_FILE simply produces nothing).
          * PATHIME_WITH_TABLE is 0 in every build for now; see TODO.md §4. */
         return false;
 #endif
@@ -102,6 +95,34 @@ bool engine_available(pathime_engine_id_t id)
         /* The backend is not in this build, or @a id is not an engine id.
          * Both mean the same thing to a caller: do not try to create it. */
         return false;
+    }
+}
+
+/**
+ * Build the adapter's engine-level state for @a id, or nullptr if it cannot be
+ * built. Only ever called for an id engine_available() has already approved,
+ * so an unreachable default is the honest body for the rest.
+ */
+std::unique_ptr<EngineBackend> create_engine_backend(pathime_engine_id_t id)
+{
+    switch (id) {
+#if PATHIME_WITH_HANGUL
+    case PATHIME_ENGINE_HANGUL:
+        return hangul_create_engine();
+#endif
+#if PATHIME_WITH_ANTHY
+    case PATHIME_ENGINE_ANTHY:
+        return anthy_create_engine();
+#endif
+#if PATHIME_WITH_PYZY
+    case PATHIME_ENGINE_PINYIN:
+    case PATHIME_ENGINE_BOPOMOFO:
+        /* One backend, two ids: pyzy fixes its InputType when the context is
+         * created, so the phonetic scheme has to travel with the id. */
+        return pyzy_create_engine(id);
+#endif
+    default:
+        return nullptr;
     }
 }
 
@@ -131,12 +152,6 @@ pathime_status_t pathime_engine_create(pathime_engine_id_t id,
         return PATHIME_ERROR_UNKNOWN_ENGINE;
     }
 
-    /*
-     * Unreachable today, and written properly regardless: this is the object
-     * lifecycle the whole engine layer rests on, and having it here means
-     * enabling an adapter is a change to the registry above and to the marked
-     * gap below, not to the entry point.
-     */
     pathime_engine_t *engine = nullptr;
     try {
         engine = new pathime_engine();
@@ -146,12 +161,15 @@ pathime_status_t pathime_engine_create(pathime_engine_id_t id,
     engine->id = id;
 
     /*
-     * TODO(impl): construct the backend's engine-level state here — the one
-     * thing an adapter owns at this layer (engine.h's trailing member), as
-     * whatever handle backend.h ends up defining. On failure: delete engine,
-     * leave *out_engine untouched, and return PATHIME_ERROR_BACKEND. Nothing
-     * is published to the caller until it has succeeded.
+     * The adapter's engine-level state. Nothing is published to the caller
+     * until it has succeeded, which is why the handle above is a bare pointer
+     * this function still owns rather than something already in *out_engine.
      */
+    engine->backend = pathime::create_engine_backend(id);
+    if (engine->backend == nullptr) {
+        delete engine;
+        return PATHIME_ERROR_BACKEND;
+    }
 
     *out_engine = engine;
     return PATHIME_OK;

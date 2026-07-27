@@ -15,6 +15,24 @@
  *  - anthy_init() is process-global, and "personality" is the write-once
  *    trap that shaped pathime_init()'s data_dir; the auxiliary dictionaries
  *    were deferred for exactly that reason (TODO.md §1).
+ *
+ * ---------------------------------------------------------------------------
+ * Nothing is declared here
+ * ---------------------------------------------------------------------------
+ *
+ * The three functions backend.h declares under PATHIME_WITH_ANTHY —
+ * anthy_global_init(), anthy_global_shutdown() and anthy_create_engine() — are
+ * the whole of this adapter's surface, and they are already declared there,
+ * which is the point of that header: init.cc and engine.cc call them without
+ * naming a vendor type. The EngineBackend and ContextBackend subclasses behind
+ * them have no second caller, so they live in the .cc as internal-linkage
+ * types and never appear in a header at all.
+ *
+ * The file remains because <anthy/anthy.h> must not be reachable from core:
+ * this is the documented place to put anything the adapter later has to share
+ * with a second translation unit of its own — the kana-entry state machine
+ * romaji.h defers, say — without that becoming an invitation to include it
+ * from src/.
  */
 
 #ifndef LIBPATHIME_SRC_ENGINES_ANTHY_BACKEND_H
@@ -24,7 +42,7 @@
 
 namespace pathime {
 
-/* Adapter to be defined once backend.h has its shape. */
+/* Intentionally empty; see the note above. */
 
 }  // namespace pathime
 

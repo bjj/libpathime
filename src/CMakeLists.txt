@@ -69,6 +69,11 @@ if(LIBPATHIME_WITH_ANTHY)
     engines/anthy/anthy_backend.cc
     engines/anthy/romaji.cc)
   target_link_libraries(pathime PRIVATE anthy-unicode anthydic-unicode)
+  # <anthy/anthy.h> lives at the submodule root. Unlike the vendored test
+  # suites the adapter needs nothing else: the public header is self-contained,
+  # so the port's generated <config.h> stays out of our include path and none
+  # of anthy's internal headers are reachable from here.
+  target_include_directories(pathime PRIVATE "${ANTHY_TEST_SRC_DIR}")
 endif()
 
 if(LIBPATHIME_WITH_PYZY)
@@ -76,6 +81,30 @@ if(LIBPATHIME_WITH_PYZY)
     engines/pyzy/pyzy_backend.cc
     engines/pyzy/observer.cc)
   target_link_libraries(pathime PRIVATE pyzy)
+
+  # pyzy's src/String.h shadows the C library's <string.h> on a
+  # case-insensitive filesystem, so pyzy's source directory must never appear
+  # in an -I. The adapter needs only the public headers, so they are staged
+  # into the layout `cmake --install` produces and included exactly as an
+  # outside consumer would: <PyZy/InputContext.h>. The staging directory holds
+  # nothing else, so there is nothing for a system header to collide with.
+  #
+  # This is the same trick tests/pyzy/CMakeLists.txt uses, minus the generated
+  # forwarding headers — those exist there to reach pyzy's *private* headers,
+  # which an adapter has no business touching. Copying from
+  # PYZY_EFFECTIVE_SRC_DIR rather than pyzy/src matters on Windows, where it is
+  # the rewritten mirror the DLL was actually built from.
+  if(NOT PYZY_EFFECTIVE_SRC_DIR)
+    message(FATAL_ERROR
+      "src: PYZY_EFFECTIVE_SRC_DIR is not set. It is published by "
+      "cmake/ports/pyzy/CMakeLists.txt, which must be processed first.")
+  endif()
+  file(COPY
+    "${PYZY_EFFECTIVE_SRC_DIR}/Const.h"
+    "${PYZY_EFFECTIVE_SRC_DIR}/InputContext.h"
+    "${PYZY_EFFECTIVE_SRC_DIR}/Variant.h"
+    DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/include/PyZy")
+  target_include_directories(pathime PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/include")
 endif()
 
 # engines/table/ holds only a README until the engine described by

@@ -30,6 +30,9 @@ if(LIBPATHIME_WITH_PYZY)
   add_subdirectory(pyzy)
 endif()
 
-# The API-surface suite is not gated: it needs only the libpathime target,
-# which always builds.
+# Neither of the libpathime suites is gated: both need only core code, which
+# always builds. They differ in what they link — api/ links the built library
+# and sees only exported symbols, core/ compiles internal sources directly. See
+# tests/core/CMakeLists.txt for why that split exists.
 add_subdirectory(api)
+add_subdirectory(core)

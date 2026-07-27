@@ -22,18 +22,122 @@
  *    fire, so this adapter drives it explicitly (TODO.md §5).
  *  - Input is [a-z] and apostrophe only (Finding 6).
  *
- * One claim to re-verify here: whether PATHIME_OPT_PINYIN_FUZZY/_CORRECTION
- * are truly unreachable from bopomofo (TODO.md §1, "One claim to re-check").
+ * One claim re-verified here, and the answer is split (TODO.md §1, "One claim
+ * to re-check"). Tracing pyzy's bopomofo_table (PinyinParserTable.h:6622) into
+ * the pinyin_table entries it points at: of its 479 rows, 75 reach an entry
+ * with a non-zero `flags` field, and check_flags() (PinyinParser.cc:34-49)
+ * makes parseBopomofo() *stop* at a syllable whose flag bit is clear.
+ *
+ *   - PATHIME_OPT_PINYIN_FUZZY is reachable from bopomofo. 61 rows carry a
+ *     PINYIN_FUZZY_* bit across 16 distinct bits, and the behaviour is
+ *     visible: ㄈㄨㄥ parses as "fong" and yields 红 with PINYIN_FUZZY_F_H
+ *     set, and parses as "fu" with ㄥ left in restText without it.
+ *   - PATHIME_OPT_PINYIN_CORRECTION is not. No row of bopomofo_table reaches
+ *     an entry carrying a PINYIN_CORRECT_* bit — the original reasoning holds
+ *     for corrections, which are Latin typing slips with no bopomofo spelling.
+ *
+ * So the option table's `engines` for PATHIME_OPT_PINYIN_FUZZY is narrower
+ * than the truth. Widening it is additive and is options.cc's to make; nothing
+ * here depends on the change, because the mask is pulled through OptionReader
+ * either way and an unsupported option still resolves to its default of every
+ * bit — which is pyzy's own default too.
  */
 
 #ifndef LIBPATHIME_SRC_ENGINES_PYZY_BACKEND_H
 #define LIBPATHIME_SRC_ENGINES_PYZY_BACKEND_H
 
+#include <PyZy/InputContext.h>
+
 #include "backend.h"
+#include "engines/pyzy/observer.h"
 
 namespace pathime {
 
-/* Adapter to be defined once backend.h has its shape. */
+/**
+ * One composition in flight: a PyZy::InputContext and the observer it reports
+ * through.
+ *
+ * The InputType is held only as a record of what the live context was built
+ * with. The wanted type is recomputed from PATHIME_OPT_PINYIN_SCHEME on every
+ * mutating call and compared against it — never cached as a decision, which is
+ * backend.h rule 4. That option is documented as resetting the composition
+ * precisely because pyzy fixes the type at create() time
+ * (InputContext.cc:67-81), so when the two differ this object rebuilds its own
+ * PyZy::InputContext. That rebuild is what makes a scheme change take effect at
+ * all: ContextBackend has no "replace me" hook, and the core cannot be expected
+ * to know that one vendor's context is cheap to throw away.
+ */
+class PyzyContext final : public ContextBackend {
+public:
+    PyzyContext(pathime_engine_id_t id, const OptionReader &options);
+    ~PyzyContext() override;
+
+    /** False if pyzy refused to make a context; the engine then makes none. */
+    bool valid() const { return context_ != nullptr; }
+
+    bool process_key(const KeyEvent &key,
+                     const OptionReader &options,
+                     Composition *model,
+                     Output *out) override;
+
+    void reset(Composition *model, Output *out) override;
+
+    void options_changed(const OptionReader &options,
+                         Composition *model,
+                         Output *out) override;
+
+    pathime_status_t select_candidate(size_t index,
+                                      const OptionReader &options,
+                                      Composition *model,
+                                      Output *out) override;
+
+    void materialize_candidates(size_t cap,
+                                const OptionReader &options,
+                                Composition *model) override;
+
+private:
+    /** The InputType @a options currently ask for, given this engine id. */
+    PyZy::InputContext::InputType wanted_type(const OptionReader &options) const;
+
+    /**
+     * Push every option pyzy models as a property, rebuilding the context
+     * first if the phonetic type changed. Called at the top of each mutating
+     * call: options are pulled when needed and never cached (backend.h rule
+     * 4), and the header's promise is that a change takes effect immediately.
+     */
+    void apply_options(const OptionReader &options);
+
+    /** Replace the live context with a fresh one of @a type. */
+    void recreate(PyZy::InputContext::InputType type);
+
+    /**
+     * Copy out whatever the observer says the last mutation changed. This is
+     * the post-call assembly of Finding 5 and the only place pyzy's borrowed
+     * strings are read.
+     */
+    void harvest(Composition *model, Output *out);
+
+    PyzyObserver observer_;
+    PyZy::InputContext *context_ = nullptr;
+    PyZy::InputContext::InputType type_;
+    pathime_engine_id_t id_;
+};
+
+/**
+ * What the two Chinese engines share. pyzy keeps its dictionaries in a
+ * process-global Database rather than per engine (Finding 3), so this holds
+ * only the id that decides which InputType its contexts are built with —
+ * which is the whole reason pyzy_create_engine() takes one.
+ */
+class PyzyEngine final : public EngineBackend {
+public:
+    explicit PyzyEngine(pathime_engine_id_t id) : id_(id) {}
+
+    std::unique_ptr<ContextBackend> create_context(const OptionReader &options) override;
+
+private:
+    pathime_engine_id_t id_;
+};
 
 }  // namespace pathime
 

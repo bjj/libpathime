@@ -38,19 +38,13 @@
 #include "options.h"
 
 /*
- * TODO(impl): the currently-shown candidate cursor belongs here — the index
- * within the active region's list that the user is hovering, which we track
- * because neither backend does (Finding 2), and which is pushed into the
- * backend only when a selection or a commit makes it real.
- *
- * It has nowhere to live yet. It is per *active region*, not per context: a
- * region settles, the next one becomes active, and the new region starts with
- * its own cursor at 0 — so the natural home is the structured composition
- * (composition.h), which does not exist, and inventing a representation for it
- * here would pre-empt the one design round that is meant to settle regions,
- * the active index and the per-region cursor together against all three
- * mapping docs at once (TODO.md §3, question 1). Nothing between now and then
- * needs it: with no enumeration there is no list to hover in.
+ * The currently-shown candidate cursor lives in Composition::cursor
+ * (composition.h), not here. It is per *active span* rather than per context —
+ * a span settles, the next becomes active, and the new one starts hovering its
+ * own first candidate — so it belongs with the span structure, and this file
+ * is what moves it: the core tracks it because neither anthy nor pyzy durably
+ * records it before commit (TODO.md §2, Finding 2), and it reaches the backend
+ * only when a selection or a commit makes it real.
  */
 
 namespace {
@@ -89,7 +83,7 @@ size_t resolve_candidate_cap(const pathime_context_t *ctx)
 namespace pathime {
 
 /**
- * Fill ctx->candidates with every candidate the cap allows, and drop any past
+ * Fill ctx->model.candidates with every candidate the cap allows, and drop any past
  * it. Called by refresh_composition() after the backend has finished mutating
  * and before any callback is dispatched — see the file comment for why that
  * ordering is load-bearing rather than tidy.
@@ -108,37 +102,47 @@ void materialize_candidates(pathime_context_t *ctx)
      * the truncation first also bounds the work below to (cap - size())
      * fetches rather than a full re-enumeration.
      */
-    if (ctx->candidates.size() > cap) {
-        ctx->candidates.resize(cap);
+    if (ctx->model.candidates.size() > cap) {
+        ctx->model.candidates.resize(cap);
+        if (ctx->model.cursor >= ctx->model.candidates.size()) {
+            ctx->model.cursor = 0;
+        }
     }
 
     /*
-     * TODO(impl): enumerate the active region's candidates through backend.h,
-     * appending copies until either the backend runs out or the list reaches
-     * `cap`. Three things about that loop are already decided and should not
-     * be rediscovered:
+     * Enumerate the active span's candidates, appending until the backend runs
+     * out or the list reaches the cap. Three things about this are decided and
+     * should not be rediscovered:
      *
-     *  - It is the *active region* only. There is never more than one span
-     *    under consideration and the client never chooses which — greedy
+     *  - It is the *active span* only. There is never more than one under
+     *    consideration and the client never chooses which — greedy
      *    left-to-right resolution, no segment navigation, which the
      *    phone-keyboard target settled.
      *  - Every string is copied at the seam. Everything a backend returns is
      *    borrowed and volatile, valid only until its next mutating call
-     *    (TODO.md §2, Finding 4), so aliasing one into ctx->candidates would
-     *    hand a client a dangling slice the moment the next key arrives.
+     *    (TODO.md §2, Finding 4), so aliasing one into the model would hand a
+     *    client a dangling slice the moment the next key arrives. The
+     *    obligation is the adapter's, stated as rule 1 of backend.h.
      *  - Running out before the cap is normal and is not an error: the cap is
      *    a ceiling, and what the enumeration produces is presented to the
-     *    client as the complete list. Hangul reaches this function with
-     *    nothing to enumerate at all — libhangul composes syllables from jamo
-     *    and has nothing to choose between — which is why it reports
+     *    client as the complete list. Hangul reaches here with nothing to
+     *    enumerate at all — libhangul composes syllables from jamo and has
+     *    nothing to choose between — which is why it reports
      *    PATHIME_OPT_MAX_CANDIDATES unsupported.
-     *
-     * The enumeration crosses backend.h, which is deliberately undesigned
-     * until the composition representation settles (TODO.md §3, question 1),
-     * so there is nothing to call yet. Until then the list stays empty and
-     * pathime_context_candidate() below therefore rejects every index.
      */
-    (void)cap;
+    if (ctx->backend != nullptr) {
+        const pathime::ContextOptions options(ctx);
+        ctx->backend->materialize_candidates(cap, options, &ctx->model);
+    }
+
+    /* The adapter is trusted to respect the cap, but not blindly: a backend
+     * that overshot would silently break the client's position numbering. */
+    if (ctx->model.candidates.size() > cap) {
+        ctx->model.candidates.resize(cap);
+    }
+    if (ctx->model.cursor >= ctx->model.candidates.size()) {
+        ctx->model.cursor = 0;
+    }
 }
 
 }  // namespace pathime
@@ -162,7 +166,7 @@ pathime_status_t pathime_context_candidate(const pathime_context_t *ctx,
      * Focus is not required: this is a non-mutating query, and focus gates
      * input and only input.
      *
-     * The bound is ctx->candidates.size(), which is exactly
+     * The bound is ctx->model.candidates.size(), which is exactly
      * ctx->composition.candidate_count — refresh_composition() publishes the
      * one from the other — but reading it from the vector is what makes the
      * indexing below safe by construction rather than by agreement between two
@@ -170,7 +174,7 @@ pathime_status_t pathime_context_candidate(const pathime_context_t *ctx,
      * empty and every index is out of range; the read itself is real and needs
      * no revisiting when it stops being.
      */
-    if (index >= ctx->candidates.size()) {
+    if (index >= ctx->model.candidates.size()) {
         return PATHIME_ERROR_INVALID_ARGUMENT;
     }
 
@@ -181,7 +185,7 @@ pathime_status_t pathime_context_candidate(const pathime_context_t *ctx,
      * above ran first. The slice is borrowed with the ordinary lifetime, and
      * c_str() is NUL-terminated as everything the library produces is.
      */
-    const std::string &candidate = ctx->candidates[index];
+    const std::string &candidate = ctx->model.candidates[index];
     out->bytes = candidate.c_str();
     out->len = candidate.size();
     return PATHIME_OK;
@@ -215,31 +219,44 @@ pathime_status_t pathime_context_select_candidate(pathime_context_t *ctx,
      * With the pump empty, candidates.size() is 0 and every call is rejected
      * here.
      */
-    if (index >= ctx->candidates.size()) {
+    if (index >= ctx->model.candidates.size()) {
         return PATHIME_ERROR_INVALID_ARGUMENT;
     }
 
     /*
-     * TODO(impl): perform the selection. It is greedy and resolves left to
-     * right, and the four steps are fixed by the API round:
+     * The selection itself, greedy and left to right. The adapter settles the
+     * span the chosen candidate covers, extends the settled prefix, and
+     * produces a fresh list for whatever remains; when nothing remains it puts
+     * the finished text in the Output and the dispatch below delivers it. The
+     * client never navigates or resizes spans.
      *
-     *   1. Push the selection into the backend for the active region — this is
-     *      also the moment the currently-shown cursor (Finding 2) stops being
-     *      ours and becomes the backend's, since neither anthy nor pyzy
-     *      records it before then.
-     *   2. Settle the span that candidate covers, extending the settled region
-     *      of the preedit: composition.preedit_settled moves right by the
-     *      scalar count of the settled text.
-     *   3. Produce a fresh candidate list for whatever input remains — the new
-     *      leftmost unsettled span becomes the active region, with its own
-     *      cursor at 0. The client never navigates or resizes segments.
-     *   4. When nothing remains, commit. That commit and any resulting
-     *      composition change are dispatched by refresh_composition() below,
-     *      in the fixed order, before this call returns.
+     * The cursor moves first, because this is the moment Finding 2's bookkeeping
+     * stops being ours: an adapter that must tell its backend which candidate
+     * was chosen reads it from the model rather than being passed it twice.
      */
+    ctx->model.cursor = index;
+    ctx->output.clear();
 
-    /* Every mutating entry point ends here, this one included: assemble,
-     * materialize, then dispatch. */
+    pathime_status_t status = PATHIME_OK;
+    if (ctx->backend != nullptr) {
+        const pathime::ContextOptions options(ctx);
+        status = ctx->backend->select_candidate(index, options, &ctx->model, &ctx->output);
+    }
+
+    if (status != PATHIME_OK) {
+        /*
+         * PATHIME_ERROR_UNSUPPORTED is a rejection — an engine that produces no
+         * candidates never had a list to select from, so nothing happened and
+         * nothing needs assembling. Anything else is a failure that got partway,
+         * and leaves the composition indeterminate until reset, exactly as the
+         * header's Status section promises.
+         */
+        if (status != PATHIME_ERROR_UNSUPPORTED) {
+            ctx->indeterminate = true;
+        }
+        return status;
+    }
+
     pathime::refresh_composition(ctx, false);
     return PATHIME_OK;
 }

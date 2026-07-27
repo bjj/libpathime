@@ -20,11 +20,13 @@
 #define LIBPATHIME_SRC_CONTEXT_H
 
 #include <cstddef>
+#include <memory>
 #include <string>
-#include <vector>
 
 #include <pathime/pathime.h>
 
+#include "backend.h"
+#include "composition.h"
 #include "options.h"
 
 /**
@@ -83,14 +85,24 @@ struct pathime_context {
     std::string auxiliary;
 
     /**
-     * Every candidate the PATHIME_OPT_MAX_CANDIDATES cap allows, materialized
-     * before composition_changed is dispatched. This eagerness is what makes
-     * pathime_context_candidate() callback-safe — it reads this vector and
-     * never re-enters a backend — and it is a real obligation rather than a
-     * formality, because pyzy's hasCandidate(i) is lazy and mutating. See
-     * candidates.cc.
+     * The structured composition state (composition.h) — the model of record.
+     * The flat value above is projected from it after every change and never
+     * patched incrementally, which is what keeps the two from drifting.
+     *
+     * Its `candidates` vector is also what pathime_context_candidate() reads.
+     * The list is materialized to the PATHIME_OPT_MAX_CANDIDATES cap before
+     * composition_changed is dispatched, which is what makes that function
+     * callback-safe — a real obligation rather than a formality, because
+     * pyzy's hasCandidate(i) is lazy and mutating. See candidates.cc.
      */
-    std::vector<std::string> candidates;
+    pathime::Composition model;
+
+    /**
+     * What the backend asked for during the call in progress: text to commit,
+     * and any deletion of client text. Consumed and cleared by the dispatch at
+     * the end of that call, so it is empty at rest.
+     */
+    pathime::Output output;
 
     /**
      * The client text snapshot from pathime_context_set_surrounding_text(),
@@ -110,16 +122,33 @@ struct pathime_context {
     /** The context level of the two-level store: tier 1, overriding the engine. */
     pathime::OptionStore options;
 
-    /*
-     * TODO(impl): the backend's per-context handle (HangulInputContext *,
-     * anthy_context_t, PyZy::InputContext *) and the structured composition it
-     * projects from, both as whatever types backend.h and composition.h end up
-     * defining. Deliberately absent until that representation is designed
-     * against all three mapping docs at once (TODO.md §3, question 1).
+    /**
+     * The adapter's per-context handle, wrapping whatever its vendor library
+     * has — HangulInputContext *, anthy_context_t, PyZy::InputContext *. One
+     * owned handle each, destroyed with this context.
      */
+    std::unique_ptr<pathime::ContextBackend> backend;
 };
 
 namespace pathime {
+
+/**
+ * The OptionReader an adapter is handed: read access to this context's
+ * resolved option values, with none of the machinery behind them.
+ *
+ * It resolves through all four tiers and applies the capability capping, so an
+ * adapter sees the effective value and nothing else — it never learns that
+ * options have levels, and never has to invalidate a cached copy, which is why
+ * backend.h makes options pulled rather than pushed.
+ */
+class ContextOptions : public OptionReader {
+public:
+    explicit ContextOptions(const pathime_context_t *ctx) : ctx_(ctx) {}
+    int64_t number(pathime_option_t option) const override;
+
+private:
+    const pathime_context_t *ctx_;
+};
 
 /**
  * Rebuild the flat composition value from the structured model, materialize

@@ -1,4 +1,4 @@
-# Source layout — `src/` and `tests/api/`
+# Source layout — `src/`, `tests/api/` and `tests/core/`
 
 The map of the implementation tree: what each file is for, the conventions
 that hold across it, and which choices are settled versus deliberately still
@@ -34,12 +34,15 @@ src/
   backend.h             the internal engine interface — the load-bearing seam
   engines/
     hangul/             hangul_backend.h/.cc
-    anthy/              anthy_backend.h/.cc, romaji.h/.cc
-    pyzy/               pyzy_backend.h/.cc, observer.h/.cc
+    anthy/              anthy_backend.h/.cc, romaji.h/.cc — the composing front end
+    pyzy/               pyzy_backend.h/.cc, observer.h/.cc — the dirty-flag Observer
     table/              README.md only, until the engine of docs/ibus-table-spec.md
                         is written
 tests/
-  api/                  the API-surface suite: abi, lifecycle, options
+  api/                  links the built library, exported symbols only, C11:
+                        abi, lifecycle, options, and one test per engine
+  core/                 compiles internal sources directly, C++17:
+                        utf8, composition, options
 ```
 
 ## Two structural decisions, and why
@@ -118,34 +121,87 @@ The findings are `TODO.md` §2's; the layout gives each exactly one home.
   `src/CMakeLists.txt` on the same `LIBPATHIME_WITH_*` options as everything
   else. Core files compile regardless of which engines exist and branch on
   `<pathime/config.h>` where they must.
-- Vendor **include** wiring for anthy and pyzy is deliberately not replicated
-  in `src/CMakeLists.txt` yet. When an adapter first includes a vendor
-  header, lift the solved pattern from that backend's
-  `tests/<backend>/CMakeLists.txt` (port config dirs, generated forwarding
-  headers, glib).
+- Vendor **include** wiring lives in `src/CMakeLists.txt`, lifted from the
+  pattern each backend's test directory had already solved. anthy needs only
+  the submodule root, since `<anthy/anthy.h>` is self-contained. pyzy needs its
+  three public headers staged into an install-shaped directory and included as
+  `<PyZy/InputContext.h>`, because its `src/String.h` shadows the C library's
+  `<string.h>` on a case-insensitive filesystem — pyzy's source directory must
+  never appear in an `-I`.
 
-## `tests/api/`
+## `tests/api/` and `tests/core/`
 
-A peer of `tests/{hangul,anthy,pyzy}` under the same rules — plain C11, no
-external framework, must build and pass identically on Linux and Windows,
-ctest names `api.<name>`. Being C is part of the point: these are the only
-programs that consume the header the way a client does, so they double as
-proof it works from strict C and that the symbols are exported.
+Two suites, and the difference between them is what each links.
 
-- `abi_test.c` — live now: version macro/function lockstep, status-string
-  totality, explicit enum values, `pathime_has_engine`'s pre-init falsity.
-- `lifecycle_test.c`, `options_test.c` — registered but exiting 77, which
-  ctest reports as *skipped* (`SKIP_RETURN_CODE`), until the functions they
-  exercise exist. Each file's header comment is its planned coverage. Replace
-  the skip with real checks as implementation lands; never delete a
-  registration.
+**`tests/api/`** links the built library and touches only exported symbols.
+Plain C11, no external framework, identical on Linux and Windows, ctest names
+`api.<name>`. Being C is part of the point: these are the only programs that
+consume the header the way a client does, so they double as proof it works from
+strict C and that the symbols are exported.
 
-## Deliberately undecided
+- `abi_test.c` — version macro/function lockstep, status-string totality,
+  explicit enum values, `pathime_has_engine`'s pre-init falsity.
+- `lifecycle_test.c` — init/shutdown pairing and its rejections, params
+  validation, engine and context lifecycle, the focus rules, NULL handling
+  across every entry point in three initialization states.
+- `options_test.c` — the introspection walk, name totality and distinctness,
+  the pre-init-safe subset.
+- `engine_hangul_test.c`, `engine_anthy_test.c`, `engine_pyzy_test.c` — one
+  end-to-end test per engine, typing real Korean, Japanese and Chinese through
+  the public API. These are the only tests here gated on a `LIBPATHIME_WITH_*`
+  option, because they need their backend's *runtime data* rather than just the
+  library; `tests/api/CMakeLists.txt` carries that wiring and says why it is a
+  test-environment problem rather than a library one.
 
-- **The shape of `backend.h`** and **the types in `composition.h`.** They are
-  one decision — `TODO.md` §3, question 1 — and should be designed against
-  all three mapping docs at once, not accreted engine by engine. Until then
-  both headers carry constraints, not signatures.
+**`tests/core/`** compiles the internal sources under test directly into each
+executable, because internal helpers carry no `PATHIME_API` and a shared build
+does not export them — and decorating them purely to make them testable would
+widen the ABI for no client's benefit. C++17, ctest names `core.<name>`.
+
+- `utf8_test.cc` — the encoding boundary, with the rejection cases (overlongs,
+  surrogates, CESU-8 pairs, truncation, embedded NUL) tested at least as hard
+  as the acceptance ones.
+- `composition_test.cc` — the model and its projection, especially
+  `preedit_settled` as a scalar count rather than a byte count.
+- `options_test.cc` — the descriptor table against the header option by
+  option, tier resolution, the `struct_size` protocol, the Hangul capping rule,
+  and the engine-level broadcast. It builds `pathime_engine` and
+  `pathime_context` aggregates directly, which is how it reaches machinery the
+  public API alone cannot.
+
+Compiling the sources in twice is the deliberate trade: a little build time for
+tests that reach the seams where the rules actually live, without any of it
+becoming public surface.
+
+## The seam, as designed
+
+`backend.h` and `composition.h` were one decision — `TODO.md` §3, question 1 —
+and were taken against all three mapping docs at once rather than accreted
+engine by engine. The answer turned out to be smaller than expected, because
+laid side by side the three backends describe the same three-part picture:
+
+|          | settled              | active             | tail              |
+|----------|----------------------|--------------------|-------------------|
+| pyzy     | `selectedText()`     | `conversionText()` | `restText()`      |
+| anthy    | segments < active    | segment[active]    | segments > active |
+| hangul   | finished syllables   | trailing syllable  | (always empty)    |
+
+So `Composition` is three strings, a candidate list for the active span, and a
+cursor into it; the projection to the flat public value is a concatenation and
+a scalar count, and `preedit_settled` falls out as the length of `settled`.
+Greedy left-to-right resolution is then one function, `settle_active()`.
+
+There is deliberately no segment array and no active index. anthy has both; it
+keeps them privately and reports the three strings. That is the
+phone-keyboard target breaking the tie, and it is why nothing in the model can
+address a span other than the active one.
+
+`backend.h` follows from that: two layers matching the API's own
+(`EngineBackend`, `ContextBackend`), a `KeyEvent` the key layer has already
+validated, an `OptionReader` an adapter pulls resolved values through, and an
+`Output` carrying the commit and deletion requests one call produced. An
+adapter mutates the model in place and never dispatches, never orders, never
+learns that options have tiers.
 
 ## Decided here, cheap to revisit
 

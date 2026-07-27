@@ -29,6 +29,23 @@ bool initialized();
  */
 const char *data_dir();
 
+/**
+ * True if the backend behind @a id brought its process-global prerequisites up
+ * successfully during pathime_init().
+ *
+ * A backend that could not — anthy without its dictionary, pyzy without its
+ * database — is reported unavailable through pathime_has_engine() rather than
+ * failing the whole library, which is what the public header describes:
+ * pathime_has_engine() is false both for an engine this build does not contain
+ * and for "one whose runtime prerequisites, such as its dictionaries, are
+ * unavailable". A client with three engines compiled in and one dictionary
+ * missing gets the other two, and finds out which through the query that
+ * exists for exactly that purpose.
+ *
+ * False before pathime_init() and after pathime_shutdown(), for every id.
+ */
+bool backend_ready(pathime_engine_id_t id);
+
 }  // namespace pathime
 
 #endif /* LIBPATHIME_SRC_INIT_H */

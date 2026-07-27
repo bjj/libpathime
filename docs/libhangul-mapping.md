@@ -36,7 +36,7 @@ separate from the syllable-composition core.
 | **Handled**             | Boolean return value of `hangul_ic_process()` and `hangul_ic_backspace()`. `true` = handled; `false` = unhandled (the caller must forward the event). |
 | **Unhandled**           | `hangul_ic_process()` / `hangul_ic_backspace()` returns `false`.          |
 | **Preedit text**        | `const ucschar* hangul_ic_get_preedit_string(HangulInputContext*)` — UCS-4 string, valid until the next call that mutates `hic`. At most one syllable's worth of composition, but that may be **1–3 UCS-4 codepoints** (e.g. choseong + `HANGUL_JUNGSEONG_FILLER`, non-precomposable jaso combinations, or decomposed jamo under `HANGUL_OUTPUT_JAMO` mode). |
-| **Commit text**         | `const ucschar* hangul_ic_get_commit_string(HangulInputContext*)` — UCS-4 string, valid until the next call that mutates `hic`. **Not limited to one syllable:** a single `hangul_ic_process()` can leave a completed syllable *followed by* an appended character (up to the internal `commit_string[64]` buffer). In particular a printable **non-jamo ASCII** character is appended to the commit string and the call returns `true` (handled), so libhangul swallows and re-emits such characters rather than declining them. |
+| **Commit text**         | `const ucschar* hangul_ic_get_commit_string(HangulInputContext*)` — UCS-4 string, valid until the next call that mutates `hic`. **Not limited to one syllable:** a single `hangul_ic_process()` can leave a completed syllable *followed by* an appended character (up to the internal `commit_string[64]` buffer). In particular a printable **non-jamo ASCII** character *may be* appended to the commit string with the call returning `true` (handled), so libhangul swallows and re-emits it rather than declining it — but **only when the selected layout's table carries a non-zero entry for that key**. See the correction below. |
 | **Reset**               | `void hangul_ic_reset(HangulInputContext*)` — clears preedit, commit, and flushed strings and resets the internal jamo buffer; does not commit. |
 | **Flush (forced commit)** | `const ucschar* hangul_ic_flush(HangulInputContext*)` — serializes the pending jamo buffer into a **separate** `flushed_string[64]` buffer and returns *that*. It first clears the preedit, commit, **and** flushed strings, so `hangul_ic_get_commit_string()` is **empty** afterward; the caller must use the flush return value directly. This is distinct from the internal flush-to-commit path (`hangul_ic_flush_internal`) used during normal composition. Intended for focus-out / context-switch scenarios. (Not a CONCEPTS.md term, but closely related to how focus-out must be handled.) |
 | **Composition data**    | Partially covered. `hangul_ic_get_preedit_string()` provides preedit text. No auxiliary text concept. No candidate list concept. |
@@ -297,13 +297,34 @@ the client; quantity and timing are engine-defined.
 
 **libhangul provides:** Usually zero or one syllable per `hangul_ic_process()`
 call, but **not strictly** — a single call can leave a completed syllable
-*followed by* an appended non-jamo character (up to the buffer size), and a
+*followed by* an appended non-jamo character (up to the buffer size), and such a
 printable non-jamo ASCII character is committed with the call returning `true`
 (handled). The commit string is valid only until the next call to
 `hangul_ic_process()` or any other mutating function, and is overwritten at the
 *start* of the next `process`/`backspace`. The text belongs to an internal
 fixed-size buffer (`commit_string[64]` in `_HangulInputContext`) and must be
 consumed immediately.
+
+**Correction, measured while writing the adapter.** The absorb-and-re-emit
+branch (`hangulinputcontext.c:612-616`, and the identical one in
+`hangul_ic_process_romaja`) fires on the value *after* translation, not on the
+raw ASCII, and `hangul_ic_map_to_char()` answers 0 for a key the selected
+layout's table does not carry. So the behaviour is **layout-dependent**, and
+the original wording above overstated it:
+
+- On the **two-set** layouts (`2`, `2y` — the default and the common case) the
+  tables map letters only. All 43 non-letter printables map to 0, are declined,
+  and reach the client untouched. Nothing is swallowed.
+- On the **three-set**, ahnmatae and romaja layouts every printable except
+  space is absorbed, because those layouts genuinely reassign the symbol
+  positions — on Sebeolsik Final `?` is `!` and `{` is `%`.
+
+That difference matters to an adapter: intercepting punctuation defensively
+"to be safe" would be correct-looking on two-set and would hand a three-set
+user the US-QWERTY character their layout explicitly reassigns. The adapter
+therefore offers every printable ASCII key to libhangul and honours its
+verdict. What is *not* libhangul's to decide is the word boundary: a key it
+declines closes a held word.
 
 **Bridge required:** The wrapper must read the commit string after every call
 and act on it before the next call. In word-commit mode it must buffer

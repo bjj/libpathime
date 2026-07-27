@@ -1,0 +1,910 @@
+/*
+ * The Chinese engines, driven the way a client drives them: through
+ * <pathime/pathime.h> and nothing else.
+ *
+ * Third of the end-to-end engine tests, after engine_hangul_test.c (no
+ * candidates at all) and engine_anthy_test.c (a composing front end plus
+ * multi-segment conversion). pyzy is the one that stresses the *candidate*
+ * machinery, for two reasons the other two do not have:
+ *
+ *   - Its candidate enumeration is lazy and mutating. PhoneticContext's
+ *     hasCandidate(i) prepares entry i as a side effect, so the library
+ *     materializes the whole PATHIME_OPT_MAX_CANDIDATES window before
+ *     dispatching composition_changed. That eager pump is what makes
+ *     pathime_context_candidate() callback-safe, and this file is the only
+ *     place that promise can actually be tested.
+ *   - It commits by itself. When a selection exhausts the input pyzy fires
+ *     commitText from inside selectCandidate(), which is the case the whole
+ *     Output plumbing in the adapter exists to carry.
+ *
+ * One backend supplies two engine ids: PATHIME_ENGINE_PINYIN and
+ * PATHIME_ENGINE_BOPOMOFO. They are distinct ids rather than an option because
+ * pyzy fixes the phonetic scheme when its context is created, and the test
+ * below shows the two reaching an identical candidate list from different keys.
+ *
+ * ---------------------------------------------------------------------------
+ * Where the expected values came from
+ * ---------------------------------------------------------------------------
+ *
+ * Real Chinese, observed by running this stack against the android.db this
+ * build produces — not predicted. Written as UTF-8 escapes with the character
+ * named in a comment, as engine_hangul_test.c does, so the file holds no
+ * non-ASCII bytes and needs no /utf-8 from MSVC to mean what it says.
+ *
+ * The expectations are deliberately several candidates deep. With no database
+ * open pyzy does not fail — Database::init() builds its singleton whether or
+ * not open() succeeded, so the warning goes to stderr and the engine reports
+ * success — it simply produces nothing. A test that only checked "some
+ * candidates came back" would pass vacuously against a broken build tree;
+ * naming five of them cannot. tests/api/CMakeLists.txt is where the database is
+ * staged, and explains why that is a test-environment problem rather than a
+ * library one.
+ */
+
+#include <string.h>
+
+#include "api_test_util.h"
+
+/*
+ * Local rather than in api_test_util.h: that header is shared with the other
+ * api tests, and engine_hangul_test.c keeps its own copy for the same reason.
+ */
+#define PT_CHECK_SIZE(expr, expected)                                        \
+    do {                                                                     \
+        const size_t pt_got_sz_ = (size_t)(expr);                            \
+        const size_t pt_want_sz_ = (size_t)(expected);                       \
+        pt_checks++;                                                         \
+        if (pt_got_sz_ != pt_want_sz_)                                       \
+            PT_FAILF("%s: got %zu, expected %zu", #expr,                     \
+                     pt_got_sz_, pt_want_sz_);                               \
+    } while (0)
+
+#if !PATHIME_WITH_PYZY
+
+int main(void)
+{
+    return pt_skip("api.engine_pyzy", "this build does not contain pyzy");
+}
+
+#elif !defined(PYZY_TEST_DATA_DIR)
+
+/*
+ * The library is here but its database is not: the port only builds android.db
+ * when it can find a Python 3 interpreter at configure time, and without it
+ * every assertion below would fail for a reason that has nothing to do with
+ * libpathime. tests/api/CMakeLists.txt withholds PYZY_TEST_DATA_DIR to say so.
+ */
+int main(void)
+{
+    return pt_skip("api.engine_pyzy", "pyzy's android.db was not built");
+}
+
+#else
+
+/* ---- The candidates "nihao" produces, in the order pyzy ranks them ------- */
+
+#define NI_HAO "\xE4\xBD\xA0\xE5\xA5\xBD"  /* 你好 U+4F60 U+597D — "hello" */
+#define LI_HAO "\xE5\x88\xA9\xE5\xA5\xBD"  /* 利好 U+5229 U+597D */
+#define NI     "\xE4\xBD\xA0"              /* 你 U+4F60 — "you" */
+#define LI_1   "\xE9\x87\x8C"              /* 里 U+91CC */
+#define LI_2   "\xE6\x9D\x8E"              /* 李 U+674E */
+#define LI_3   "\xE7\xA6\xBB"              /* 离 U+79BB — simplified */
+#define LI_3_T "\xE9\x9B\xA2"              /* 離 U+96E2 — its traditional form */
+
+/* ---- What remains once 你 is settled ------------------------------------ */
+
+#define HAO   "\xE5\xA5\xBD"  /* 好 U+597D */
+#define HAO_2 "\xE5\x8F\xB7"  /* 号 U+53F7 */
+#define HAO_3 "\xE6\xB5\xA9"  /* 浩 U+6D69 */
+
+/* The auxiliary text pyzy renders for a full-pinyin composition: the syllables
+ * it decoded, with '|' at its own input cursor. Supplemental text a client
+ * shows beside the preedit and never commits. */
+#define AUX_NI_HAO "ni hao|"
+
+/*
+ * What the client saw. Same shape as the other two engine tests', plus one
+ * extra field: a context handle, so composition_changed can exercise the
+ * callback-safe query set from inside the callback.
+ */
+typedef struct {
+    char commits[512];     /* every commit_text payload, concatenated */
+    int commit_count;
+    int changed_count;
+    char order[64];        /* one char per callback: 'd', 'c', 'x' */
+    int order_len;
+
+    /* What composition_changed last reported, copied out during the call. */
+    char last_preedit[256];
+    size_t last_settled;
+    size_t last_candidates;
+
+    /*
+     * Set once the context exists. When non-NULL, composition_changed walks
+     * the whole candidate list from inside the callback — see
+     * test_callback_safety() for what that is proving.
+     */
+    pathime_context_t *ctx;
+    int probed_lists;      /* how many lists were walked that way */
+    int probe_failures;    /* fetches that failed inside a callback */
+} client_log_t;
+
+static void log_order(client_log_t *log, char c)
+{
+    if (log->order_len < (int)sizeof(log->order) - 1) {
+        log->order[log->order_len++] = c;
+        log->order[log->order_len] = '\0';
+    }
+}
+
+static void on_commit(void *user_data, pathime_str_t text)
+{
+    client_log_t *log = (client_log_t *)user_data;
+    log_order(log, 'c');
+    log->commit_count++;
+    if (strlen(log->commits) + text.len < sizeof(log->commits)) {
+        memcpy(log->commits + strlen(log->commits), text.bytes, text.len);
+    }
+    /* The library promises everything it produces is NUL-terminated even
+     * though len is authoritative. */
+    PT_CHECK(text.bytes[text.len] == '\0');
+}
+
+static void on_delete(void *user_data, ptrdiff_t offset, size_t count)
+{
+    client_log_t *log = (client_log_t *)user_data;
+    log_order(log, 'd');
+    (void)offset;
+    (void)count;
+}
+
+static void on_changed(void *user_data, const pathime_composition_t *composition)
+{
+    client_log_t *log = (client_log_t *)user_data;
+    log_order(log, 'x');
+    log->changed_count++;
+    log->last_settled = composition->preedit_settled;
+    log->last_candidates = composition->candidate_count;
+    if (composition->preedit.len < sizeof(log->last_preedit)) {
+        memcpy(log->last_preedit, composition->preedit.bytes, composition->preedit.len);
+        log->last_preedit[composition->preedit.len] = '\0';
+    }
+
+    /*
+     * The callback-safety probe. pathime_context_candidate() is documented as
+     * callback-safe *because* the library materializes every candidate the cap
+     * allows before dispatching this callback — so here it is a plain array
+     * read and cannot re-enter pyzy's lazy, mutating hasCandidate(). If the
+     * pump were lazy instead, this loop is where it would show: it runs while
+     * the context is mid-mutation.
+     */
+    if (log->ctx != NULL && composition->candidate_count > 0) {
+        size_t i;
+        log->probed_lists++;
+        for (i = 0; i < composition->candidate_count; i++) {
+            pathime_str_t cand;
+            if (pathime_context_candidate(log->ctx, i, &cand) != PATHIME_OK ||
+                cand.len == 0 || cand.bytes[cand.len] != '\0') {
+                log->probe_failures++;
+            }
+        }
+    }
+}
+
+static void log_reset(client_log_t *log)
+{
+    pathime_context_t *ctx = log->ctx;
+    memset(log, 0, sizeof(*log));
+    log->ctx = ctx;
+}
+
+/* Press one printable US-QWERTY key. pyzy has no notion of key position, so
+ * layout_key is never consulted; a client supplies it anyway. */
+static bool press(pathime_context_t *ctx, uint32_t keysym)
+{
+    pathime_key_event_t event;
+    bool handled = false;
+    memset(&event, 0, sizeof(event));
+    event.struct_size = sizeof(event);
+    event.keysym = keysym;
+    event.layout_key = keysym;
+    PT_CHECK_STATUS(pathime_context_process_key(ctx, &event, &handled), PATHIME_OK);
+    return handled;
+}
+
+/* Type a spelling one key at a time; every key must be accepted. */
+static void type(pathime_context_t *ctx, const char *keys)
+{
+    for (; *keys != '\0'; keys++) {
+        PT_CHECK(press(ctx, (uint32_t)(unsigned char)*keys));
+    }
+}
+
+static const char *preedit_of(pathime_context_t *ctx)
+{
+    return pathime_context_composition(ctx)->preedit.bytes;
+}
+
+static void check_str(const char *what, const char *got, const char *want)
+{
+    pt_checks++;
+    if (strcmp(got, want) != 0) {
+        PT_FAILF("%s: got \"%s\", expected \"%s\"", what, got, want);
+    }
+}
+
+static const char *candidate_of(pathime_context_t *ctx, size_t index)
+{
+    pathime_str_t cand;
+    if (pathime_context_candidate(ctx, index, &cand) != PATHIME_OK) return "";
+    return cand.bytes;
+}
+
+/* A focused context with the standard callback table. */
+static pathime_context_t *open_context(pathime_engine_t *engine,
+                                       pathime_client_t *client,
+                                       client_log_t *log)
+{
+    pathime_context_t *ctx = NULL;
+
+    memset(log, 0, sizeof(*log));
+    memset(client, 0, sizeof(*client));
+    client->struct_size = sizeof(*client);
+    client->commit_text = on_commit;
+    client->delete_surrounding_text = on_delete;
+    client->composition_changed = on_changed;
+
+    PT_CHECK_STATUS(pathime_context_create(engine, client, log, &ctx), PATHIME_OK);
+    PT_CHECK(ctx != NULL);
+    PT_CHECK_STATUS(pathime_context_set_focused(ctx, true), PATHIME_OK);
+    return ctx;
+}
+
+/* Copy the first @a count candidates out, for comparison after a change. */
+static void snapshot(pathime_context_t *ctx, size_t count, char list[][32])
+{
+    size_t i;
+    for (i = 0; i < count; i++) {
+        const char *text = candidate_of(ctx, i);
+        PT_CHECK(strlen(text) < 32);
+        strncpy(list[i], text, 31);
+        list[i][31] = '\0';
+    }
+}
+
+/* ---------------------------------------------------------------------- */
+
+/*
+ * Full pinyin: "nihao" gives a preedit and a real candidate list. Five entries
+ * are named rather than one, because one would still pass against a build tree
+ * with no database in it.
+ */
+static void test_pinyin_composition(pathime_engine_t *engine)
+{
+    client_log_t log;
+    pathime_client_t client;
+    pathime_context_t *ctx = open_context(engine, &client, &log);
+    const pathime_composition_t *c = NULL;
+    size_t i;
+
+    type(ctx, "nihao");
+
+    c = pathime_context_composition(ctx);
+    check_str("nihao preedit", c->preedit.bytes, NI_HAO);
+    PT_CHECK_SIZE(c->preedit.len, 6);
+    /* Nothing settled: the whole conversion is one active span until a
+     * selection settles part of it. */
+    PT_CHECK_SIZE(c->preedit_settled, 0);
+
+    /* pyzy's own rendering of what it decoded, cursor marker included. It is
+     * auxiliary text — shown beside the preedit, never committed — which is
+     * exactly what a rendering of segmentation state is. */
+    check_str("auxiliary text", c->auxiliary.bytes, AUX_NI_HAO);
+
+    PT_CHECK(c->candidate_count > 0);
+    check_str("candidate 0", candidate_of(ctx, 0), NI_HAO);
+    check_str("candidate 1", candidate_of(ctx, 1), LI_HAO);
+    check_str("candidate 2", candidate_of(ctx, 2), NI);
+    check_str("candidate 3", candidate_of(ctx, 3), LI_1);
+    check_str("candidate 4", candidate_of(ctx, 4), LI_2);
+
+    /* Every advertised index is fetchable and non-empty, over the whole
+     * range — not merely the entries this test names. */
+    for (i = 0; i < c->candidate_count; i++) {
+        pathime_str_t cand;
+        PT_CHECK_STATUS(pathime_context_candidate(ctx, i, &cand), PATHIME_OK);
+        PT_CHECK(cand.len > 0);
+        PT_CHECK(cand.bytes[cand.len] == '\0');
+    }
+    {
+        pathime_str_t cand;
+        PT_CHECK_STATUS(pathime_context_candidate(ctx, c->candidate_count, &cand),
+                        PATHIME_ERROR_INVALID_ARGUMENT);
+        PT_CHECK_STATUS(pathime_context_select_candidate(ctx, c->candidate_count),
+                        PATHIME_ERROR_INVALID_ARGUMENT);
+    }
+
+    /* Escape discards without committing; with nothing composing the key goes
+     * back to the client, whose dialog it must still close. */
+    log_reset(&log);
+    PT_CHECK(press(ctx, PATHIME_KEY_ESCAPE));
+    check_str("preedit after escape", preedit_of(ctx), "");
+    PT_CHECK(log.commit_count == 0);
+    PT_CHECK(!press(ctx, PATHIME_KEY_ESCAPE));
+
+    /*
+     * Return means "give me what I typed" and Space means "convert it" — the
+     * pinyin convention, and the difference is visible in the committed text.
+     */
+    type(ctx, "nihao");
+    log_reset(&log);
+    PT_CHECK(press(ctx, PATHIME_KEY_RETURN));
+    check_str("return commits the raw input", log.commits, "nihao");
+
+    type(ctx, "nihao");
+    log_reset(&log);
+    PT_CHECK(press(ctx, ' '));
+    check_str("space commits the conversion", log.commits, NI_HAO);
+    check_str("callback order across a commit", log.order, "cx");
+
+    pathime_context_destroy(ctx);
+}
+
+/*
+ * The three-part preedit, and the automatic commit.
+ *
+ * Selecting 你 — candidate 2, the one covering only the first syllable —
+ * settles it and leaves 好 active with a fresh list for the remaining input.
+ * That is settled/active/tail with all the parts in play, and it is where
+ * preedit_settled has to be a scalar count: 你 is one character and three
+ * bytes, so a byte count would read 3 here and be indistinguishable from a
+ * three-character prefix to any client that trusted it.
+ */
+static void test_settled_boundary_and_auto_commit(pathime_engine_t *engine)
+{
+    client_log_t log;
+    pathime_client_t client;
+    pathime_context_t *ctx = open_context(engine, &client, &log);
+    const pathime_composition_t *c = NULL;
+    char before[8][32];
+    size_t i;
+
+    type(ctx, "nihao");
+    snapshot(ctx, 5, before);
+
+    log_reset(&log);
+    PT_CHECK_STATUS(pathime_context_select_candidate(ctx, 2), PATHIME_OK);
+
+    c = pathime_context_composition(ctx);
+    /* One scalar settled, six bytes of preedit. Not 3. */
+    PT_CHECK_SIZE(c->preedit_settled, 1);
+    PT_CHECK_SIZE(c->preedit.len, 6);
+    /* The preedit still spans the whole input: settling is not committing. */
+    check_str("preedit after settling 你", c->preedit.bytes, NI_HAO);
+    /* The auxiliary text follows the boundary — only the unconsumed syllable
+     * is left to decode. */
+    check_str("auxiliary after settling", c->auxiliary.bytes, "hao|");
+
+    /* Nothing was committed, and the client was told once. */
+    PT_CHECK(log.commit_count == 0);
+    PT_CHECK(log.changed_count == 1);
+    PT_CHECK_SIZE(log.last_settled, 1);
+
+    /* A fresh list arrived, describing the new active span and nothing else.
+     * Positions in the previous list are obsolete — which is why the header
+     * says so in composition_changed's own documentation. */
+    PT_CHECK(c->candidate_count > 0);
+    check_str("new candidate 0", candidate_of(ctx, 0), HAO);
+    check_str("new candidate 1", candidate_of(ctx, 1), HAO_2);
+    check_str("new candidate 2", candidate_of(ctx, 2), HAO_3);
+    for (i = 0; i < 3; i++) {
+        PT_CHECK(strcmp(candidate_of(ctx, i), before[i]) != 0);
+    }
+
+    /*
+     * Selecting again exhausts the input, and pyzy commits by itself from
+     * inside selectCandidate(). Nothing in the API asked for a commit here —
+     * this is the engine deciding the composition is finished, and the case
+     * the adapter's Output plumbing exists to carry back out.
+     */
+    log_reset(&log);
+    PT_CHECK_STATUS(pathime_context_select_candidate(ctx, 0), PATHIME_OK);
+    PT_CHECK(log.commit_count == 1);
+    check_str("automatic commit", log.commits, NI_HAO);
+    check_str("callback order across the automatic commit", log.order, "cx");
+
+    c = pathime_context_composition(ctx);
+    check_str("preedit after the automatic commit", c->preedit.bytes, "");
+    PT_CHECK_SIZE(c->preedit_settled, 0);
+    PT_CHECK_SIZE(c->candidate_count, 0);
+    check_str("auxiliary after the automatic commit", c->auxiliary.bytes, "");
+
+    /* With nothing composing there is no span to select from. */
+    PT_CHECK_STATUS(pathime_context_select_candidate(ctx, 0),
+                    PATHIME_ERROR_INVALID_ARGUMENT);
+
+    pathime_context_destroy(ctx);
+}
+
+/*
+ * Eager materialization, which is the obligation the whole candidates.cc design
+ * rests on. pyzy enumerates lazily, so raising PATHIME_OPT_MAX_CANDIDATES has
+ * to *append* — a client that already handed index 4 to its user must still see
+ * the same candidate there after the user scrolls. A lazy implementation, or
+ * one that rebuilt the list from scratch, would show up here as renumbering.
+ */
+static void test_eager_materialization(pathime_engine_t *engine)
+{
+    client_log_t log;
+    pathime_client_t client;
+    pathime_context_t *ctx = open_context(engine, &client, &log);
+    const pathime_composition_t *c = NULL;
+    char at_5[8][32];
+    char at_12[16][32];
+    size_t i;
+
+    PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_MAX_CANDIDATES, 5),
+                    PATHIME_OK);
+    type(ctx, "nihao");
+
+    c = pathime_context_composition(ctx);
+    PT_CHECK_SIZE(c->candidate_count, 5);
+    snapshot(ctx, 5, at_5);
+    check_str("capped list still starts at the best", at_5[0], NI_HAO);
+
+    /* Raise it: more candidates appear, and the first five are untouched. */
+    log_reset(&log);
+    PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_MAX_CANDIDATES, 12),
+                    PATHIME_OK);
+    c = pathime_context_composition(ctx);
+    PT_CHECK_SIZE(c->candidate_count, 12);
+    PT_CHECK(log.changed_count == 1);
+    PT_CHECK_SIZE(log.last_candidates, 12);
+    for (i = 0; i < 5; i++) {
+        check_str("candidate kept its position at 12", candidate_of(ctx, i), at_5[i]);
+    }
+    snapshot(ctx, 12, at_12);
+    check_str("candidate 5 appeared", at_12[5], LI_3);
+
+    /* Again, further. Still appending. */
+    PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_MAX_CANDIDATES, 40),
+                    PATHIME_OK);
+    c = pathime_context_composition(ctx);
+    PT_CHECK(c->candidate_count > 12);
+    for (i = 0; i < 12; i++) {
+        check_str("candidate kept its position at 40", candidate_of(ctx, i), at_12[i]);
+    }
+
+    /* Lowering removes from the tail and leaves the head alone. */
+    PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_MAX_CANDIDATES, 5),
+                    PATHIME_OK);
+    c = pathime_context_composition(ctx);
+    PT_CHECK_SIZE(c->candidate_count, 5);
+    for (i = 0; i < 5; i++) {
+        check_str("candidate survived the lowering", candidate_of(ctx, i), at_5[i]);
+    }
+
+    /* The preedit is untouched throughout: changing the cap is not a
+     * conversion event. */
+    check_str("preedit survives the cap changes", preedit_of(ctx), NI_HAO);
+
+    /* Zero is rejected rather than treated as "hide the list": an engine that
+     * converts by selection cannot make progress without a candidate. */
+    PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_MAX_CANDIDATES, 0),
+                    PATHIME_ERROR_INVALID_ARGUMENT);
+
+    pathime_context_destroy(ctx);
+}
+
+/*
+ * Callback safety in practice.
+ *
+ * The header lists pathime_context_candidate() as one of the functions a client
+ * may call from inside a callback, and gives the reason: every candidate the
+ * cap allows is materialized before composition_changed is dispatched, so the
+ * call is a plain array read. That is a promise about pyzy specifically —
+ * hasCandidate(i) is lazy *and* mutating — and this is the only place in the
+ * suite where it can be checked, because it can only be checked from inside a
+ * callback.
+ */
+static void test_callback_safety(pathime_engine_t *engine)
+{
+    client_log_t log;
+    pathime_client_t client;
+    pathime_context_t *ctx = open_context(engine, &client, &log);
+
+    /* Arming the probe: on_changed now walks the whole list on every dispatch. */
+    log.ctx = ctx;
+
+    type(ctx, "nihao");
+    PT_CHECK(log.probed_lists >= 5);      /* one per key, at least */
+    PT_CHECK_SIZE(log.probe_failures, 0);
+
+    /* Again across a selection, where the list is replaced wholesale rather
+     * than extended — the dispatch most likely to hand out a stale array. */
+    PT_CHECK_STATUS(pathime_context_select_candidate(ctx, 2), PATHIME_OK);
+    PT_CHECK_SIZE(log.probe_failures, 0);
+
+    /* And across a cap change, which is the one mutation that lengthens the
+     * list without any key having been pressed. */
+    PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_MAX_CANDIDATES, 30),
+                    PATHIME_OK);
+    PT_CHECK_SIZE(log.probe_failures, 0);
+    PT_CHECK(log.probed_lists >= 7);
+
+    /* The other callback-safe queries answer sensibly from in there too — they
+     * are what a language binding reaches for when handed a bare handle. */
+    PT_CHECK(pathime_context_engine(ctx) == engine);
+    PT_CHECK(pathime_context_user_data(ctx) == &log);
+
+    log.ctx = NULL;
+    pathime_context_destroy(ctx);
+}
+
+/*
+ * Bopomofo: a different engine id, different keys, the same backend and the
+ * same answer. "su3cl3" is ㄋㄧˇ ㄏㄠˇ — ni hao with both third tones — on the
+ * standard zhuyin keyboard, and it has to reach exactly the candidate list
+ * full pinyin's "nihao" reaches, because pyzy parses zhuyin into pinyin before
+ * querying the database.
+ */
+static void test_bopomofo(pathime_engine_t *pinyin, pathime_engine_t *bopomofo)
+{
+    client_log_t pinyin_log, bopo_log;
+    pathime_client_t pinyin_client, bopo_client;
+    pathime_context_t *pinyin_ctx = open_context(pinyin, &pinyin_client, &pinyin_log);
+    pathime_context_t *bopo_ctx = open_context(bopomofo, &bopo_client, &bopo_log);
+    const pathime_composition_t *pc = NULL;
+    const pathime_composition_t *bc = NULL;
+    char expected[16][32];
+    size_t i;
+
+    type(pinyin_ctx, "nihao");
+    pc = pathime_context_composition(pinyin_ctx);
+    PT_CHECK(pc->candidate_count >= 12);
+    snapshot(pinyin_ctx, 12, expected);
+
+    type(bopo_ctx, "su3cl3");
+    bc = pathime_context_composition(bopo_ctx);
+    check_str("bopomofo preedit", bc->preedit.bytes, NI_HAO);
+    /* The auxiliary text is the zhuyin, not the latin keys — the one visible
+     * difference between the two engines at this point. */
+    check_str("bopomofo auxiliary",
+              bc->auxiliary.bytes,
+              /* ㄋㄧˇ,ㄏㄠˇ| — U+310B U+3127 U+02C7 , U+310F U+3120 U+02C7 */
+              "\xE3\x84\x8B\xE3\x84\xA7\xCB\x87,\xE3\x84\x8F\xE3\x84\xA0\xCB\x87|");
+
+    PT_CHECK_SIZE(bc->candidate_count, pc->candidate_count);
+    for (i = 0; i < 12; i++) {
+        check_str("bopomofo reaches the same candidate",
+                  candidate_of(bopo_ctx, i), expected[i]);
+    }
+
+    /* Selecting behaves identically, down to the automatic commit. */
+    log_reset(&bopo_log);
+    PT_CHECK_STATUS(pathime_context_select_candidate(bopo_ctx, 0), PATHIME_OK);
+    PT_CHECK(bopo_log.commit_count == 1);
+    check_str("bopomofo commit", bopo_log.commits, NI_HAO);
+
+    pathime_context_destroy(bopo_ctx);
+    pathime_context_destroy(pinyin_ctx);
+}
+
+/*
+ * Options. Each of the three below is implemented at a different level: the
+ * Chinese variant is a pyzy property set on every mutating call, the pinyin
+ * scheme is a context rebuild, and the fuzzy flags are a table translation
+ * whose *engine set* was the thing recently corrected.
+ */
+static void test_options(pathime_engine_t *pinyin, pathime_engine_t *bopomofo)
+{
+    client_log_t log;
+    pathime_client_t client;
+    pathime_context_t *ctx = NULL;
+    pathime_option_info_t info;
+    int64_t value = -1;
+
+    /* --- PATHIME_OPT_CHINESE_VARIANT ------------------------------------ */
+
+    /*
+     * pyzy models this as one simplified-or-traditional flag with no mixed
+     * mode, so these two engines accept only the two exclusive values while the
+     * table engine accepts all five. That narrowing is reported through
+     * valid_values rather than hidden, so a client can present exactly the
+     * choices that will work — and this is the assertion that the reported set
+     * is the set the setters actually enforce.
+     */
+    memset(&info, 0, sizeof(info));
+    info.struct_size = sizeof(info);
+    PT_CHECK_STATUS(pathime_engine_option_info(pinyin, PATHIME_OPT_CHINESE_VARIANT, &info),
+                    PATHIME_OK);
+    PT_CHECK(info.supported);
+    PT_CHECK(info.type == PATHIME_OPTION_ENUM);
+    PT_CHECK(info.valid_values ==
+             ((UINT64_C(1) << PATHIME_CHINESE_SIMPLIFIED_ONLY) |
+              (UINT64_C(1) << PATHIME_CHINESE_TRADITIONAL_ONLY)));
+    PT_CHECK(info.default_value == PATHIME_CHINESE_SIMPLIFIED_ONLY);
+    /* Changing the repertoire does not invalidate what has been typed. */
+    PT_CHECK(!info.resets_composition);
+
+    memset(&info, 0, sizeof(info));
+    info.struct_size = sizeof(info);
+    PT_CHECK_STATUS(pathime_engine_option_info(bopomofo, PATHIME_OPT_CHINESE_VARIANT, &info),
+                    PATHIME_OK);
+    PT_CHECK(info.valid_values ==
+             ((UINT64_C(1) << PATHIME_CHINESE_SIMPLIFIED_ONLY) |
+              (UINT64_C(1) << PATHIME_CHINESE_TRADITIONAL_ONLY)));
+
+    ctx = open_context(pinyin, &client, &log);
+    PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_CHINESE_VARIANT,
+                                                   PATHIME_CHINESE_SIMPLIFIED_ONLY),
+                    PATHIME_OK);
+    PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_CHINESE_VARIANT,
+                                                   PATHIME_CHINESE_TRADITIONAL_ONLY),
+                    PATHIME_OK);
+    /* The three non-exclusive values are rejected, not silently coerced. */
+    PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_CHINESE_VARIANT,
+                                                   PATHIME_CHINESE_SIMPLIFIED_FIRST),
+                    PATHIME_ERROR_INVALID_ARGUMENT);
+    PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_CHINESE_VARIANT,
+                                                   PATHIME_CHINESE_TRADITIONAL_FIRST),
+                    PATHIME_ERROR_INVALID_ARGUMENT);
+    PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_CHINESE_VARIANT,
+                                                   PATHIME_CHINESE_ANY),
+                    PATHIME_ERROR_INVALID_ARGUMENT);
+    /* A rejected set changes nothing: traditional is still in force. */
+    PT_CHECK_STATUS(pathime_context_get_option_int(ctx, PATHIME_OPT_CHINESE_VARIANT,
+                                                   &value),
+                    PATHIME_OK);
+    PT_CHECK(value == PATHIME_CHINESE_TRADITIONAL_ONLY);
+
+    /*
+     * And it really changes the candidates. The head of the list is the same
+     * in both repertoires — 你好 has no distinct traditional form — so the
+     * check has to reach the first entry that does, which is 离 / 離.
+     */
+    type(ctx, "nihao");
+    check_str("traditional preedit", preedit_of(ctx), NI_HAO);
+    check_str("traditional candidate 0", candidate_of(ctx, 0), NI_HAO);
+    check_str("traditional candidate 5", candidate_of(ctx, 5), LI_3_T);
+
+    /*
+     * A change takes effect immediately. The header states that as a rule, and
+     * this option — not one of the four marked resets_composition — has to obey
+     * it without disturbing the composition in progress.
+     *
+     * Worth asserting rather than assuming, because it did not hold when the
+     * three adapters were first assembled, and the failure was quiet: the store
+     * updated, the getters reported the new value, composition_changed was
+     * dispatched, and the list on screen stayed the old repertoire's until the
+     * user typed one more key. Two things were missing. The core never told the
+     * backend that a resolved value had moved — options are pulled, but pulling
+     * next time is too late when there may be no next time — which is now
+     * ContextBackend::options_changed(). And pyzy's setProperty() stores
+     * without regenerating, firing no candidatesChanged, so the adapter drops
+     * its materialized list and lets the core's pump refill it.
+     *
+     * Index 5 must therefore flip from the traditional 離 to the simplified 离
+     * with no key pressed in between.
+     */
+    PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_CHINESE_VARIANT,
+                                                   PATHIME_CHINESE_SIMPLIFIED_ONLY),
+                    PATHIME_OK);
+    check_str("variant change felt with no further key", candidate_of(ctx, 5), LI_3);
+
+    /* And it stays in force across the next keystroke, which is the check that
+     * the list was genuinely regenerated and not merely reordered once. */
+    PT_CHECK(press(ctx, PATHIME_KEY_BACKSPACE));
+    PT_CHECK(press(ctx, 'o'));
+    check_str("simplified preedit", preedit_of(ctx), NI_HAO);
+    check_str("simplified candidate 5", candidate_of(ctx, 5), LI_3);
+    pathime_context_destroy(ctx);
+
+    /* Set before anything is typed, the option behaves the way a client would
+     * expect it to throughout — which is the ordinary case and the one worth
+     * pinning independently of the gap above. */
+    ctx = open_context(pinyin, &client, &log);
+    PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_CHINESE_VARIANT,
+                                                   PATHIME_CHINESE_TRADITIONAL_ONLY),
+                    PATHIME_OK);
+    type(ctx, "nihao");
+    check_str("traditional from the start, candidate 5", candidate_of(ctx, 5), LI_3_T);
+    pathime_context_destroy(ctx);
+
+    /* --- PATHIME_OPT_PINYIN_SCHEME -------------------------------------- */
+
+    memset(&info, 0, sizeof(info));
+    info.struct_size = sizeof(info);
+    PT_CHECK_STATUS(pathime_engine_option_info(pinyin, PATHIME_OPT_PINYIN_SCHEME, &info),
+                    PATHIME_OK);
+    PT_CHECK(info.supported);
+    /* Declared as data, not left for a client to discover: pyzy fixes the
+     * scheme when its context is created, so changing it rebuilds that context
+     * and whatever was typed goes with it. */
+    PT_CHECK(info.resets_composition);
+
+    ctx = open_context(pinyin, &client, &log);
+    type(ctx, "nihao");
+    check_str("composition before the scheme change", preedit_of(ctx), NI_HAO);
+
+    log_reset(&log);
+    PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_PINYIN_SCHEME,
+                                                   PATHIME_PINYIN_SCHEME_DOUBLE_MSPY),
+                    PATHIME_OK);
+    /* Really discarded — not preserved, and not committed either. */
+    check_str("composition after the scheme change", preedit_of(ctx), "");
+    PT_CHECK_SIZE(pathime_context_composition(ctx)->candidate_count, 0);
+    check_str("auxiliary after the scheme change",
+              pathime_context_composition(ctx)->auxiliary.bytes, "");
+    PT_CHECK(log.commit_count == 0);
+    PT_CHECK(log.changed_count == 1);
+
+    /* The rebuilt context is a working one, not a wedged one: the scheme change
+     * replaced pyzy's InputContext, and the next key has to reach the new one. */
+    PT_CHECK(press(ctx, 'n'));
+    PT_CHECK(pathime_context_composition(ctx)->candidate_count > 0);
+    pathime_context_destroy(ctx);
+
+    /* The scheme is not a Bopomofo option: that engine's phonetic type comes
+     * from its id, so offering the pinyin schemes there would be a control that
+     * does nothing, and the setter says so rather than accepting it. */
+    ctx = open_context(bopomofo, &client, &log);
+    PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_PINYIN_SCHEME,
+                                                   PATHIME_PINYIN_SCHEME_DOUBLE_MSPY),
+                    PATHIME_ERROR_UNSUPPORTED);
+    /* Its own layout option is the one that resets, for the mirror-image
+     * reason: pyzy stores a new zhuyin arrangement without re-reading the keys
+     * already typed. */
+    memset(&info, 0, sizeof(info));
+    info.struct_size = sizeof(info);
+    PT_CHECK_STATUS(pathime_engine_option_info(bopomofo, PATHIME_OPT_BOPOMOFO_LAYOUT, &info),
+                    PATHIME_OK);
+    PT_CHECK(info.supported);
+    PT_CHECK(info.resets_composition);
+    pathime_context_destroy(ctx);
+
+    /* --- PATHIME_OPT_PINYIN_FUZZY --------------------------------------- */
+
+    /*
+     * Recently widened from Pinyin alone to both pyzy engines. The claim was
+     * measured rather than reasoned: 61 rows of pyzy's bopomofo_table carry a
+     * PINYIN_FUZZY_* bit, and check_flags() makes parseBopomofo stop at a
+     * syllable whose bit is clear — so the rules really are reachable from
+     * zhuyin, which is parsed into pinyin before it is looked up. This is the
+     * assertion that the descriptor says so.
+     */
+    memset(&info, 0, sizeof(info));
+    info.struct_size = sizeof(info);
+    PT_CHECK_STATUS(pathime_engine_option_info(pinyin, PATHIME_OPT_PINYIN_FUZZY, &info),
+                    PATHIME_OK);
+    PT_CHECK(info.supported);
+    PT_CHECK(info.type == PATHIME_OPTION_FLAGS);
+
+    memset(&info, 0, sizeof(info));
+    info.struct_size = sizeof(info);
+    PT_CHECK_STATUS(pathime_engine_option_info(bopomofo, PATHIME_OPT_PINYIN_FUZZY, &info),
+                    PATHIME_OK);
+    PT_CHECK(info.supported);
+    PT_CHECK(info.type == PATHIME_OPTION_FLAGS);
+    /* Every bit, on both, and the same default. */
+    PT_CHECK(info.valid_values == ((UINT64_C(1) << 20) - 1));
+    PT_CHECK((uint64_t)info.default_value == info.valid_values);
+
+    /* Settable on a bopomofo context, which is the behavioural half. */
+    ctx = open_context(bopomofo, &client, &log);
+    PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_PINYIN_FUZZY, 0),
+                    PATHIME_OK);
+    PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_PINYIN_FUZZY,
+                                                   PATHIME_PINYIN_FUZZY_F_H),
+                    PATHIME_OK);
+    /* An undefined bit is rejected rather than dropped: silently ignoring one
+     * would let a client believe a rule is in force that is not. */
+    PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_PINYIN_FUZZY,
+                                                   UINT64_C(1) << 20),
+                    PATHIME_ERROR_INVALID_ARGUMENT);
+
+    /*
+     * PATHIME_OPT_PINYIN_CORRECTION did *not* widen with it, and the contrast
+     * is the point: zero rows of bopomofo_table reach an entry carrying a
+     * PINYIN_CORRECT_* bit, because corrections are latin typing slips and
+     * there is no zhuyin spelling to slip in.
+     */
+    PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_PINYIN_CORRECTION, 0),
+                    PATHIME_ERROR_UNSUPPORTED);
+    memset(&info, 0, sizeof(info));
+    info.struct_size = sizeof(info);
+    PT_CHECK_STATUS(pathime_engine_option_info(bopomofo, PATHIME_OPT_PINYIN_CORRECTION,
+                                               &info),
+                    PATHIME_OK);
+    PT_CHECK(!info.supported);
+    pathime_context_destroy(ctx);
+}
+
+/*
+ * The other half of the fuzzy claim: the engines that do *not* implement it.
+ *
+ * Hangul is checked here because this test can create one. Anthy cannot be
+ * created without its dictionary, which this test has no wiring for, so the
+ * matching assertion lives in engine_anthy_test.c instead — see the comment
+ * there. Splitting it keeps both halves real rather than making one of them
+ * skip silently.
+ */
+static void test_fuzzy_is_not_a_hangul_option(void)
+{
+    pathime_engine_t *hangul = NULL;
+    pathime_option_info_t info;
+
+    if (!pathime_has_engine(PATHIME_ENGINE_HANGUL)) return;
+
+    PT_CHECK_STATUS(pathime_engine_create(PATHIME_ENGINE_HANGUL, &hangul), PATHIME_OK);
+    if (hangul == NULL) return;
+
+    memset(&info, 0, sizeof(info));
+    info.struct_size = sizeof(info);
+    /* An option the engine does not implement is reported through `supported`,
+     * not as an error — the query itself still succeeds. */
+    PT_CHECK_STATUS(pathime_engine_option_info(hangul, PATHIME_OPT_PINYIN_FUZZY, &info),
+                    PATHIME_OK);
+    PT_CHECK(!info.supported);
+    PT_CHECK_STATUS(pathime_engine_set_option_int(hangul, PATHIME_OPT_PINYIN_FUZZY, 0),
+                    PATHIME_ERROR_UNSUPPORTED);
+    PT_CHECK(!pathime_engine_option_is_set(hangul, PATHIME_OPT_PINYIN_FUZZY));
+
+    pathime_engine_destroy(hangul);
+}
+
+int main(void)
+{
+    pathime_engine_t *pinyin = NULL;
+    pathime_engine_t *bopomofo = NULL;
+    pathime_init_params_t params;
+
+    /*
+     * The library's own persistent-storage surface, pointed at the build tree:
+     * pyzy_global_init() roots its cache and config directories here, so the
+     * learned-phrase database this run writes cannot be the developer's.
+     *
+     * It is *not* how the main database is found. That one is located relative
+     * to the process's working directory, which only CTest can set — see
+     * tests/api/CMakeLists.txt.
+     */
+    memset(&params, 0, sizeof(params));
+    params.struct_size = sizeof(params);
+    params.data_dir = PYZY_TEST_DATA_DIR;
+    PT_CHECK_STATUS(pathime_init(&params), PATHIME_OK);
+
+    /*
+     * One backend, two engine ids, and the id round-trips through the handle so
+     * a client juggling both need not carry it alongside.
+     */
+    PT_CHECK(pathime_has_engine(PATHIME_ENGINE_PINYIN));
+    PT_CHECK(pathime_has_engine(PATHIME_ENGINE_BOPOMOFO));
+    PT_CHECK_STATUS(pathime_engine_create(PATHIME_ENGINE_PINYIN, &pinyin), PATHIME_OK);
+    PT_CHECK_STATUS(pathime_engine_create(PATHIME_ENGINE_BOPOMOFO, &bopomofo), PATHIME_OK);
+    PT_CHECK(pinyin != NULL && bopomofo != NULL);
+    PT_CHECK(pathime_engine_id(pinyin) == PATHIME_ENGINE_PINYIN);
+    PT_CHECK(pathime_engine_id(bopomofo) == PATHIME_ENGINE_BOPOMOFO);
+    PT_CHECK(pinyin != bopomofo);
+
+    /* Neither uses the surrounding-text surface: pyzy has no reconversion path
+     * and the adapter asks the client for nothing. */
+    PT_CHECK(pathime_engine_requirements(pinyin) == 0);
+    PT_CHECK(pathime_engine_requirements(bopomofo) == 0);
+
+    if (pinyin != NULL && bopomofo != NULL) {
+        test_pinyin_composition(pinyin);
+        test_settled_boundary_and_auto_commit(pinyin);
+        test_eager_materialization(pinyin);
+        test_callback_safety(pinyin);
+        test_bopomofo(pinyin, bopomofo);
+        test_options(pinyin, bopomofo);
+        test_fuzzy_is_not_a_hangul_option();
+    }
+
+    pathime_engine_destroy(bopomofo);
+    pathime_engine_destroy(pinyin);
+    pathime_shutdown();
+    return pt_report("api.engine_pyzy");
+}
+
+#endif /* PATHIME_WITH_PYZY */

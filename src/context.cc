@@ -42,6 +42,9 @@
 #include "context.h"
 #include "engine.h"
 #include "init.h"
+#include "keys.h"
+#include "options.h"
+#include "utf8.h"
 
 namespace pathime {
 
@@ -65,84 +68,6 @@ namespace {
  * UTF-8 validation
  * ------------------------------------------------------------------------- */
 
-/**
- * Validate @a len bytes of UTF-8 and count the Unicode scalar values in them.
- *
- * Rejects everything the public header's Text convention excludes: an embedded
- * NUL (U+0000 is not representable in this API, in either direction),
- * truncated and malformed sequences, overlong forms, surrogate halves, and
- * anything above U+10FFFF. A slice is a run of text, not a buffer that might
- * end early, so @a len is authoritative and a NUL inside it is an error rather
- * than a terminator.
- *
- * TODO(impl): this belongs in utf8.cc with the rest of the encoding boundary
- * (TODO.md §2, Finding 4). utf8.h is deliberately empty until its types are
- * designed alongside the composition representation, so the one caller that
- * needs the check today carries a file-local copy rather than pre-empting that
- * round. Move it, unchanged, when utf8.* lands.
- */
-bool utf8_validate_and_count(const char *bytes, size_t len, size_t *out_scalars)
-{
-    /* The lowest scalar value each sequence length may legally encode; index 0
-     * is unused. A value below its entry is an overlong form. */
-    static const uint32_t kLowestLegal[5] = { 0u, 0x0u, 0x80u, 0x800u, 0x10000u };
-
-    size_t scalars = 0;
-    size_t i = 0;
-
-    while (i < len) {
-        const unsigned char lead = static_cast<unsigned char>(bytes[i]);
-        size_t seq_len;
-        uint32_t scalar;
-
-        if (lead == 0x00u) {
-            return false;  /* U+0000 is not representable in this API. */
-        } else if (lead < 0x80u) {
-            seq_len = 1;
-            scalar = lead;
-        } else if ((lead & 0xE0u) == 0xC0u) {
-            seq_len = 2;
-            scalar = lead & 0x1Fu;
-        } else if ((lead & 0xF0u) == 0xE0u) {
-            seq_len = 3;
-            scalar = lead & 0x0Fu;
-        } else if ((lead & 0xF8u) == 0xF0u) {
-            seq_len = 4;
-            scalar = lead & 0x07u;
-        } else {
-            return false;  /* A stray continuation byte, or a 5-byte form. */
-        }
-
-        if (len - i < seq_len) {
-            return false;  /* Truncated: the slice ends mid-sequence. */
-        }
-        for (size_t k = 1; k < seq_len; ++k) {
-            const unsigned char cont = static_cast<unsigned char>(bytes[i + k]);
-            if ((cont & 0xC0u) != 0x80u) {
-                return false;
-            }
-            scalar = (scalar << 6) | (cont & 0x3Fu);
-        }
-
-        if (scalar < kLowestLegal[seq_len]) {
-            return false;  /* Overlong. */
-        }
-        if (scalar > 0x10FFFFu) {
-            return false;
-        }
-        if (scalar >= 0xD800u && scalar <= 0xDFFFu) {
-            return false;  /* A surrogate half is not a scalar value. */
-        }
-
-        i += seq_len;
-        ++scalars;
-    }
-
-    if (out_scalars != nullptr) {
-        *out_scalars = scalars;
-    }
-    return true;
-}
 
 /* ---------------------------------------------------------------------------
  * struct_size versioning
@@ -291,12 +216,27 @@ pathime_status_t pathime_context_create(pathime_engine_t *engine,
     }
 
     /*
-     * TODO(impl): create the backend's per-context handle here
-     * (HangulInputContext *, anthy_context_t, PyZy::InputContext *) through
-     * backend.h, and on failure unregister, delete, and report
-     * PATHIME_ERROR_BACKEND with out_ctx untouched. Its type waits on the
-     * composition representation (TODO.md §3, question 1).
+     * The backend's per-context handle — HangulInputContext *, anthy_context_t,
+     * PyZy::InputContext *, whichever this engine is. Created only now, rather
+     * than with the object above, because it is the one step that can fail for
+     * a reason the caller did not cause, and because it needs the options
+     * reader, which needs the context to exist first.
+     *
+     * On failure the context is unregistered and deleted and out_ctx is left
+     * untouched: nothing is published to the caller until every step has
+     * succeeded.
      */
+    if (engine->backend != nullptr) {
+        const pathime::ContextOptions options(ctx);
+        ctx->backend = engine->backend->create_context(options);
+        if (ctx->backend == nullptr) {
+            std::vector<pathime_context_t *> &siblings = engine->contexts;
+            siblings.erase(std::remove(siblings.begin(), siblings.end(), ctx),
+                           siblings.end());
+            delete ctx;
+            return PATHIME_ERROR_BACKEND;
+        }
+    }
 
     /*
      * A new context starts unfocused, with empty composition data and no
@@ -332,10 +272,9 @@ void pathime_context_destroy(pathime_context_t *ctx)
                        siblings.end());
     }
 
-    /* TODO(impl): destroy the backend's per-context handle before the object
-     * goes, once backend.h defines one. Each of the three is one owned handle,
-     * caller-destroyed (TODO.md §2, Finding 3). */
-
+    /* The backend handle goes with the object — each of the three is one owned
+     * handle, caller-destroyed (TODO.md §2, Finding 3), and unique_ptr in
+     * context.h is where that ownership is stated. */
     delete ctx;
 }
 
@@ -383,43 +322,44 @@ pathime_status_t pathime_context_process_key(pathime_context_t *ctx,
     }
 
     /*
-     * Value legality, last. Keysyms are otherwise passed through unvalidated:
-     * the X11 keysym space is open-ended and no useful membership test exists,
-     * so an unrecognized value is not an error — engines dispatch on the ones
-     * they know and report the rest unhandled, which is also what a client
-     * wants for keys it has invented. Zero is the one thing checked, because
-     * it names no key at all.
+     * Value legality, last, and in the key layer rather than here — keys.cc is
+     * where "what a valid event is" is settled once, so that three adapters
+     * cannot each answer it differently.
      */
-    if (event->keysym == 0) {
-        return PATHIME_ERROR_INVALID_ARGUMENT;
+    pathime::KeyEvent key;
+    const pathime_status_t decoded = pathime::key_event_from_public(event, &key);
+    if (decoded != PATHIME_OK) {
+        return decoded;
     }
 
     /*
-     * TODO(impl): this is where the mutating sequence runs, and it is the
-     * whole of the engine's input path:
+     * The mutating sequence. The ordering is the whole point of this file: the
+     * backend finishes mutating before anything is assembled, and everything
+     * is assembled before any callback is dispatched.
      *
-     *   1. Route the event through the engine-agnostic key layer (keys.cc) —
-     *      modifiers, the PATHIME_KEY_* named keys, the handled/unhandled
-     *      verdict. The backends accept only finished input (TODO.md §2,
-     *      Finding 6), so all of this is ours: anthy wants completed kana,
-     *      pyzy takes only [a-z] and apostrophe, libhangul takes a US-QWERTY
-     *      int with uppercase meaning Shift.
-     *   2. For anthy, through the composing front end first
-     *      (engines/anthy/romaji.cc), which is the only per-engine state
-     *      machine that has to run before its backend sees anything.
-     *   3. Let the backend mutate, through backend.h.
-     *   4. End in pathime::refresh_composition(ctx, false), which assembles,
-     *      materializes and dispatches, in that order — including when the
-     *      event is reported unhandled, since an engine may absorb a key into
-     *      its composition state, emit the resulting text, and still hand the
-     *      original key back.
-     *
-     * Until that exists every key is reported unhandled and PATHIME_OK is
-     * returned. Nothing was mutated, so there is nothing to assemble and no
-     * callback to dispatch, and a client sees exactly the behaviour the header
-     * documents for a key no engine acts on. out_handled is already false from
-     * the top of the function.
+     * The backends accept only finished input (TODO.md §2, Finding 6), so
+     * everything above this call is ours — and for anthy the composing front
+     * end runs inside its adapter, which is why there is no separate step for
+     * it here.
      */
+    ctx->output.clear();
+
+    const pathime::ContextOptions options(ctx);
+    bool handled = false;
+    if (ctx->backend != nullptr) {
+        handled = ctx->backend->process_key(key, options, &ctx->model, &ctx->output);
+    }
+
+    /*
+     * Assemble, materialize, dispatch — including when the event is reported
+     * unhandled, since an engine may absorb a key into its composition state,
+     * emit the resulting text, and still hand the original key back for the
+     * client to act on, with the ordering already correct. "Handled" describes
+     * the incoming event only and is independent of what was produced.
+     */
+    pathime::refresh_composition(ctx, false);
+
+    *out_handled = handled;
     return PATHIME_OK;
 }
 
@@ -465,7 +405,7 @@ pathime_status_t pathime_context_set_surrounding_text(pathime_context_t *ctx,
      */
 
     size_t scalars = 0;
-    if (!utf8_validate_and_count(text.bytes, text.len, &scalars)) {
+    if (!pathime::utf8_validate(text.bytes, text.len, &scalars)) {
         return PATHIME_ERROR_INVALID_ARGUMENT;
     }
 
@@ -563,45 +503,31 @@ pathime_status_t pathime_context_reset(pathime_context_t *ctx)
      * field is still focused. */
 
     const bool was_indeterminate = ctx->indeterminate;
-    const bool was_empty = ctx->preedit.empty() &&
-                           ctx->auxiliary.empty() &&
-                           ctx->candidates.empty();
 
     /*
-     * TODO(impl): the backend's own reset goes here — hangul_ic_reset(),
-     * anthy_reset_context(), PyZy::InputContext::reset() — through backend.h.
-     * One thing precedes it: reset does not commit, so an engine that must
-     * preserve text commits it explicitly first, through ctx->commit_text, as
-     * part of handling the reset. The three backends differ on flush
-     * semantics; consult docs/[engine]-mapping.md rather than re-deriving
-     * them.
+     * The backend's own reset — hangul_ic_reset(), anthy_reset_context(),
+     * PyZy::InputContext::reset(). It does not commit: an engine that must
+     * preserve text puts it in the Output explicitly, as part of handling the
+     * reset, and the dispatch below delivers it. The three backends differ on
+     * flush semantics; the docs/ mapping notes have the details rather than
+     * this file re-deriving them.
      */
+    ctx->output.clear();
+    if (ctx->backend != nullptr) {
+        ctx->backend->reset(&ctx->model, &ctx->output);
+    }
 
-    /*
-     * Clearing the flat storage *is* the reset today. Once the structured
-     * model exists (composition.h, TODO.md §3 question 1) it is that model
-     * which is cleared here, and the flat value follows from the assembly step
-     * inside refresh_composition() rather than being cleared directly.
-     */
-    ctx->preedit.clear();
-    ctx->auxiliary.clear();
-    ctx->candidates.clear();
-    ctx->composition.preedit_settled = 0;
+    ctx->model.clear();
     ctx->indeterminate = false;
 
     /*
      * force is true on the recovery path: a context whose composition state is
      * indeterminate cannot be said to have been "already empty", and the
-     * client's view of it must be replaced either way.
-     *
-     * The second term is the placeholder half. refresh_composition() decides
-     * for itself whether anything changed, but only from what the assembly
-     * step tells it — and because the clearing above happens here rather than
-     * inside that step, it cannot see it. When assembly lands this reduces to
-     * `was_indeterminate` alone, and the header's "unless the composition was
-     * already empty" promise is kept by the change detection.
+     * client's view of it must be replaced either way. Otherwise the change
+     * detection inside refresh_composition() decides, which is what keeps the
+     * header's "unless the composition was already empty" promise exact.
      */
-    pathime::refresh_composition(ctx, was_indeterminate || !was_empty);
+    pathime::refresh_composition(ctx, was_indeterminate);
     return PATHIME_OK;
 }
 
@@ -610,6 +536,17 @@ pathime_status_t pathime_context_reset(pathime_context_t *ctx)
  * ======================================================================== */
 
 namespace pathime {
+
+int64_t ContextOptions::number(pathime_option_t option) const
+{
+    /*
+     * The whole of the adapter-facing options surface: one call into the one
+     * place resolution lives. An adapter never learns that options have levels
+     * or tiers, and never caches — which is what makes the header's "a change
+     * takes effect immediately" true without any invalidation protocol.
+     */
+    return resolve_option_number(ctx_->engine, ctx_, option);
+}
 
 void refresh_composition(pathime_context_t *ctx, bool force)
 {
@@ -622,25 +559,7 @@ void refresh_composition(pathime_context_t *ctx, bool force)
      * promise is that they read finished state and cannot re-enter a backend.
      */
 
-    /* --- 1. Assemble the flat value from the structured model -------------
-     *
-     * TODO(impl): project the structured composition (composition.cc) into
-     * ctx->preedit, ctx->auxiliary and ctx->composition.preedit_settled. Every
-     * backend keeps state the flat value cannot hold (TODO.md §2, Finding 1):
-     * anthy has N segments, each with its own candidate array, plus an
-     * active-segment index; pyzy's preedit is three parts with the middle one
-     * provisional and its own focused-candidate index; libhangul exposes only
-     * the trailing mutable syllable, so the settled prefix is accumulated on
-     * our side. pyzy contributes through its observer's dirty flags rather
-     * than by being polled (Finding 5), which is what reconciles its push
-     * model with the other two pull-only ones into one atomic value.
-     *
-     * preedit_settled is set here too: it is the boundary between the settled
-     * prefix and the still-mutable region, in Unicode scalar values, and it
-     * may never exceed the scalar count of the assembled preedit.
-     */
-
-    /* --- 2. Materialize candidates up to the cap --------------------------
+    /* --- 1. Materialize candidates up to the cap --------------------------
      *
      * Before any callback, never during one. pyzy's hasCandidate(i) is lazy
      * and mutating, so pathime_context_candidate() is only the plain array
@@ -648,37 +567,41 @@ void refresh_composition(pathime_context_t *ctx, bool force)
      * PATHIME_OPT_MAX_CANDIDATES cap allows has already been fetched. That is
      * the obligation from the API round, and this call is where it is
      * discharged; candidates.cc owns the rest.
+     *
+     * It runs before the projection because the projection publishes the
+     * count, and a count published before the list it describes would be a lie
+     * for exactly as long as it took to fix.
      */
     materialize_candidates(ctx);
 
-    /* --- 3. Republish the flat value --------------------------------------
+    /* --- 2. Project the structured model onto the flat value ---------------
      *
-     * Rebuilt in place, never patched incrementally. The pathime_str_t members
-     * point into this context's own storage, which is what backs the header's
-     * promise that they stay valid until the next call mutating this context;
-     * std::string::c_str() is never NULL and is "" when the string is empty,
-     * which is exactly what a zero-length pathime_str_t must point at.
+     * Rebuilt wholesale, never patched incrementally. The pathime_str_t
+     * members point into this context's own storage, which is what backs the
+     * header's promise that they stay valid until the next call mutating this
+     * context; std::string::c_str() is never NULL and is "" when the string is
+     * empty, which is exactly what a zero-length pathime_str_t must point at.
      *
-     * struct_size is filled in by the library because the library owns this
-     * struct — the caller never allocates one — so the value reports how many
-     * bytes of it this build knows how to write.
+     * Whether anything changed is decided here, by comparing what the
+     * projection produced against what was published last time. Two string
+     * comparisons per keystroke is the price of an exact answer, and it buys
+     * the header's promise that composition_changed means the composition
+     * changed — a promise a client leans on to avoid redrawing.
      */
-    ctx->composition.struct_size = sizeof(pathime_composition_t);
-    ctx->composition.preedit.bytes = ctx->preedit.c_str();
-    ctx->composition.preedit.len = ctx->preedit.size();
-    ctx->composition.auxiliary.bytes = ctx->auxiliary.c_str();
-    ctx->composition.auxiliary.len = ctx->auxiliary.size();
-    ctx->composition.candidate_count = ctx->candidates.size();
+    const std::string previous_preedit = ctx->preedit;
+    const std::string previous_auxiliary = ctx->auxiliary;
+    const size_t previous_settled = ctx->composition.preedit_settled;
+    const size_t previous_candidates = ctx->composition.candidate_count;
 
-    /*
-     * TODO(impl): the assembly step reports whether anything actually changed
-     * — pyzy through the observer's dirty flags, the pull-only backends by
-     * comparing what they project. Until there is a structured model to
-     * assemble from, nothing here can have changed, so `force` alone decides
-     * and the comparison it stands in for would cost two string copies on the
-     * hottest path in the library to always answer false.
-     */
-    const bool changed = force;
+    pathime::project_composition(ctx->model, &ctx->preedit, &ctx->auxiliary,
+                                 &ctx->composition);
+    ctx->composition.candidate_count = ctx->model.candidates.size();
+
+    const bool changed = force ||
+                         ctx->preedit != previous_preedit ||
+                         ctx->auxiliary != previous_auxiliary ||
+                         ctx->composition.preedit_settled != previous_settled ||
+                         ctx->composition.candidate_count != previous_candidates;
 
     /* --- 4. Dispatch, in the fixed order ----------------------------------
      *
@@ -691,21 +614,48 @@ void refresh_composition(pathime_context_t *ctx, bool force)
      * view of the composition matches the engine's.
      */
 
-    /* TODO(impl): dispatch any pending deletion through
-     * ctx->delete_surrounding_text, with offset relative to
-     * ctx->surrounding_cursor in scalar values and a count that is never 0,
-     * and only where ctx->has_surrounding covers the range. An engine wanting
-     * to revise text the current snapshot does not cover abandons the revision
-     * instead: it discards the state that was to be revised and treats what is
-     * already in the document as final, requesting no deletion and refusing no
-     * key. The pending record itself waits on backend.h. */
+    if (ctx->output.has_deletion && ctx->output.delete_count != 0 &&
+        ctx->delete_surrounding_text != nullptr && ctx->has_surrounding) {
+        /*
+         * Only where the snapshot actually covers the range. An engine wanting
+         * to revise text the current snapshot does not cover abandons the
+         * revision instead — it treats what is already in the document as
+         * final and continues from the next input as if starting fresh — so a
+         * request that does not fit is dropped rather than guessed at. That is
+         * the same recovery ibus-hangul performs when its caret-sanity check
+         * fails, and it is why no key is refused and no error is reported.
+         */
+        ctx->delete_surrounding_text(ctx->user_data,
+                                     ctx->output.delete_offset,
+                                     ctx->output.delete_count);
+    }
 
-    /* TODO(impl): dispatch any pending commit through ctx->commit_text, which
-     * is never NULL here — pathime_context_create() rejects a client without
-     * it. A commit invalidates the surrounding-text snapshot the moment it
-     * lands, so ctx->has_surrounding is cleared alongside: until the client
-     * supplies a fresh one the engine can no longer see the text it just
-     * inserted. */
+    if (!ctx->output.commit.empty()) {
+        /* Never NULL here: pathime_context_create() rejects a client without
+         * it. Copied out first, because the callback is entitled to call back
+         * into the callback-safe queries and must not see a half-cleared
+         * Output. */
+        const std::string commit = ctx->output.commit;
+        ctx->output.clear();
+
+        /*
+         * A commit invalidates the surrounding-text snapshot the moment it
+         * lands: the document now contains text the snapshot does not describe.
+         * Until the client supplies a fresh one the engine cannot see what it
+         * just inserted, which is precisely the obligation
+         * PATHIME_REQUIRES_SURROUNDING_TEXT describes as stronger than it
+         * sounds.
+         */
+        ctx->has_surrounding = false;
+        ctx->surrounding_text.clear();
+        ctx->surrounding_cursor = 0;
+
+        pathime_str_t text;
+        text.bytes = commit.c_str();
+        text.len = commit.size();
+        ctx->commit_text(ctx->user_data, text);
+    }
+    ctx->output.clear();
 
     if (changed && ctx->composition_changed != nullptr) {
         /* Last, and only if the client supplied it — one with no way to

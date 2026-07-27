@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Three backends wrap vendored submodules (libhangul, anthy-unicode, pyzy). A fourth, the table-driven engine behind `PATHIME_ENGINE_TABLE`, is **ours to write**: `ibus-table` is Python and cannot be linked against, so it serves as the reference feature set only, and `docs/ibus-table-spec.md` is the specification we implement. It does not exist yet — `LIBPATHIME_WITH_TABLE` defaults OFF and is refused if turned on — but it is a real engine for API-design purposes. See `TODO.md` §4.
 
-> **Build:** a CMake build for the three submodules is in place and verified on both Linux and Windows (MSVC and clang-cl). See `BUILD.md` — its "Windows" section documents the compat layer, the generated source variants, and the known runtime limitations, and its "Tests" section covers the suites under `tests/`. The vendored submodule trees are never edited; if something needs a source change to compile on Windows, it goes through the compat headers or a configure-time generated copy. NOTE! If you are on Linux, you are in a sbx environment on Windows. Build in `/tmp` to avoid issues with symlinks and case-insensitivity.
+> **Build:** a CMake build for the three submodules is in place and verified on both Linux and Windows (MSVC and clang-cl). The library itself and the first vertical slice of all three adapters are implemented and tested end to end; `TODO.md` §4a is what that slice left. See `BUILD.md` — its "Windows" section documents the compat layer, the generated source variants, and the known runtime limitations, and its "Tests" section covers the suites under `tests/`. The vendored submodule trees are never edited; if something needs a source change to compile on Windows, it goes through the compat headers or a configure-time generated copy. NOTE! If you are on Linux, you are in a sbx environment on Windows. Build in `/tmp` to avoid issues with symlinks and case-insensitivity.
 
 ## Repository Structure
 
@@ -21,9 +21,11 @@ docs/                    # Documentation and project design information
   ibus-table-spec.md     # Clean-room behavioral spec for ibus-table (source format, DB schema, engine logic)
   *-mapping.md           # Overview of how the submodule libraries relate to the concepts
   *-options.md           # Per-library option inventories, for the options design round
-src/                     # Library implementation — stubbed skeleton; the map is docs/source-layout.md
+src/                     # Library implementation; the map is docs/source-layout.md
+  backend.h              # The seam between core and adapters
+  composition.h          # The structured composition model core and adapters share
   engines/               # One adapter directory per backend, plus table/ for the future table engine
-tests/                   # Test suites: one directory per backend, plus api/ — see BUILD.md
+tests/                   # Test suites: one per backend, plus api/ and core/ — see BUILD.md
 refs/                    # Local reference clones — gitignored, not submodules
   ibus-hangul/           # Korean IBus engine (reference)
   ibus-anthy/            # Japanese IBus engine (reference)

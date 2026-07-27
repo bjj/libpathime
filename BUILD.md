@@ -114,13 +114,32 @@ On Windows add `-C Release` to the `ctest` line (the Visual Studio generator is
 multi-config). Tests are named `<backend>.<name>`, so `ctest -R '^anthy\.'`
 runs one backend's suite.
 
-The suite passes on Linux (19 tests) and on Windows under both MSVC and
-clang-cl (18 — see `hangul.vendored.unittest` below for the missing one).
+The suite passes on Linux (30 tests). On Windows the vendored count is one
+lower — see `hangul.vendored.unittest` below for the missing one.
 
-`tests/api/` holds the suite for libpathime's own API surface (`api.<name>`):
-plain C11 against `<pathime/pathime.h>`, doubling as proof the header works
-from strict C. Tests registered ahead of their implementation exit 77, which
-ctest reports as *skipped* — see `tests/api/CMakeLists.txt`.
+Two of the directories are libpathime's own, and they differ in what they link:
+
+- `tests/api/` (`api.<name>`) links the built library and touches only
+  exported symbols. Plain C11 against `<pathime/pathime.h>`, which doubles as
+  proof the header works from strict C and that every symbol a client needs is
+  actually exported. It holds the ABI, lifecycle and options suites, plus one
+  end-to-end test per engine that types real Korean, Japanese and Chinese
+  through the public API.
+- `tests/core/` (`core.<name>`) compiles the internal sources under test
+  directly into each executable, because internal helpers carry no
+  `PATHIME_API` and a shared build does not export them. C++17, covering
+  `utf8.*`, `composition.*` and the options machinery at seams the public API
+  cannot reach.
+
+The three engine tests are the only ones under `tests/api/` gated on a
+`LIBPATHIME_WITH_*` option, because they need their backend's *runtime data*
+rather than just the library — anthy's dictionary and pyzy's database, neither
+of which exists at its installed location in a build tree. That wiring lives in
+`tests/api/CMakeLists.txt`; it is a test-environment problem, not a library
+one, and the library must not grow code to hunt for data files itself.
+
+A test registered ahead of its implementation exits 77, which ctest reports as
+*skipped*. Never delete a registration.
 
 Everything else lives under `tests/<backend>/`, and each directory holds two
 kinds:
