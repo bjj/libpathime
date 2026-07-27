@@ -621,3 +621,10 @@ Three smaller header/implementation divergences, all pinned down by tests:
   whether a client's behaviour depends on it, and whether removing it would let
   someone reopen a question this design already closed. Do not do this early —
   removing the reasoning before the code replaces it loses it entirely.
+
+- **Build a demo app based on CPP-Terminal**
+  Create demo/ which conditionally compiles based on its own flag. Bring in CPP-Terminal https://github.com/jupyter-xeus/cpp-terminal as a submodule under demo/. It is a portable
+  windows/linux terminal library. That will let us write an interactive IME demo
+  that has one interactive input, displays preedit and aux texts, lets users select
+  candidates, etc. It can have interactive engine selection, maybe even expose options
+  to play with.
