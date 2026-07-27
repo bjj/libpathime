@@ -26,7 +26,7 @@
  *    immediately (utf8.h helpers).
  *
  * Per-backend gotchas (flush semantics, the unknown-keyboard crash, the
- * two-call length protocol) are in docs/*-mapping.md — consult those rather
+ * two-call length protocol) are in the docs/ mapping notes — consult those rather
  * than re-deriving.
  */
 

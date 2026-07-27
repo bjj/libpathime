@@ -11,17 +11,215 @@
  *    sets a PATHIME_REQUIRES_* bit;
  *  - the engine level of the two-level option store (the machinery itself is
  *    options.cc's).
+ *
+ * The handle lifecycle here is real, including the success path that nothing
+ * can currently reach: the registry is honestly empty, because a backend being
+ * compiled in is not the same as an adapter existing to drive it, so every
+ * creation is PATHIME_ERROR_UNKNOWN_ENGINE until src/engines/ has code.
+ *
+ * Allocation discipline is init.cc's: std::bad_alloc is caught at the boundary
+ * and becomes PATHIME_ERROR_OUT_OF_MEMORY, rather than new(std::nothrow),
+ * which would not cover a throwing member constructor.
  */
 
 #include <pathime/pathime.h>
 
+#include <new>
+
+#include "engine.h"
+#include "init.h"
+
+namespace pathime {
+
+bool engine_available(pathime_engine_id_t id)
+{
+    /*
+     * False for everything before pathime_init(), as the header promises and
+     * tests/api/abi_test.c asserts. This is not a formality: an engine's
+     * runtime prerequisites — libhangul's keyboard registry, anthy's
+     * dictionaries, pyzy's shared database — are precisely what pathime_init()
+     * opens, so before it there is nothing to report on.
+     */
+    if (!initialized()) {
+        return false;
+    }
+
+    /*
+     * The registry. Each arm exists exactly when this build contains the
+     * backend behind it, which is why the #ifs wrap the cases rather than the
+     * bodies: an id whose backend was compiled out falls through to the
+     * default, together with a value that is not an engine id at all. Note
+     * that the mapping is not one-to-one — pyzy supplies both PINYIN and
+     * BOPOMOFO, since the phonetic scheme is fixed when its context is created
+     * — so a per-id switch is the registry's real shape, not a per-macro one.
+     *
+     * Every arm answers false today. Turning an adapter on is then the
+     * one-line change each TODO(impl) names, and nothing else here moves.
+     */
+    switch (id) {
+#if PATHIME_WITH_HANGUL
+    case PATHIME_ENGINE_HANGUL:
+        /* TODO(impl): libhangul is linked in, but src/engines/hangul has no
+         * adapter yet. Replace with the hangul adapter's availability query —
+         * which will be an unconditional true, because hangul is the one
+         * backend with no process-global prerequisite to fail: its nine
+         * built-in layouts are static tables, and hangul_init() exists only
+         * under ENABLE_EXTERNAL_KEYBOARDS, which this build turns off. See the
+         * matching note in init.cc's pathime_init(). */
+        return false;
+#endif
+
+#if PATHIME_WITH_ANTHY
+    case PATHIME_ENGINE_ANTHY:
+        /* TODO(impl): replace with the anthy adapter's availability query —
+         * anthy_init() having succeeded and its dictionaries having opened,
+         * which is the one prerequisite here that genuinely fails at runtime. */
+        return false;
+#endif
+
+#if PATHIME_WITH_PYZY
+    case PATHIME_ENGINE_PINYIN:
+    case PATHIME_ENGINE_BOPOMOFO:
+        /* TODO(impl): replace with the pyzy adapter's availability query —
+         * PyZy::InputContext::init() having succeeded, i.e. the shared SQLite
+         * database opened. Both ids are answered together on purpose: one
+         * backend, one prerequisite, two phonetic schemes. */
+        return false;
+#endif
+
+#if PATHIME_WITH_TABLE
+    case PATHIME_ENGINE_TABLE:
+        /* TODO(impl): replace with the table engine's own readiness. Unlike
+         * the three above it wraps no submodule — it is ours to write, to
+         * docs/ibus-table-spec.md — and needs no global prerequisite, so this
+         * becomes an unconditional true once the engine exists (a context
+         * without a resolved PATHIME_OPT_TABLE_FILE simply produces nothing).
+         * PATHIME_WITH_TABLE is 0 in every build for now; see TODO.md §4. */
+        return false;
+#endif
+
+    default:
+        /* The backend is not in this build, or @a id is not an engine id.
+         * Both mean the same thing to a caller: do not try to create it. */
+        return false;
+    }
+}
+
+}  // namespace pathime
+
 bool pathime_has_engine(pathime_engine_id_t id)
 {
-    /* Documented as false for every engine before pathime_init() has
-     * succeeded — and pathime_init() is not implemented yet, so this is
-     * unconditionally false, honestly. The real registry (PATHIME_WITH_*
-     * gating plus runtime prerequisites such as dictionaries) replaces this
-     * body when init.cc lands. */
-    (void)id;
-    return false;
+    return pathime::engine_available(id);
+}
+
+pathime_status_t pathime_engine_create(pathime_engine_id_t id,
+                                       pathime_engine_t **out_engine)
+{
+    /* Arguments, then initialization, then state — the library-wide order.
+     * out_engine is left untouched on every one of these paths. */
+    if (out_engine == nullptr) {
+        return PATHIME_ERROR_INVALID_ARGUMENT;
+    }
+    if (!pathime::initialized()) {
+        return PATHIME_ERROR_NOT_INITIALIZED;
+    }
+
+    /* engine_available() answers false when uninitialized too, so the check
+     * above is what separates "you have not called pathime_init()" from "this
+     * library cannot supply that engine" — two very different fixes. */
+    if (!pathime::engine_available(id)) {
+        return PATHIME_ERROR_UNKNOWN_ENGINE;
+    }
+
+    /*
+     * Unreachable today, and written properly regardless: this is the object
+     * lifecycle the whole engine layer rests on, and having it here means
+     * enabling an adapter is a change to the registry above and to the marked
+     * gap below, not to the entry point.
+     */
+    pathime_engine_t *engine = nullptr;
+    try {
+        engine = new pathime_engine();
+    } catch (const std::bad_alloc &) {
+        return PATHIME_ERROR_OUT_OF_MEMORY;
+    }
+    engine->id = id;
+
+    /*
+     * TODO(impl): construct the backend's engine-level state here — the one
+     * thing an adapter owns at this layer (engine.h's trailing member), as
+     * whatever handle backend.h ends up defining. On failure: delete engine,
+     * leave *out_engine untouched, and return PATHIME_ERROR_BACKEND. Nothing
+     * is published to the caller until it has succeeded.
+     */
+
+    *out_engine = engine;
+    return PATHIME_OK;
+}
+
+void pathime_engine_destroy(pathime_engine_t *engine)
+{
+    /*
+     * NULL is a no-op, which `delete` already gives us.
+     *
+     * The contract that every context created from this engine has already
+     * been destroyed is the caller's, and it is left as one: engine.contexts
+     * would make a check trivial, but a library that aborts on a client bug is
+     * worse than one that documents the obligation, and there is no error
+     * channel here to report it through. What the list does guarantee is that
+     * a well-behaved caller leaves it empty, so nothing here dangles.
+     */
+    delete engine;
+}
+
+pathime_engine_id_t pathime_engine_id(const pathime_engine_t *engine)
+{
+    /*
+     * Deliberately not NULL-guarded. pathime_engine_id_t has no "none" value,
+     * so any answer this could invent for a NULL handle would name a real
+     * engine and mislead the caller into thinking it holds one — worse than
+     * the caller's own bug surfacing where it happened. A valid handle is part
+     * of the contract for this call.
+     */
+    return engine->id;
+}
+
+uint32_t pathime_engine_requirements(const pathime_engine_t *engine)
+{
+    /* Unlike pathime_engine_id() this one has an honest answer for a handle
+     * that does not exist: no callback obligation can arise from it. */
+    if (engine == nullptr) {
+        return 0;
+    }
+
+    /*
+     * PATHIME_HANGUL_PREEDIT_NONE is the only thing in the library that sets
+     * either bit (TODO.md §1, "Cut in the API review round"). It holds no
+     * preedit at all, building each syllable inside the client's document by
+     * deleting the partial form and recommitting a fuller one, so it can only
+     * work against a client that both supplies surrounding text and can delete
+     * what it sees. Every other engine in every other configuration requires
+     * nothing, which is why this function is usually 0.
+     *
+     * Resolved at the engine level — nullptr for the context — and that is the
+     * point rather than an omission: engine-level resolution deliberately does
+     * no capability capping, so this reports the true configured value. A
+     * context whose client cannot serve it is rejected by
+     * pathime_context_create() against exactly this answer, which is only
+     * possible because the value has not already been quietly capped.
+     *
+     * The header's contract holds here: these are the *engine's* requirements,
+     * so a context that overrides PATHIME_OPT_HANGUL_PREEDIT itself needs
+     * whatever its own resolved value needs, and the option's documentation is
+     * what a client reads for that.
+     */
+    uint32_t requirements = 0;
+
+    if (pathime::resolve_option_number(engine, nullptr, PATHIME_OPT_HANGUL_PREEDIT) ==
+        PATHIME_HANGUL_PREEDIT_NONE) {
+        requirements |= PATHIME_REQUIRES_SURROUNDING_TEXT |
+                        PATHIME_REQUIRES_DELETE_SURROUNDING;
+    }
+
+    return requirements;
 }

@@ -21,7 +21,7 @@
  * positions are Unicode scalar values; utf8.h owns the conversions.
  *
  * Design the representation against all three mapping docs at once
- * (docs/*-mapping.md); the shape of backend.h falls out of it.
+ * (the docs/ per-library mapping notes); the shape of backend.h falls out of it.
  */
 
 #ifndef LIBPATHIME_SRC_COMPOSITION_H

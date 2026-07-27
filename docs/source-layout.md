@@ -13,16 +13,21 @@ src/
   CMakeLists.txt        the `pathime` library target; defines PATHIME_BUILD, carries
                         the public include dirs (the old libpathime::headers
                         interface target is folded in and retired)
-  init.cc               process-global layer: pathime_init/shutdown, init params,
-                        version + status introspection (implemented)
-  engine.cc             pathime_engine_*: registry, handles, requirements,
-                        engine-level options
-  context.cc            pathime_context_*: lifecycle, process_key entry, focus /
-                        reset / surrounding text, callback dispatch ordering
+  init.h/.cc            process-global layer: pathime_init/shutdown, init params,
+                        version + status introspection; the header answers the
+                        two questions every other file asks — initialized(),
+                        data_dir()
+  engine.h/.cc          pathime_engine_*: registry, handles, requirements. The
+                        header defines struct pathime_engine
+  context.h/.cc         pathime_context_*: lifecycle, process_key entry, focus /
+                        reset / surrounding text, callback dispatch ordering. The
+                        header defines struct pathime_context
   composition.h/.cc     structured composition model + projection to the flat value
-  candidates.cc         eager materialization to the cap; currently-shown cursor
+  candidates.cc         pathime_context_candidate/_select_candidate; eager
+                        materialization to the cap; currently-shown cursor
   options.h/.cc         descriptor table, two-level store, kind-typed accessors,
-                        introspection walk
+                        introspection walk — and all 19 public option entry
+                        points, both levels
   keys.h/.cc            engine-agnostic key layer: validation, routing,
                         handled/unhandled
   utf8.h/.cc            encoding boundaries; copy-on-return helpers
@@ -51,6 +56,37 @@ everything an adapter provides crosses through `backend.h`. There is
 deliberately no `engines/common/`: if something is shared between engines, it
 is a core obligation and lives in `src/` — the eager candidate pump
 (`candidates.cc`) is the standing example.
+
+**The two handle types are defined in headers, not in their `.cc` files.**
+`struct pathime_engine` is in `engine.h` and `struct pathime_context` is in
+`context.h` because in each case more than one core file has to reach inside:
+`options.cc` reads and writes both levels of the option store, `candidates.cc`
+reads the context's materialized list, and `context.cc` registers itself in the
+engine's context list for the engine-level broadcast. Both complete the
+incomplete types the public header's typedefs declare, so they sit in the
+global namespace while everything around them is in `namespace pathime`.
+
+## Which file owns which entry point
+
+Roughly one file per section of the public header, with two seams worth stating
+because they are not obvious from the names:
+
+| Entry points | Home |
+|---|---|
+| `pathime_version*`, `pathime_status_string`, `pathime_init`, `pathime_shutdown` | `init.cc` |
+| `pathime_has_engine`, `pathime_engine_create/destroy/id/requirements` | `engine.cc` |
+| `pathime_context_create/destroy/engine/user_data`, `_process_key`, `_composition`, `_set_surrounding_text`, `_set_focused`, `_reset` | `context.cc` |
+| `pathime_context_candidate`, `pathime_context_select_candidate` | `candidates.cc` |
+| all 19 `pathime_*option*` functions, both levels | `options.cc` |
+
+The two seams: **candidate access lives with the candidate subsystem**, not with
+the rest of `pathime_context_*`, because both functions are thin faces over the
+materialized list and the cursor that `candidates.cc` owns outright — though
+`select_candidate` still ends in `context.cc`'s post-mutation assembly like
+every other mutating call. And **the option entry points live in `options.cc`
+rather than being split between `engine.cc` and `context.cc`**: they are
+kind-typed pairs that differ only in which store they consult first, and
+splitting them would put the two halves of one resolution rule in two files.
 
 ## Who owns which finding
 

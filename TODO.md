@@ -26,11 +26,30 @@ Done:
   `libpathime::headers` interface target is folded into the real target and
   retired, and `PATHIME_BUILD` is defined where it belongs.
 
+- The `src/` stub-out: all 40 public entry points exist, compile, and link from
+  strict C. Three internal object headers were added — `src/init.h`,
+  `src/engine.h`, `src/context.h` — because `struct pathime_engine` and
+  `struct pathime_context` had no definition and more than one core file has to
+  reach inside each; `src/options.h` gained its real types at the same time.
+  `docs/source-layout.md` records which file owns which entry point.
+
+  Everything with no backend dependency is *implemented*, not stubbed: the
+  process-global lifetime and `data_dir` resolution, the engine registry (real
+  in shape, honestly empty), engine and context handle lifecycle, focus, the
+  surrounding-text snapshot with full UTF-8 validation, and the whole options
+  machinery — a 32-row descriptor table, four-tier resolution, the two-level
+  store, and the in-and-out `struct_size` protocol. Everything that crosses
+  `backend.h` returns a determinate failure behind a `TODO(impl):` comment
+  naming what replaces it.
+
 Not started:
 
-- Any real implementation. Only the pre-init introspection (version, status
-  strings, `pathime_has_engine`'s pre-init falsity) has code behind it;
-  everything else in `src/` is an intent comment awaiting the design in §3.
+- The adapter layer. Nothing in `src/engines/` has code, so the registry
+  answers false for every engine and `pathime_engine_create()` is always
+  `PATHIME_ERROR_UNKNOWN_ENGINE` — which makes every context-level entry point
+  correct but unreachable. Their success paths are written anyway; that is what
+  makes enabling an adapter a change to the registry and the marked gaps rather
+  than to the entry points.
 - The table-driven engine. `PATHIME_ENGINE_TABLE` exists in the header and
   `LIBPATHIME_WITH_TABLE` exists in the build, but the option defaults OFF and
   is forced off with an explanatory warning if requested, because there is no
@@ -160,10 +179,20 @@ context must track it itself.
 ### Finding 3 — two-layer lifetime everywhere
 
 Process-global one-time init (pyzy's shared SQLite `Database` and
-`SpecialPhraseTable` via `InputContext::init()`; libhangul's process-global
-keyboard registry via `hangul_init()`; anthy's `anthy_init()`) is separate from
-per-context handles (`HangulInputContext*`, `anthy_context_t`,
+`SpecialPhraseTable` via `InputContext::init()`; anthy's `anthy_init()`) is
+separate from per-context handles (`HangulInputContext*`, `anthy_context_t`,
 `PyZy::InputContext*`), which are one owned handle each and caller-destroyed.
+
+**Corrected during the `src/` stub-out:** this finding used to name libhangul's
+keyboard registry via `hangul_init()` as a third case. It is not one in our
+build. `hangul_init()`/`hangul_fini()` exist only under
+`ENABLE_EXTERNAL_KEYBOARDS` (`libhangul/hangul/hangul.h:99-103`,
+`hangulkeyboard.c:994-1033`), which the top-level `CMakeLists.txt:34` turns off
+to avoid an EXPAT dependency and a `sed -i` codegen step. Without it the nine
+built-in layouts are static tables and hangul has **no** process-global setup at
+all — it is the one backend whose availability cannot fail at runtime. Recorded
+at the two places that would otherwise have coded around it, in `src/init.cc`'s
+`pathime_init()` and `src/engine.cc`'s registry.
 
 This one is already realized in the API: `pathime_init()` / `pathime_shutdown()`
 are the global layer, `pathime_engine_*` holds what is shared across contexts,
@@ -270,6 +299,37 @@ adapter layer for the three backends that do exist.
 - **Thread-safety is a documented requirement, not an enforced one.** Nothing
   detects overlapping calls. If that proves to be a common client bug, a debug
   build could catch it cheaply with a non-recursive in-call flag per context.
+
+- **Two header sentences the stub-out had to interpret.** Both were decided in
+  code with the reasoning written at the decision point; both are cheap to flip
+  if the reading is wrong, and neither is a design change.
+
+  `pathime_*_reset_option()` says "resetting an option that was never set is a
+  no-op" and, in the next sentence, "behaves in every other respect like a
+  setter, including resetting the composition for options that require it."
+  Taken literally: nothing was dropped, so nothing resolves differently, so
+  there is no composition reset and no dispatch. The second sentence governs
+  the case where a value *was* set. `src/options.cc`'s `reset_option()`.
+
+  Whether a *context*-level set dispatches `composition_changed` is spelled out
+  in the header only for the engine level, where it matters because the
+  callbacks belong to contexts the caller never passed. The context form was
+  made symmetric, on the strength of "when a change takes effect: always
+  immediately."
+
+- **`src/candidates.h` does not exist yet.** `materialize_candidates()` is
+  declared at the top of `src/context.cc` rather than in a header, because one
+  function nothing else names is not worth one. It becomes the right answer as
+  soon as the pump has real work: the enumeration entry point, the
+  currently-shown cursor accessor, and the selection path all want declaring in
+  one place.
+
+- **Pending output has no home.** `refresh_composition()` dispatches
+  `delete_surrounding_text` and then `commit_text` before
+  `composition_changed`, but nothing yet holds the deletion range or the commit
+  text a mutation produced. It is probably the structured model's business
+  rather than `pathime_context`'s, so it is listed here rather than guessed at
+  — it belongs with §3 question 1.
 
 - **The header explains itself against the backends; one day it should not.**
   Much of the commentary in `include/pathime/pathime.h` justifies a decision by
