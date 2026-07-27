@@ -24,9 +24,12 @@ Done:
   process-global lifetime and `data_dir` resolution, the engine registry, both
   handle lifecycles, focus, the surrounding-text snapshot, the key layer
   (`keys.*`), the encoding boundary (`utf8.*`), the structured composition
-  model and its projection (`composition.*`), the eager candidate pump
-  (`candidates.cc`), and the options machinery — a 32-row descriptor table,
-  four-tier resolution, the two-level store, and the `struct_size` protocol.
+  model and its projection (`composition.*`) — including `Output`, which is
+  where a mutation's pending commit text and deletion range live until
+  `refresh_composition()` dispatches them in the header's fixed order — the
+  eager candidate pump (`candidates.cc`), and the options machinery: a 32-row
+  descriptor table, four-tier resolution, the two-level store, and the
+  `struct_size` protocol.
   `docs/source-layout.md` maps which file owns what.
 - **The seam.** `src/backend.h` and `src/composition.h` — §3's two deferred
   questions, answered together against all three mapping docs.
@@ -35,7 +38,7 @@ Done:
   C API and verified end to end. `src/engines/{hangul,anthy,pyzy}` implement
   `backend.h`, and `src/engines/anthy/romaji.*` is the composing front end anthy
   needs. What the slice left undone is §4a — start there.
-- **Tests: 30, all passing.** `tests/core/` compiles internal sources directly,
+- **Tests: 31, all passing.** `tests/core/` compiles internal sources directly,
   because internal helpers carry no `PATHIME_API` and a shared build would not
   export them. `tests/api/` holds the ABI, lifecycle and options suites plus one
   end-to-end test per engine; those three need their backend's *data*, which is
@@ -54,12 +57,20 @@ Not started:
 
 ## 1. Design rounds not yet held
 
-The header covers the core loop and options. One area remains deferred with no
-API surface at all:
+The header covers the core loop and options. One area has no API surface at
+all, and is now **deliberately out of v1** rather than pending:
 
 - **Input purpose and hints** — ordinary text / name / email / URL / number /
   telephone / password, single-line vs. multiline, and the assistance toggles
   (spelling, prediction, completion, auto-capitalization).
+
+  **Deferred past v1** (decided 2026-07-27). Nothing in the three backends
+  consumes a purpose or a hint, and this project's standing habit is to remove
+  concepts no backend justifies rather than carry them "just in case". The
+  extension is additive when a consumer appears — most likely the table engine,
+  which is the one with a plausible opinion (a URL field wanting Latin
+  passthrough). Until then this is not unfinished work, and a reader should not
+  treat it as a gap.
 
 **Engine options and negotiation are done** — the Options section of
 `include/pathime/pathime.h`. 32 options, 8 of them common to several engines and
@@ -133,33 +144,23 @@ implementation. The surviving inventory is in the header, not here.
   `docs/libhangul-mapping.md:158`). It is the only thing in the library that
   sets either `PATHIME_REQUIRES_*` bit.
 
-### One claim to re-check during implementation — **answered**
+### One claim to re-check during implementation — **answered, and acted on**
 
-`PATHIME_OPT_PINYIN_FUZZY` and `PATHIME_OPT_PINYIN_CORRECTION` were scoped to
-Pinyin on reasoning that was never traced to pyzy's bopomofo-to-pinyin tables.
-It was traced while writing the adapter, by walking `bopomofo_table`
-(`PinyinParserTable.h:6622`, 479 rows) into the `pinyin_table` entries it points
-at, and the answer is **split**:
+Whether `PATHIME_OPT_PINYIN_FUZZY` and `PATHIME_OPT_PINYIN_CORRECTION` are
+Pinyin-only was traced through pyzy's `bopomofo_table` while writing the
+adapter, and the answer is **split**: fuzzy *is* reachable from bopomofo (61
+rows carry a `PINYIN_FUZZY_*` bit), correction is not (zero rows reach a
+`PINYIN_CORRECT_*` bit). `src/options.cc` widened the fuzzy row to `kPyzy` and
+left correction at `kPinyin`; the derivation and the behavioural confirmation
+are in the comment at `src/options.cc:229`.
 
-- **Fuzzy is reachable from bopomofo.** 61 of those rows carry a
-  `PINYIN_FUZZY_*` bit, across 16 distinct bits — 12 of the 14 consonant pairs
-  (all but `CH_C` and `G_K`), plus `EN_ENG`, `IN_ING`, and the `AN_ANG`/`ANG_AN`
-  pair that `IAN_IANG` and `UAN_UANG` alias. `check_flags`
-  (`PinyinParser.cc:34-49`) makes `parseBopomofo` stop at a syllable whose bit
-  is clear. Confirmed behaviourally: ㄈㄨㄥ parses as "fong" and yields 红 with
-  `PATHIME_PINYIN_FUZZY_F_H` set, and as "fu" with ㄥ stranded in `restText`
-  without it. `src/options.cc` widened the row to `kPyzy`.
-- **Correction is not.** Zero rows of `bopomofo_table` reach an entry carrying a
-  `PINYIN_CORRECT_*` bit. The original reasoning holds for this one:
-  corrections are Latin typing slips, and there is no bopomofo spelling to slip
-  in. The row stays `kPinyin`.
+Both keep their `PATHIME_OPT_PINYIN_` prefix: the name describes what the rules
+are *about*, and bopomofo reaches them only by being parsed into pinyin first.
 
-Both keep their `PATHIME_OPT_PINYIN_` prefix and their place in the header's
-Pinyin section: the name describes what the rules are *about*, and bopomofo
-reaches them only by being parsed into pinyin first. The header's doc comment
-for `PATHIME_OPT_PINYIN_FUZZY` should gain an explicit "Pinyin, Bopomofo." line
-at the next header pass — unlike the unprefixed options it names no engines, so
-the section heading is currently all a reader has.
+**Left to do:** the header's doc comment for `PATHIME_OPT_PINYIN_FUZZY` should
+gain an explicit "Pinyin, Bopomofo." line — unlike the unprefixed options it
+names no engines, so the section heading is currently all a reader has. One
+line, at the next header pass.
 
 ## 2. The adapter layer
 
@@ -354,25 +355,40 @@ is implemented and tested end to end (`api.engine_hangul`, `api.engine_anthy`,
   order, and the snapshot-invalidation rule in one go.
 - **`PATHIME_ANTHY_TYPING_KANA`.** Marked, and declines every key rather than
   silently falling through to romaji.
-- **`PATHIME_OPT_LEARNING` on pyzy.** The header says the library implements it
-  for anthy and pyzy "by withholding the learning commit". That works for anthy
-  — `anthy_commit_segment` is a separate call we can skip — but pyzy learns
-  *inside* `selectCandidate()`/`commit()` via `PhraseEditor::commit()`, and its
-  public header exposes no switch, only `resetCandidate()` to unlearn one entry
-  afterwards. The option is also per-context while pyzy's user database is
-  process-global. Either it reports itself unsupported for these two engine ids,
-  or it is implemented by redirecting pyzy's user-cache directory — a change to
-  `pyzy_global_init()`'s contract, not to the adapter. **The header currently
-  overpromises; pick one and make them agree.**
-- **pyzy's availability cannot be detected.** `InputContext::init()` returns
-  void, and beneath it `Database::init()` constructs the singleton whether or
-  not `open()` found a database (`Database.cc:202-208, 729-734`), so a missing
-  `main.db` is indistinguishable from a working one through the public header —
-  pyzy reports it with a `g_warning` and nothing else. A conversion probe is
-  *not* the answer: with no database open `m_db` is NULL and the query path
-  dereferences it, so the probe meant to detect the broken install is the thing
-  that crashes on it. A real check belongs in front of `InputContext::init()`,
-  testing for a readable database file, and needs `PKGDATADIR`.
+- **`PATHIME_OPT_LEARNING` on pyzy — decided, not yet applied.** The header says
+  the library implements it for anthy and pyzy "by withholding the learning
+  commit". That works for anthy — `anthy_commit_segment` is a separate call we
+  can skip — but pyzy learns *inside* `selectCandidate()`/`commit()` via
+  `PhraseEditor::commit()`, and its public header exposes no switch, only
+  `resetCandidate()` to unlearn one entry afterwards.
+
+  **Decision (2026-07-27): report it unsupported on pyzy.** The rejected
+  alternative was redirecting pyzy's user-cache directory from
+  `pyzy_global_init()`. That was turned down because it does not fix the second
+  mismatch: the option is per-context while pyzy's user database is
+  process-global, so two contexts disagreeing about learning would still be
+  unrepresentable — the redirect would buy a half-true implementation at the
+  cost of a changed global-init contract. Unsupported is the honest report.
+  **To do:** widen the option's engine set to exclude pyzy in `src/options.cc`,
+  and amend the header to promise anthy only.
+- ~~**pyzy's availability cannot be detected.**~~ **Done (2026-07-27.)**
+  `pyzy_database_present()` in `src/engines/pyzy/pyzy_backend.cc` runs in front
+  of `PyZy::InputContext::init()` and mirrors `Database::open()`'s four
+  candidates (`Database.cc:247-252`) with the same `stat`/`S_ISREG` predicate
+  glib's `G_FILE_TEST_IS_REGULAR` uses; `PKGDATADIR` reaches the adapter as
+  `PATHIME_PYZY_PKGDATADIR`, derived in `src/CMakeLists.txt` from the same
+  expression the pyzy port uses so the two cannot drift. Returning false leaves
+  `PyZy::InputContext::init()` uncalled, which keeps `finalize()` balanced.
+  Covered by `api.engine_pyzy_nodb`, which is registered only when the
+  configure-time probe finds no system-wide pyzy database — its premise is a
+  property of the machine, not of the build.
+
+  Two things worth keeping: the conversion probe is still *not* the answer (with
+  no database open `m_db` is NULL and the query path dereferences it, so the
+  probe meant to detect the broken install is what crashes on it), and the
+  mirrored candidate list is now duplicated in `tests/api/CMakeLists.txt`'s
+  probe as well — three places if pyzy's list ever changes, in a vendored tree
+  we do not edit.
 - **`ContextBackend::options_changed()` closed a real gap, and there may be
   more of its kind.** A mid-composition option change reached the store and the
   getters but not the engine: pyzy had already converted, and "options are
@@ -394,15 +410,24 @@ Three smaller header/implementation divergences, all pinned down by tests:
 - The descriptor reports `max-candidates`'s maximum as `INT64_MAX`. The header
   states a minimum of 1 and no maximum, leaving the representation open.
 - `Return` on pyzy commits the **raw** input (`"nihao"`), not the 你好 the
-  preedit is showing. Verified, and it matches ibus-pinyin, but it is the kind
-  of thing a client will report as a bug.
+  preedit is showing. Verified, and it matches ibus-pinyin. **Decided
+  (2026-07-27): keep it, and write the rule into the header** so it reads as
+  chosen rather than accidental — `Return` means "I did not want conversion,
+  give me what I typed", and it is the only key that escapes conversion without
+  backspacing out of the composition. Documenting it is the whole fix; the
+  behaviour does not change.
 
 ## 5. Loose ends
 
-- **pyzy schedules its user-database save through glib.** `Database` uses
-  `g_timeout_add` and a `GTimer` (`pyzy/src/Database.h:98-101`). That is not a
-  thread, but it needs a running `GMainLoop` we will not have, so the save will
-  never fire. The adapter has to drive it explicitly.
+- **pyzy's user-database save is handled — do not go looking for a save call.**
+  This used to read as an open obligation: `Database` schedules its save with
+  `g_timeout_add_seconds` (`pyzy/src/Database.h:98-101`) and the timeout never
+  fires, because nothing runs a `GMainLoop`. But the timeout id is still set,
+  which is exactly what `~Database` tests before saving, so
+  `Database::finalize()` at our global-shutdown does the save. Recorded because
+  the next reader will re-derive the first half and conclude, wrongly, that
+  learning is being dropped. `src/engines/pyzy/pyzy_backend.cc:816`.
+
 - **The JIS ¥-vs-ろ distinction cannot be expressed.** `layout_key` is a
   US-QWERTY keysym and neither key exists on that layout, so anthy's one
   keycode-dependent case is lost. Accepted: it is kana-hardware-only and
@@ -448,19 +473,13 @@ Three smaller header/implementation divergences, all pinned down by tests:
   made symmetric, on the strength of "when a change takes effect: always
   immediately."
 
-- **`src/candidates.h` does not exist yet.** `materialize_candidates()` is
-  declared at the top of `src/context.cc` rather than in a header, because one
-  function nothing else names is not worth one. It becomes the right answer as
-  soon as the pump has real work: the enumeration entry point, the
-  currently-shown cursor accessor, and the selection path all want declaring in
-  one place.
-
-- **Pending output has no home.** `refresh_composition()` dispatches
-  `delete_surrounding_text` and then `commit_text` before
-  `composition_changed`, but nothing yet holds the deletion range or the commit
-  text a mutation produced. It is probably the structured model's business
-  rather than `pathime_context`'s, so it is listed here rather than guessed at
-  — it belongs with §3 question 1.
+- **`src/candidates.h` still does not exist, and the trigger has now fired.**
+  `materialize_candidates()` is declared at the top of `src/context.cc` rather
+  than in a header, on the grounds that one function nothing else names is not
+  worth one. `src/candidates.cc` now has real work in it, so the condition that
+  note set for itself is met: the enumeration entry point, the currently-shown
+  cursor accessor, and the selection path all want declaring in one place.
+  Mechanical, do it with the next change that touches the pump.
 
 - **The header explains itself against the backends; one day it should not.**
   Much of the commentary in `include/pathime/pathime.h` justifies a decision by

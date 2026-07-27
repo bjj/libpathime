@@ -114,8 +114,10 @@ On Windows add `-C Release` to the `ctest` line (the Visual Studio generator is
 multi-config). Tests are named `<backend>.<name>`, so `ctest -R '^anthy\.'`
 runs one backend's suite.
 
-The suite passes on Linux (30 tests). On Windows the vendored count is one
-lower — see `hangul.vendored.unittest` below for the missing one.
+The suite passes on Linux (31 tests). On Windows the vendored count is one
+lower — see `hangul.vendored.unittest` below for the missing one. One further
+test, `api.engine_pyzy_nodb`, is registered only on a machine with no
+system-wide pyzy database; see the note on it below.
 
 Two of the directories are libpathime's own, and they differ in what they link:
 
@@ -143,6 +145,17 @@ one, and the library must not grow code to hunt for data files itself. Both
 tests reach their data the way an installation would: anthy through a
 build-tree conf file named by the `CONFFILE` environment variable, pyzy through
 a `main.db` staged into the test's working directory.
+
+`api.engine_pyzy_nodb` is the inverse of that last one, and the only test in
+the tree whose *registration* depends on the machine rather than the build. It
+asserts that a pyzy which cannot find a database reports itself absent through
+`pathime_has_engine()` instead of pretending to work — which is only a true
+statement when no database is reachable, and pyzy looks in its compiled-in
+`PKGDATADIR` before it looks in the working directory. The working directory
+the test runs in is one this build creates and never stages a `main.db` into;
+`PKGDATADIR` is probed at configure time, and if a system-wide pyzy is
+installed there the test is not registered and CMake says so at `STATUS`. Do
+not "fix" its absence on such a machine.
 
 A test registered ahead of its implementation exits 77, which ctest reports as
 *skipped*. Never delete a registration.
