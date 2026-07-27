@@ -410,13 +410,14 @@ Three smaller header/implementation divergences, all pinned down by tests:
   "use the default" — but the header documents only what NULL does.
 - The descriptor reports `max-candidates`'s maximum as `INT64_MAX`. The header
   states a minimum of 1 and no maximum, leaving the representation open.
-- `Return` on pyzy commits the **raw** input (`"nihao"`), not the 你好 the
-  preedit is showing. Verified, and it matches ibus-pinyin. **Decided
-  (2026-07-27): keep it, and write the rule into the header** so it reads as
-  chosen rather than accidental — `Return` means "I did not want conversion,
-  give me what I typed", and it is the only key that escapes conversion without
-  backspacing out of the composition. Documenting it is the whole fix; the
-  behaviour does not change.
+- ~~`Return` on pyzy commits the **raw** input.~~ **Done (2026-07-27.)** The
+  behaviour is unchanged and matches ibus-pinyin; what was missing was the rule
+  that makes it read as chosen. `pathime_context_process_key()` now states the
+  pair — Space asks for conversion, Return ends the composition without
+  applying any conversion the user has not explicitly chosen — and then states
+  the consequence outright: Return may commit text differing from the last
+  preedit shown, because an engine may *preview* an unchosen conversion, and
+  Pinyin and Bopomofo do.
 
 ## 5. Loose ends
 

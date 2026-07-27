@@ -801,6 +801,25 @@ PATHIME_API void *pathime_context_user_data(const pathime_context_t *ctx);
  *
  * "Handled" describes the incoming event only, and is independent of whatever
  * output was produced while processing it.
+ *
+ * Two keys have a fixed meaning across every engine that composes, and a
+ * client should not rebind them into each other:
+ *
+ * - PATHIME_KEY_SPACE asks for conversion. It is what advances a composition
+ *   from what was typed toward what the engine thinks was meant.
+ * - PATHIME_KEY_RETURN ends the composition *without* applying any conversion
+ *   the user has not explicitly chosen. Whatever the user did settle — a
+ *   candidate selected, a segment converted — is kept; the rest commits as
+ *   typed. Return is therefore the way out of a composition the engine is
+ *   converting wrongly, without backspacing through it.
+ *
+ * The consequence worth stating plainly, because it looks like a bug and is
+ * not: Return may commit text that differs from the preedit the client was
+ * last shown. An engine is free to *preview* a conversion in the preedit
+ * before the user has chosen it, and Pinyin and Bopomofo do exactly that —
+ * typing "nihao" shows a preedit reading 你好, and Return commits "nihao". The
+ * preview is a suggestion; Return declines it. Use Space, or select a
+ * candidate, to accept it.
  */
 PATHIME_API pathime_status_t pathime_context_process_key(pathime_context_t *ctx,
                                                          const pathime_key_event_t *event,
