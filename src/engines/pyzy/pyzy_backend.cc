@@ -38,6 +38,8 @@
 
 #include "engines/pyzy/pyzy_backend.h"
 
+#include <sys/stat.h>
+
 #include <cstddef>
 #include <memory>
 #include <string>
@@ -77,6 +79,83 @@ std::string path_join(const std::string &base, const char *leaf)
     }
     joined += leaf;
     return joined;
+}
+
+/*
+ * Is @a path a regular file?
+ *
+ * The predicate has to be this one and not "can I open it", because that is
+ * the predicate pyzy uses: Database::open() gates every candidate on
+ * g_file_test(..., G_FILE_TEST_IS_REGULAR) before it tries sqlite3_open_v2
+ * (Database.cc:255-261). glib implements that test as stat plus S_ISREG, which
+ * is what this is; going through glib directly would pull a dependency into a
+ * target that has none for one call.
+ *
+ * A directory must not pass. It would with an fopen-based check on glibc,
+ * where opening a directory for reading succeeds and only the read fails.
+ */
+bool is_regular_file(const std::string &path)
+{
+#if defined(_WIN32)
+    struct _stat st;
+    if (_stat(path.c_str(), &st) != 0) {
+        return false;
+    }
+    return (st.st_mode & _S_IFMT) == _S_IFREG;
+#else
+    struct stat st;
+    if (stat(path.c_str(), &st) != 0) {
+        return false;
+    }
+    return S_ISREG(st.st_mode);
+#endif
+}
+
+/*
+ * Would PyZy::Database::open() find a database to open?
+ *
+ * This is the availability check TODO.md §4a asked for, and it has to live in
+ * *front* of PyZy::InputContext::init() rather than behind it. Behind it there
+ * is nothing left to ask: init() returns void, and beneath it Database::init()
+ * constructs the singleton whether or not open() found anything
+ * (Database.cc:202-208, 729-734), so a broken installation and a working one
+ * are indistinguishable through the public header — pyzy says so with a
+ * g_warning and nothing more.
+ *
+ * The tempting stronger check — convert a syllable, see whether a candidate
+ * comes back — is what this deliberately is not. With no database open m_db is
+ * NULL and the query path dereferences it, so the probe meant to detect the
+ * broken installation is the thing that crashes on it.
+ *
+ * The candidate list mirrors Database::open()'s (Database.cc:247-252) in its
+ * order and its contents, including the bare "main.db", which is relative to
+ * the process's working directory. That last entry is not an oddity to tidy
+ * away: it is how an uninstalled build tree gets a database at all, and it is
+ * what tests/api/CMakeLists.txt stages against. Resolving it here is faithful
+ * because this runs in the same process and the same working directory as the
+ * open() it predicts, moments earlier.
+ *
+ * The cost of mirroring is that this list has to be revisited if pyzy's ever
+ * changes. It is four entries in a vendored tree we do not edit, and the
+ * failure mode is conservative in the direction that matters least — a
+ * database we did not predict makes us report unavailable for an engine that
+ * would have worked, rather than available for one that crashes.
+ */
+bool pyzy_database_present()
+{
+    const std::string candidates[] = {
+        std::string(PATHIME_PYZY_PKGDATADIR "/db/local.db"),
+        std::string(PATHIME_PYZY_PKGDATADIR "/db/open-phrase.db"),
+        std::string(PATHIME_PYZY_PKGDATADIR "/db/android.db"),
+        std::string("main.db"),
+    };
+
+    for (const std::string &candidate : candidates) {
+        if (is_regular_file(candidate)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 /* ---------------------------------------------------------------------------
@@ -771,6 +850,19 @@ bool pyzy_global_init(const char *data_dir)
     }
 
     /*
+     * Before init(), not after: see pyzy_database_present(). Returning false
+     * here leaves g_pyzy_ready false, so pathime_has_engine() reports both
+     * PATHIME_ENGINE_PINYIN and PATHIME_ENGINE_BOPOMOFO unavailable, which is
+     * exactly what the header documents for an engine "whose runtime
+     * prerequisites, such as its dictionaries, are unavailable". It also
+     * leaves PyZy::InputContext::init() uncalled, which is what keeps
+     * pyzy_global_shutdown()'s finalize() balanced.
+     */
+    if (!pyzy_database_present()) {
+        return false;
+    }
+
+    /*
      * Both directories are rooted at data_dir, which is the whole point of
      * pathime_init_params_t::data_dir: pyzy would otherwise take the cache
      * directory from XDG_CACHE_HOME and the config directory from
@@ -788,19 +880,9 @@ bool pyzy_global_init(const char *data_dir)
                              path_join(path_join(root, "pyzy"), "config"));
 
     /*
-     * True, and it cannot be anything else. InputContext::init() returns void,
-     * and beneath it Database::init() constructs the singleton whether or not
-     * open() found a database (Database.cc:202-208, 729-734), so a missing
-     * main.db is indistinguishable from a working one through the public
-     * header — pyzy reports it with a g_warning and nothing else.
-     *
-     * The obvious stronger check, converting a syllable and seeing whether any
-     * candidate comes back, is deliberately not done: with no database open
-     * m_db is NULL and the query path dereferences it, so the probe intended
-     * to detect the broken installation would be the thing that crashes on it.
-     * TODO(impl): if pathime_has_engine() must distinguish the two, the check
-     * belongs in front of this call — testing for a readable database file —
-     * not behind it.
+     * True, and by now it has been earned rather than assumed: the database
+     * check above ran in front of init(), because after it there is nothing
+     * left to ask.
      */
     g_pyzy_ready = true;
     return true;

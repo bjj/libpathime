@@ -54,10 +54,12 @@ libpathime_add_core_test(utf8 SOURCES "${PROJECT_SOURCE_DIR}/src/utf8.cc")
 # init.cc and engine.cc both reach the adapters through backend.h, so the
 # per-backend arms come too, gated exactly as src/CMakeLists.txt gates them.
 #
-# The vendor include and link wiring is inherited from the pathime target
-# rather than restated. Copying it would mean duplicating the pyzy header
-# staging and the anthy include dir, and the copy would drift the first time
-# either changes.
+# The vendor include, link and compile-definition wiring is inherited from the
+# pathime target rather than restated. Copying it would mean duplicating the
+# pyzy header staging, the anthy include dir and pyzy's PKGDATADIR mirror, and
+# the copy would drift the first time any of them changes — which is exactly
+# what happened when PATHIME_PYZY_PKGDATADIR was added to src/CMakeLists.txt
+# alone and this test stopped compiling.
 set(_lpi_options_sources
   "${PROJECT_SOURCE_DIR}/src/init.cc"
   "${PROJECT_SOURCE_DIR}/src/engine.cc"
@@ -86,6 +88,8 @@ target_include_directories(core_options_test PRIVATE
   $<TARGET_PROPERTY:pathime,INCLUDE_DIRECTORIES>)
 target_link_libraries(core_options_test PRIVATE
   $<TARGET_PROPERTY:pathime,LINK_LIBRARIES>)
+target_compile_definitions(core_options_test PRIVATE
+  $<TARGET_PROPERTY:pathime,COMPILE_DEFINITIONS>)
 
 libpathime_add_core_test(composition SOURCES
   "${PROJECT_SOURCE_DIR}/src/composition.cc"

@@ -201,14 +201,66 @@ if(LIBPATHIME_WITH_PYZY)
     set_tests_properties(api.engine_pyzy PROPERTIES
       FIXTURES_REQUIRED api_engine_pyzy_data)
   else()
-    # Without the database pyzy still reports success and simply produces no
-    # candidates, so every assertion in the test would fail for a reason that
-    # has nothing to do with libpathime. Withholding PYZY_TEST_DATA_DIR is what
-    # makes the test compile to a pt_skip() instead — the same protocol the
-    # PATHIME_WITH_* macros use, one level finer.
+    # Without the database there is nothing for this test to convert, so every
+    # assertion in it would fail for a reason that has nothing to do with
+    # libpathime. Withholding PYZY_TEST_DATA_DIR is what makes the test compile
+    # to a pt_skip() instead — the same protocol the PATHIME_WITH_* macros use,
+    # one level finer. (The engine now reports itself absent in that situation
+    # rather than silently converting nothing; api.engine_pyzy_nodb below is
+    # what asserts that, and it is the positive test for this same condition.)
     message(WARNING
       "tests/api: android.db was not built, so api.engine_pyzy has no database "
       "to open and will report itself skipped. It needs Python 3 at configure "
       "time; see PYZY_BUILD_DB_ANDROID.")
+  endif()
+endif()
+
+# --- api.engine_pyzy_nodb: the negative half --------------------------------
+#
+# Asserts that a pyzy with no database reports itself unavailable instead of
+# pretending to work. Registered conditionally, because its assertion is only
+# true when there really is no database to find, and that is a property of the
+# machine rather than of this build: pyzy's Database::open() tries three files
+# under its compiled-in PKGDATADIR before falling back to "main.db" in the
+# working directory (Database.cc:247-252). The working directory is ours to
+# control and we simply never stage one; PKGDATADIR is not, so it is probed
+# here and the test is skipped entirely when a system-wide pyzy is installed.
+#
+# The probe duplicates the candidate list in pyzy_database_present(), which is
+# a real cost — two places to touch if pyzy's list ever changes. It is accepted
+# because the alternative is worse: a test that silently passes for the wrong
+# reason on a developer machine with pyzy installed.
+if(LIBPATHIME_WITH_PYZY)
+  set(_pyzy_system_db_found FALSE)
+  foreach(_db_name local.db open-phrase.db android.db)
+    if(EXISTS "${CMAKE_INSTALL_FULL_DATADIR}/pyzy/db/${_db_name}")
+      set(_pyzy_system_db_found TRUE)
+    endif()
+  endforeach()
+
+  add_executable(api_engine_pyzy_nodb_test engine_pyzy_nodb_test.c)
+  target_link_libraries(api_engine_pyzy_nodb_test PRIVATE libpathime::pathime)
+  target_include_directories(api_engine_pyzy_nodb_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}")
+
+  if(_pyzy_system_db_found)
+    message(STATUS
+      "tests/api: a pyzy database exists under ${CMAKE_INSTALL_FULL_DATADIR}/pyzy/db, "
+      "so api.engine_pyzy_nodb is not registered — the condition it asserts "
+      "does not hold on this machine.")
+  else()
+    # Ours alone, and deliberately empty: no main.db is ever staged here, which
+    # is the whole of what makes the test's premise true. Kept apart from
+    # api.engine_pyzy's rundir for exactly that reason.
+    set(_pyzy_nodb_rundir "${CMAKE_CURRENT_BINARY_DIR}/run/engine_pyzy_nodb")
+    file(MAKE_DIRECTORY "${_pyzy_nodb_rundir}")
+
+    target_compile_definitions(api_engine_pyzy_nodb_test PRIVATE
+      "PATHIME_NODB_DATA_DIR=\"${_pyzy_nodb_rundir}/data\"")
+
+    add_test(NAME api.engine_pyzy_nodb COMMAND api_engine_pyzy_nodb_test)
+    set_tests_properties(api.engine_pyzy_nodb PROPERTIES
+      SKIP_RETURN_CODE 77
+      WORKING_DIRECTORY "${_pyzy_nodb_rundir}")
   endif()
 endif()
