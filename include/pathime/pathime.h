@@ -10,12 +10,21 @@
  * ---------------------------------------------------------------------------
  *
  * Text
- *   All text crossing this boundary is plain UTF-8, passed as an explicit
- *   (pointer, byte length) pair; it is never required to be NUL-terminated,
- *   though text produced by the library always is. Text must not contain
+ *   All text crossing this boundary is plain UTF-8. Text must not contain
  *   embedded NUL bytes: U+0000 is not representable in this API, in either
- *   direction. The length is authoritative for how much text there is, not for
- *   whether it stops early.
+ *   direction.
+ *
+ *   Text that participates in composition — preedit, candidates, commits,
+ *   surrounding text — is passed as an explicit (pointer, byte length) pair and
+ *   is never required to be NUL-terminated, though text produced by the library
+ *   always is. The length is authoritative for how much text there is, not for
+ *   whether it stops early. This form exists because such text is routinely a
+ *   slice of a larger buffer the client already holds.
+ *
+ *   Short discrete values that name something rather than carrying prose — the
+ *   data directory, option strings — are plain NUL-terminated pointers. No
+ *   caller has a reason to pass a slice of one, and a length parameter would be
+ *   ceremony rather than expression.
  *
  * Positions and counts
  *   Every position and every count in this API is measured in Unicode scalar
@@ -61,7 +70,9 @@
  *
  *     pathime_version, pathime_version_string, pathime_status_string,
  *     pathime_has_engine, pathime_engine_requirements,
- *     pathime_context_composition, pathime_context_candidate
+ *     pathime_context_composition, pathime_context_candidate,
+ *     pathime_option_name, pathime_engine_option_info,
+ *     pathime_engine_get_option_*, pathime_context_get_option_*
  *
  *   This is enough for the common case, which is a client rendering a new
  *   candidate list from inside composition_changed: the library materializes
@@ -241,6 +252,46 @@ typedef struct pathime_str {
  * ========================================================================= */
 
 /**
+ * Process-global setup, supplied to pathime_init().
+ *
+ * This is deliberately not an option in the sense of the Options section below.
+ * Everything here is consumed once, while global state is being built, and
+ * cannot be changed afterward without a full shutdown.
+ */
+typedef struct pathime_init_params {
+    /** Set to sizeof(pathime_init_params_t). */
+    size_t struct_size;
+
+    /**
+     * A directory the library may read and write, holding every piece of
+     * per-user state any engine accumulates: learned word frequencies,
+     * user-defined phrases, personal dictionaries, and backend caches. The
+     * client owns this path and controls its lifetime; the library creates the
+     * directory and whatever structure it needs beneath it.
+     *
+     * This is the whole of the library's persistent-storage surface. The
+     * backends would each otherwise pick their own location from the
+     * environment — anthy from HOME or XDG_CONFIG_HOME plus a "personality"
+     * name, pyzy from XDG_CACHE_HOME and XDG_CONFIG_HOME, and the table engine
+     * from wherever its user database lives. All of them are redirected here
+     * instead, so a client that wants a second independent profile supplies a
+     * second directory rather than reaching for a per-engine identity setting.
+     *
+     * Notably this is what lets anthy's "personality" disappear from the API.
+     * It is process-global and write-once in anthy's public interface; by
+     * making the directory the identity we set it once, to a fixed name, and
+     * never contend with that restriction.
+     *
+     * A NUL-terminated filesystem path, in UTF-8 on every platform. This is the
+     * one string in the API that is not a (pointer, length) pair: it names a
+     * file rather than carrying text, and no caller has a reason to pass a
+     * slice of one. NULL selects a platform-appropriate default beneath the
+     * user's configuration directory. Borrowed for the duration of the call.
+     */
+    const char *data_dir;
+} pathime_init_params_t;
+
+/**
  * Initialize process-global state shared by all engines: dictionary and
  * database files, keyboard-layout registries, and other one-time backend
  * setup.
@@ -249,10 +300,13 @@ typedef struct pathime_str {
  * because it opens on-disk dictionaries. It is still synchronous; a caller
  * that cares should invoke it off its UI thread before creating any context.
  *
+ * @param params May be NULL, which is equivalent to a zero-initialized struct
+ *               with only struct_size set: every default applies.
+ *
  * Calling it twice without an intervening shutdown is an error. Every function
  * in this header except the version queries requires it to have succeeded.
  */
-PATHIME_API pathime_status_t pathime_init(void);
+PATHIME_API pathime_status_t pathime_init(const pathime_init_params_t *params);
 
 /**
  * Release process-global state. All engines and input contexts must already
@@ -513,9 +567,9 @@ typedef struct pathime_composition {
      * whatever follows it.
      *
      * This is the whole list the client may choose from. Engines whose
-     * backends enumerate lazily materialize up to the limit set by
-     * pathime_context_set_max_candidates() and stop; the client is never
-     * obliged to ask for more, and pagination is purely a display concern.
+     * backends enumerate lazily materialize up to PATHIME_OPT_MAX_CANDIDATES
+     * and stop; the client is never obliged to ask for more, and pagination is
+     * purely a display concern.
      */
     size_t candidate_count;
 } pathime_composition_t;
@@ -690,37 +744,6 @@ PATHIME_API pathime_status_t pathime_context_candidate(const pathime_context_t *
                                                        pathime_str_t *out);
 
 /**
- * The candidate cap a new input context starts with. Chosen to be past the
- * point where a user scrolls rather than retypes, while still bounding the
- * work a lazily enumerating backend is asked to do for one composition.
- */
-#define PATHIME_DEFAULT_MAX_CANDIDATES 64
-
-/**
- * Cap how many candidates the engine produces for one composition.
- *
- * Some backends enumerate candidates lazily from a database with no meaningful
- * total. Rather than expose that laziness, the library materializes up to this
- * many and presents the result as the complete list.
- *
- * Takes effect immediately, including partway through a composition, so a
- * client that displays a growing list can raise the cap as the user scrolls.
- * Candidates are only ever appended, never reordered, so raising the cap
- * cannot renumber positions already handed out; lowering it removes entries
- * from the tail. Dispatches composition_changed if candidate_count changed.
- *
- * @param max_candidates Must be at least 1. Zero is
- *                       PATHIME_ERROR_INVALID_ARGUMENT rather than a way to
- *                       suppress the candidate list: engines that convert by
- *                       selection cannot make progress without one, so a cap
- *                       of zero would deadlock the composition. A client that
- *                       does not want to show candidates should simply not
- *                       display them.
- */
-PATHIME_API pathime_status_t pathime_context_set_max_candidates(pathime_context_t *ctx,
-                                                                size_t max_candidates);
-
-/**
  * Tell the engine the client has chosen the candidate at absolute position
  * @a index in the most recently supplied candidate list. Requires the context
  * to be focused; otherwise returns PATHIME_ERROR_NOT_FOCUSED and does nothing.
@@ -793,6 +816,784 @@ PATHIME_API pathime_status_t pathime_context_set_focused(pathime_context_t *ctx,
  * whose composition state was left indeterminate to a known-empty one.
  */
 PATHIME_API pathime_status_t pathime_context_reset(pathime_context_t *ctx);
+
+/* =========================================================================
+ * Options
+ * =========================================================================
+ *
+ * ---------------------------------------------------------------------------
+ * What is and is not an option
+ * ---------------------------------------------------------------------------
+ *
+ * An option is a value the client sets that changes what the engine produces.
+ * Three large families of setting found in the reference implementations are
+ * deliberately absent, and their absence is not an oversight:
+ *
+ *   Key bindings, candidate labels, page size, list orientation, and every
+ *   other presentation choice belong to the client. docs/CONCEPTS.md excludes
+ *   them from the model.
+ *
+ *   Direct or Latin passthrough is engine activation state, which the model
+ *   excludes as distinct from focus. A client that wants Latin stops offering
+ *   keys to the engine.
+ *
+ *   Encodings, dictionary paths, and backend init parameters are consumed
+ *   internally. Where they carry a genuine client decision it has been lifted
+ *   out: see pathime_init_params_t::data_dir.
+ *
+ * ---------------------------------------------------------------------------
+ * Two levels, four tiers
+ * ---------------------------------------------------------------------------
+ *
+ * The same options are settable on an engine and on an input context, and the
+ * two are not separate namespaces. An engine value is the default its contexts
+ * use; a context value overrides it for that context alone. Resolving an
+ * option for a context consults, in order:
+ *
+ *   1. a value explicitly set on that context,
+ *   2. a value explicitly set on its engine,
+ *   3. the value the effective table declares, for PATHIME_ENGINE_TABLE only,
+ *   4. the library default, which pathime_engine_option_info() reports.
+ *
+ * Tier 3 exists because a table file declares behaviour its author chose for
+ * that table — whether reaching a key-run boundary auto-commits, whether
+ * wildcards are implicit — and those are defaults a client should be able to
+ * accept without knowing they exist, not values baked into the data. It sits
+ * below the client's own values in both levels, so a client that sets an
+ * option gets what it asked for, and one that does not gets what the table
+ * author intended. No other engine has a tier 3.
+ *
+ * Resolution is late: an engine-level set changes the effective value for every
+ * context that has not overridden that option, immediately, and dispatches
+ * composition_changed to each of them. This is the useful behaviour — a client
+ * changing one preference sees every open field follow — but it means an engine
+ * setter can invoke callbacks belonging to contexts it was not passed, so
+ * engine setters are not callback-safe. Getters and info queries are.
+ *
+ * ---------------------------------------------------------------------------
+ * When a change takes effect
+ * ---------------------------------------------------------------------------
+ *
+ * Always immediately. Most options can be changed partway through a composition
+ * without disturbing it, and are. A few cannot: switching the kana input method
+ * mid-word leaves a meaningless pending romaji buffer, switching the Pinyin
+ * scheme forces the backend context to be rebuilt, and switching the table
+ * changes what the accumulated keys even mean. Those options reset the context
+ * as pathime_context_reset() would, unconditionally and whether or not a
+ * composition is in progress, and they are marked resets_composition in their
+ * descriptor so a client can warn before asking.
+ *
+ * This is the one place options differ from each other in behaviour, and it is
+ * declared as data rather than left to the reader to discover per engine.
+ */
+
+/** The type of an option's value; reported by pathime_engine_option_info(). */
+typedef enum pathime_option_type {
+    PATHIME_OPTION_BOOL,    /**< Set with _set_option_bool. */
+    PATHIME_OPTION_INT,     /**< Integer in [min_value, max_value]. */
+    PATHIME_OPTION_ENUM,    /**< One of the values in valid_values. */
+    PATHIME_OPTION_FLAGS,   /**< Bitwise OR of the bits in valid_values. */
+    PATHIME_OPTION_STRING   /**< Set with _set_option_string. */
+} pathime_option_type_t;
+
+/**
+ * Every option this library defines.
+ *
+ * An option is named without an engine prefix when its meaning does not depend
+ * on which engine is loaded, whether or not every engine implements it —
+ * PATHIME_OPT_CHINESE_VARIANT means the same thing to the Pinyin, Bopomofo and
+ * table engines, and nothing at all to the other two. An option whose meaning
+ * exists only inside one engine carries that engine's prefix.
+ *
+ * Setting an option the engine does not implement is PATHIME_ERROR_UNSUPPORTED
+ * and changes nothing, so crossing engines is diagnosed rather than silently
+ * ignored. pathime_engine_option_info() answers the same question in advance.
+ *
+ * Each option below names its type, its library default, and the engines that
+ * implement it.
+ */
+typedef enum pathime_option {
+    /* =====================================================================
+     * Common — meaning does not depend on which engine is loaded
+     * ===================================================================== */
+
+    /**
+     * INT, default PATHIME_DEFAULT_MAX_CANDIDATES, minimum 1. All engines.
+     *
+     * Caps how many candidates one composition produces. Some backends
+     * enumerate lazily from a database with no meaningful total; rather than
+     * expose that, the library materializes up to this many and presents the
+     * result as the complete list.
+     *
+     * Composition-safe, and specifically so: a client displaying a growing list
+     * raises the cap as the user scrolls. Candidates are only ever appended,
+     * never reordered, so raising it cannot renumber positions already handed
+     * out; lowering it removes entries from the tail.
+     *
+     * Zero is rejected rather than treated as a way to suppress the list.
+     * Engines that convert by selection cannot make progress without a
+     * candidate, so a cap of zero would deadlock the composition; a client that
+     * does not want to show candidates simply does not display them.
+     */
+    PATHIME_OPT_MAX_CANDIDATES = 0,
+
+    /**
+     * BOOL, default true. Anthy, Pinyin, Bopomofo, Table.
+     *
+     * Whether the engine adapts to what the user chooses — the learned
+     * frequencies and phrases that make a candidate the user picked last time
+     * appear sooner. Turning it off means nothing is written to the data
+     * directory for this engine.
+     *
+     * Only the table engine has a native switch for this. Anthy and pyzy learn
+     * unconditionally on their commit paths, so for those the library
+     * implements the option by withholding the learning commit.
+     *
+     * Hangul does not implement it: libhangul has no learning to disable.
+     */
+    PATHIME_OPT_LEARNING,
+
+    /**
+     * ENUM of pathime_width_t, default PATHIME_WIDTH_HALF. Anthy, Pinyin,
+     * Bopomofo, Table.
+     *
+     * Whether Latin letters, digits and space the engine emits are the ASCII
+     * forms or their full-width CJK counterparts.
+     */
+    PATHIME_OPT_LATIN_WIDTH,
+
+    /**
+     * ENUM of pathime_width_t, default PATHIME_WIDTH_FULL. Anthy, Pinyin,
+     * Bopomofo, Table.
+     *
+     * The same choice for punctuation. It is a separate option rather than one
+     * width setting because the useful combination is full-width punctuation
+     * with half-width digits, and every reference engine models these two
+     * independently for that reason. The defaults are that combination.
+     */
+    PATHIME_OPT_PUNCTUATION_WIDTH,
+
+    /**
+     * ENUM of pathime_chinese_variant_t, default
+     * PATHIME_CHINESE_SIMPLIFIED_ONLY. Pinyin, Bopomofo, Table.
+     *
+     * Which Chinese character repertoire candidates are drawn from. The table
+     * engine supports all five values; the Pinyin and Bopomofo engines support
+     * only the two exclusive ones, because pyzy models this as a single
+     * simplified-or-traditional flag with no mixed mode. That difference is
+     * reported through valid_values rather than hidden, so a client can present
+     * exactly the choices that will work.
+     */
+    PATHIME_OPT_CHINESE_VARIANT,
+
+    /**
+     * BOOL, default false. Anthy, Table.
+     *
+     * Whether the engine offers continuations of what has been typed so far, in
+     * addition to conversions of it. Anthy's prediction and the table engine's
+     * suggestions are the same feature under two names.
+     */
+    PATHIME_OPT_PREDICTION,
+
+    /**
+     * BOOL, default true. Pinyin, Bopomofo.
+     *
+     * Whether the user-editable phrase table contributes candidates — date and
+     * time macros and similar expansions.
+     */
+    PATHIME_OPT_SPECIAL_PHRASES,
+
+    /**
+     * BOOL, default true. Pinyin, Bopomofo, Table.
+     *
+     * Whether a partial spelling can match a longer entry, so that "nh" reaches
+     * 你好 without typing "nihao" in full. Pinyin and Bopomofo call this
+     * incomplete pinyin; the table engine reaches the same result by appending
+     * a wildcard to the key sequence before searching. They are one option
+     * because the choice a client is making is identical: whether the engine
+     * guesses ahead from an unfinished spelling, at the cost of a longer
+     * candidate list.
+     */
+    PATHIME_OPT_INCOMPLETE_INPUT,
+
+    /* =====================================================================
+     * Hangul
+     * ===================================================================== */
+
+    /**
+     * ENUM of pathime_hangul_layout_t, default PATHIME_HANGUL_LAYOUT_2SET.
+     *
+     * Which jamo layout keys are interpreted against. Composition-safe:
+     * libhangul changes layout without disturbing the syllable in progress.
+     */
+    PATHIME_OPT_HANGUL_LAYOUT,
+
+    /**
+     * BOOL, default false.
+     *
+     * Whether jamo typed out of order still compose — typing ㅏ then ㄱ
+     * yielding 가. This suits moa-chigi, the chorded style in which the keys of
+     * a syllable are struck together and arrive in an arbitrary order.
+     */
+    PATHIME_OPT_HANGUL_AUTO_REORDER,
+
+    /**
+     * BOOL, default false.
+     *
+     * Whether striking a consonant key twice in succession produces the tensed
+     * consonant, ㄱㄱ yielding ㄲ. Only meaningful on two-set layouts; three-set
+     * and Old Hangul layouts have dedicated keys for the tensed consonants, and
+     * the option has no effect there.
+     */
+    PATHIME_OPT_HANGUL_DOUBLE_STROKE_COMBINE,
+
+    /**
+     * BOOL, default true.
+     *
+     * Whether consonants may combine into clusters that are not valid
+     * syllable-initial forms, ㄱ then ㅅ yielding ㄳ. Two-set layouts only, for
+     * the same reason as above.
+     */
+    PATHIME_OPT_HANGUL_NON_CHOSEONG_COMBINE,
+
+    /**
+     * ENUM of pathime_hangul_preedit_t, default PATHIME_HANGUL_PREEDIT_SYLLABLE.
+     *
+     * How much text the engine holds before committing it. libhangul exposes
+     * only the syllable currently being assembled, so anything longer is
+     * accumulated by this library; word mode does that, keeping finished
+     * syllables in the preedit with preedit_settled marking how many are done,
+     * and commits at a word boundary. The visible difference to a user is the
+     * granularity of backspace and undo.
+     */
+    PATHIME_OPT_HANGUL_PREEDIT,
+
+    /**
+     * BOOL, default false.
+     *
+     * Whether committed Hangul can be converted to Hanja, which is the only
+     * source of candidates this engine has. Enabling it changes what the engine
+     * requires of its client: conversion reads the text already committed and
+     * replaces it, so both surrounding text and delete_surrounding_text become
+     * necessary, and pathime_engine_requirements() reports them only while this
+     * is on.
+     *
+     * Setting it on a context whose client lacks delete_surrounding_text is
+     * PATHIME_ERROR_MISSING_CALLBACK and changes nothing — the same check
+     * pathime_context_create() makes, applied at the point the requirement
+     * appears. Setting it on an engine succeeds regardless, since an engine has
+     * no client; contexts created afterward are checked as they are created.
+     */
+    PATHIME_OPT_HANGUL_HANJA,
+
+    /* =====================================================================
+     * Anthy
+     * ===================================================================== */
+
+    /**
+     * ENUM of pathime_anthy_typing_t, default PATHIME_ANTHY_TYPING_ROMAJI.
+     * Resets the composition.
+     *
+     * Whether keys spell kana in Latin letters or strike kana directly. anthy
+     * itself has no notion of keystrokes and accepts only finished kana, so
+     * both state machines belong to this library; the option chooses between
+     * them. It resets because a pending romaji fragment has no meaning once the
+     * keys are read as kana.
+     */
+    PATHIME_OPT_ANTHY_TYPING_METHOD,
+
+    /**
+     * ENUM of pathime_anthy_script_t, default PATHIME_ANTHY_SCRIPT_HIRAGANA.
+     *
+     * Which kana script typing produces before conversion.
+     */
+    PATHIME_OPT_ANTHY_KANA_SCRIPT,
+
+    /**
+     * ENUM of pathime_anthy_period_t, default PATHIME_ANTHY_PERIOD_KUTEN.
+     *
+     * Which glyphs sentence-ending and separating punctuation produce: the
+     * Japanese kuten and touten, or the full-width period and comma. This is
+     * about glyph choice, not width, and is orthogonal to
+     * PATHIME_OPT_PUNCTUATION_WIDTH.
+     */
+    PATHIME_OPT_ANTHY_PERIOD_STYLE,
+
+    /**
+     * ENUM of pathime_anthy_symbol_t, default PATHIME_ANTHY_SYMBOL_CORNER_SLASH.
+     *
+     * Which glyphs the quoting and separator keys produce — corner brackets or
+     * square brackets, solidus or middle dot. The four values are the four
+     * combinations.
+     */
+    PATHIME_OPT_ANTHY_SYMBOL_STYLE,
+
+    /**
+     * ENUM of pathime_anthy_on_period_t, default PATHIME_ANTHY_ON_PERIOD_NOTHING.
+     *
+     * What typing sentence-ending punctuation does beyond inserting it: nothing,
+     * begin conversion, or commit outright. A workflow convenience for users who
+     * would otherwise reach for the convert key at the end of every sentence.
+     *
+     * The set of characters that counts as sentence-ending is fixed, rather than
+     * being a second option: it is the six characters , . 、 。 ， ． and no
+     * plausible client needs to change it.
+     */
+    PATHIME_OPT_ANTHY_ON_PERIOD,
+
+    /**
+     * BOOL, default true.
+     *
+     * Whether holding Shift while typing kana produces Latin letters instead,
+     * so a user can drop into Latin for a word without leaving kana input.
+     */
+    PATHIME_OPT_ANTHY_LATIN_WITH_SHIFT,
+
+    /* =====================================================================
+     * Pinyin
+     * ===================================================================== */
+
+    /**
+     * ENUM of pathime_pinyin_scheme_t, default PATHIME_PINYIN_SCHEME_FULL.
+     * Resets the composition.
+     *
+     * Whether syllables are spelled out in full or compressed onto two keys,
+     * and by which of the six double-pinyin schemes. The two questions are one
+     * option because they are one decision to a user: which spelling they
+     * memorized. It resets because pyzy fixes this when its context is created,
+     * so changing it rebuilds that context.
+     */
+    PATHIME_OPT_PINYIN_SCHEME,
+
+    /**
+     * FLAGS of PATHIME_PINYIN_FUZZY_*, default every bit.
+     *
+     * Which pronunciation mergers the matcher tolerates. Each corresponds to a
+     * real merger in some regional Mandarin — a speaker who does not
+     * distinguish z from zh should not have to remember which one a word is
+     * spelled with. Users settle on a set that reflects their own speech, which
+     * is why these are independent rules rather than a tolerance level.
+     *
+     * Directions are separate bits: tolerating c typed for ch is not the same
+     * as tolerating ch typed for c.
+     */
+    PATHIME_OPT_PINYIN_FUZZY,
+
+    /**
+     * FLAGS of PATHIME_PINYIN_CORRECT_*, default every bit.
+     *
+     * Which mis-spellings are silently accepted — writing "iou" for "iu", "gn"
+     * for "ng", and six more. Distinct from PATHIME_OPT_PINYIN_FUZZY: these are
+     * typing slips with one correct form, not pronunciations that genuinely
+     * differ between speakers.
+     */
+    PATHIME_OPT_PINYIN_CORRECTION,
+
+    /**
+     * BOOL, default false.
+     *
+     * Whether the auxiliary text shows the keys as typed alongside the syllables
+     * they decoded to. Useful while learning a double-pinyin scheme; meaningless
+     * under PATHIME_PINYIN_SCHEME_FULL, where the two are the same text.
+     */
+    PATHIME_OPT_PINYIN_SHOW_RAW,
+
+    /* =====================================================================
+     * Bopomofo
+     * ===================================================================== */
+
+    /**
+     * ENUM of pathime_bopomofo_layout_t, default
+     * PATHIME_BOPOMOFO_LAYOUT_STANDARD. Resets the composition.
+     *
+     * Which arrangement of bopomofo symbols across the keys is assumed. It
+     * resets because pyzy stores the new arrangement without re-reading the keys
+     * already typed, so a composition spanning the change would be decoded half
+     * one way and half the other.
+     */
+    PATHIME_OPT_BOPOMOFO_LAYOUT,
+
+    /* =====================================================================
+     * Table
+     * ===================================================================== */
+
+    /**
+     * STRING, no default, required. Resets the composition.
+     *
+     * Path to the table this context inputs from. Table engines differ only in
+     * the table loaded, which is why one engine id covers Cangjie, Wubi,
+     * Stroke5 and the rest; the engine caches compiled tables and shares them
+     * across every context naming the same one, so per-context tables cost
+     * little.
+     *
+     * This is also the option that supplies tier 3 for every other table
+     * option: a table declares the behaviour its author chose, and those values
+     * apply wherever the client has expressed no preference.
+     *
+     * A context with no table resolved produces nothing and reports every key
+     * unhandled.
+     */
+    PATHIME_OPT_TABLE_FILE,
+
+    /**
+     * BOOL, default false.
+     *
+     * Whether a key sequence that can no longer be extended stages its best
+     * match automatically, rather than waiting to be selected. Table authors
+     * treat this and PATHIME_OPT_TABLE_AUTO_SELECT as one behavioural profile
+     * and set them together, so a client changing one will usually want both.
+     */
+    PATHIME_OPT_TABLE_AUTO_COMMIT,
+
+    /**
+     * BOOL, default false.
+     *
+     * Whether the first candidate is selected implicitly when the key sequence
+     * reaches its maximum length, so that typing continues into the next
+     * character without an explicit selection.
+     */
+    PATHIME_OPT_TABLE_AUTO_SELECT,
+
+    /**
+     * STRING, default empty. One character, or empty to disable.
+     *
+     * The character that stands for exactly one unknown key in a search. Empty
+     * means the table offers no single-character wildcard, which is the common
+     * case: of the tables surveyed only one defines it.
+     */
+    PATHIME_OPT_TABLE_SINGLE_WILDCARD,
+
+    /**
+     * STRING, default empty. One character, or empty to disable.
+     *
+     * The character that stands for any run of unknown keys, conventionally an
+     * asterisk.
+     */
+    PATHIME_OPT_TABLE_MULTI_WILDCARD,
+
+    /**
+     * BOOL, default false.
+     *
+     * Whether the candidate list is restricted to single characters, excluding
+     * the multi-character phrases the table also holds.
+     */
+    PATHIME_OPT_TABLE_SINGLE_CHAR_ONLY,
+
+    /**
+     * ENUM of pathime_table_invalid_t, default
+     * PATHIME_TABLE_INVALID_COMMIT_CANDIDATE.
+     *
+     * What happens when a key arrives that the table's alphabet does not
+     * contain: commit the candidate standing at that moment, or commit the raw
+     * keys the user typed. The choice matters most to users who mix table input
+     * with Latin text.
+     */
+    PATHIME_OPT_TABLE_INVALID_INPUT,
+
+    /**
+     * BOOL, default false.
+     *
+     * Whether pinyin may be typed as a fallback when the user does not know a
+     * character's table code. Turning it on requires the resolved table to have
+     * been compiled with pinyin data; where it was not, setting it true is
+     * PATHIME_ERROR_UNSUPPORTED.
+     */
+    PATHIME_OPT_TABLE_PINYIN_FALLBACK
+} pathime_option_t;
+
+/** Values of PATHIME_OPT_LATIN_WIDTH and PATHIME_OPT_PUNCTUATION_WIDTH. */
+typedef enum pathime_width {
+    PATHIME_WIDTH_HALF = 0,
+    PATHIME_WIDTH_FULL
+} pathime_width_t;
+
+/** Values of PATHIME_OPT_CHINESE_VARIANT. */
+typedef enum pathime_chinese_variant {
+    PATHIME_CHINESE_SIMPLIFIED_ONLY = 0,  /**< Simplified candidates only. */
+    PATHIME_CHINESE_TRADITIONAL_ONLY,     /**< Traditional candidates only. */
+    PATHIME_CHINESE_SIMPLIFIED_FIRST,     /**< Both, simplified ranked higher. */
+    PATHIME_CHINESE_TRADITIONAL_FIRST,    /**< Both, traditional ranked higher. */
+    PATHIME_CHINESE_ANY                   /**< Both, no variant preference. */
+} pathime_chinese_variant_t;
+
+/** Values of PATHIME_OPT_HANGUL_LAYOUT. The nine layouts libhangul builds in. */
+typedef enum pathime_hangul_layout {
+    PATHIME_HANGUL_LAYOUT_2SET = 0,     /**< Dubeolsik; the common layout. */
+    PATHIME_HANGUL_LAYOUT_2SET_YET,     /**< Dubeolsik Yetgeul, with Old Hangul. */
+    PATHIME_HANGUL_LAYOUT_3SET_2,       /**< Sebeolsik on a two-set keyboard. */
+    PATHIME_HANGUL_LAYOUT_3SET_390,     /**< Sebeolsik 390. */
+    PATHIME_HANGUL_LAYOUT_3SET_FINAL,   /**< Sebeolsik Final. */
+    PATHIME_HANGUL_LAYOUT_3SET_NOSHIFT, /**< Sebeolsik Noshift. */
+    PATHIME_HANGUL_LAYOUT_3SET_YET,     /**< Sebeolsik Yetgeul, with Old Hangul. */
+    PATHIME_HANGUL_LAYOUT_ROMAJA,       /**< Latin transliteration. */
+    PATHIME_HANGUL_LAYOUT_AHNMATAE      /**< Ahnmatae. */
+} pathime_hangul_layout_t;
+
+/** Values of PATHIME_OPT_HANGUL_PREEDIT. */
+typedef enum pathime_hangul_preedit {
+    PATHIME_HANGUL_PREEDIT_SYLLABLE = 0, /**< Commit each syllable as it finishes. */
+    PATHIME_HANGUL_PREEDIT_WORD          /**< Hold whole words before committing. */
+} pathime_hangul_preedit_t;
+
+/** Values of PATHIME_OPT_ANTHY_TYPING_METHOD. */
+typedef enum pathime_anthy_typing {
+    PATHIME_ANTHY_TYPING_ROMAJI = 0, /**< Spell kana in Latin letters. */
+    PATHIME_ANTHY_TYPING_KANA        /**< Strike kana directly. */
+} pathime_anthy_typing_t;
+
+/** Values of PATHIME_OPT_ANTHY_KANA_SCRIPT. */
+typedef enum pathime_anthy_script {
+    PATHIME_ANTHY_SCRIPT_HIRAGANA = 0,
+    PATHIME_ANTHY_SCRIPT_KATAKANA,
+    PATHIME_ANTHY_SCRIPT_HALFWIDTH_KATAKANA
+} pathime_anthy_script_t;
+
+/** Values of PATHIME_OPT_ANTHY_PERIOD_STYLE. */
+typedef enum pathime_anthy_period {
+    PATHIME_ANTHY_PERIOD_KUTEN = 0,  /**< 。 and 、 */
+    PATHIME_ANTHY_PERIOD_FULLWIDTH   /**< ． and ， */
+} pathime_anthy_period_t;
+
+/** Values of PATHIME_OPT_ANTHY_SYMBOL_STYLE. */
+typedef enum pathime_anthy_symbol {
+    PATHIME_ANTHY_SYMBOL_CORNER_SLASH = 0,  /**< 「 」 ／ */
+    PATHIME_ANTHY_SYMBOL_CORNER_MIDDOT,     /**< 「 」 ・ */
+    PATHIME_ANTHY_SYMBOL_BRACKET_SLASH,     /**< ［ ］ ／ */
+    PATHIME_ANTHY_SYMBOL_BRACKET_MIDDOT     /**< ［ ］ ・ */
+} pathime_anthy_symbol_t;
+
+/** Values of PATHIME_OPT_ANTHY_ON_PERIOD. */
+typedef enum pathime_anthy_on_period {
+    PATHIME_ANTHY_ON_PERIOD_NOTHING = 0, /**< Insert it and carry on. */
+    PATHIME_ANTHY_ON_PERIOD_CONVERT,     /**< Begin conversion. */
+    PATHIME_ANTHY_ON_PERIOD_COMMIT       /**< Commit the composition. */
+} pathime_anthy_on_period_t;
+
+/** Values of PATHIME_OPT_PINYIN_SCHEME. */
+typedef enum pathime_pinyin_scheme {
+    PATHIME_PINYIN_SCHEME_FULL = 0,     /**< Syllables spelled out in full. */
+    PATHIME_PINYIN_SCHEME_DOUBLE_MSPY,  /**< Microsoft double pinyin. */
+    PATHIME_PINYIN_SCHEME_DOUBLE_ZRM,   /**< Ziranma. */
+    PATHIME_PINYIN_SCHEME_DOUBLE_ABC,   /**< Zhineng ABC. */
+    PATHIME_PINYIN_SCHEME_DOUBLE_ZGPY,  /**< Zhongwen Zhixing. */
+    PATHIME_PINYIN_SCHEME_DOUBLE_PYJJ,  /**< Pinyin Jiajia. */
+    PATHIME_PINYIN_SCHEME_DOUBLE_XHE    /**< Xiaohe. */
+} pathime_pinyin_scheme_t;
+
+/** Values of PATHIME_OPT_BOPOMOFO_LAYOUT. */
+typedef enum pathime_bopomofo_layout {
+    PATHIME_BOPOMOFO_LAYOUT_STANDARD = 0,
+    PATHIME_BOPOMOFO_LAYOUT_CHING_YEAH,
+    PATHIME_BOPOMOFO_LAYOUT_ETEN,
+    PATHIME_BOPOMOFO_LAYOUT_IBM
+} pathime_bopomofo_layout_t;
+
+/** Values of PATHIME_OPT_TABLE_INVALID_INPUT. */
+typedef enum pathime_table_invalid {
+    PATHIME_TABLE_INVALID_COMMIT_CANDIDATE = 0, /**< Commit the current candidate. */
+    PATHIME_TABLE_INVALID_COMMIT_RAW            /**< Commit the keys as typed. */
+} pathime_table_invalid_t;
+
+/**
+ * Bits of PATHIME_OPT_PINYIN_FUZZY. Each names the spelling typed and the
+ * spelling it may also match, in that order, so the two directions of a merger
+ * are separate bits.
+ *
+ * The final vowel pair governs more than it names: an/ang also covers ian/iang
+ * and uan/uang, which the backend treats as one rule rather than three. Naming
+ * them separately would imply a control that does not exist.
+ */
+enum {
+    /* Initial consonants. */
+    PATHIME_PINYIN_FUZZY_C_CH   = 1u << 0,
+    PATHIME_PINYIN_FUZZY_CH_C   = 1u << 1,
+    PATHIME_PINYIN_FUZZY_Z_ZH   = 1u << 2,
+    PATHIME_PINYIN_FUZZY_ZH_Z   = 1u << 3,
+    PATHIME_PINYIN_FUZZY_S_SH   = 1u << 4,
+    PATHIME_PINYIN_FUZZY_SH_S   = 1u << 5,
+    PATHIME_PINYIN_FUZZY_L_N    = 1u << 6,
+    PATHIME_PINYIN_FUZZY_N_L    = 1u << 7,
+    PATHIME_PINYIN_FUZZY_F_H    = 1u << 8,
+    PATHIME_PINYIN_FUZZY_H_F    = 1u << 9,
+    PATHIME_PINYIN_FUZZY_L_R    = 1u << 10,
+    PATHIME_PINYIN_FUZZY_R_L    = 1u << 11,
+    PATHIME_PINYIN_FUZZY_K_G    = 1u << 12,
+    PATHIME_PINYIN_FUZZY_G_K    = 1u << 13,
+
+    /* Final vowels. AN_ANG and ANG_AN also govern ian/iang and uan/uang. */
+    PATHIME_PINYIN_FUZZY_AN_ANG = 1u << 14,
+    PATHIME_PINYIN_FUZZY_ANG_AN = 1u << 15,
+    PATHIME_PINYIN_FUZZY_EN_ENG = 1u << 16,
+    PATHIME_PINYIN_FUZZY_ENG_EN = 1u << 17,
+    PATHIME_PINYIN_FUZZY_IN_ING = 1u << 18,
+    PATHIME_PINYIN_FUZZY_ING_IN = 1u << 19
+};
+
+/**
+ * Bits of PATHIME_OPT_PINYIN_CORRECTION. Each names a mis-spelling and the
+ * spelling it is taken to mean.
+ */
+enum {
+    PATHIME_PINYIN_CORRECT_GN_NG  = 1u << 0,
+    PATHIME_PINYIN_CORRECT_MG_NG  = 1u << 1,
+    PATHIME_PINYIN_CORRECT_IOU_IU = 1u << 2,
+    PATHIME_PINYIN_CORRECT_UEI_UI = 1u << 3,
+    PATHIME_PINYIN_CORRECT_UEN_UN = 1u << 4,
+    PATHIME_PINYIN_CORRECT_UE_VE  = 1u << 5,
+    PATHIME_PINYIN_CORRECT_V_U    = 1u << 6,
+    PATHIME_PINYIN_CORRECT_ON_ONG = 1u << 7
+};
+
+/** The candidate cap an engine starts with, absent any client value. */
+#define PATHIME_DEFAULT_MAX_CANDIDATES 64
+
+/**
+ * Everything a client needs to present an option it does not know by name: its
+ * type, whether this engine implements it, what values are legal, and what it
+ * defaults to. This is what lets a client build a settings interface that
+ * follows the inventory rather than hardcoding it.
+ */
+typedef struct pathime_option_info {
+    /**
+     * Filled in by the library with the size of the struct it knows how to
+     * write. A client compiled against a newer header must not read past it.
+     */
+    size_t struct_size;
+
+    pathime_option_type_t type;
+
+    /**
+     * False if this engine does not implement the option, in which case every
+     * other member is unspecified and the setters return
+     * PATHIME_ERROR_UNSUPPORTED.
+     */
+    bool supported;
+
+    /**
+     * True if setting this option discards composition state, as
+     * pathime_context_reset() does. See the section header.
+     */
+    bool resets_composition;
+
+    /** BOOL, INT, ENUM, FLAGS: the tier-4 library default. */
+    int64_t default_value;
+
+    /** INT only: inclusive bounds. */
+    int64_t min_value;
+    int64_t max_value;
+
+    /**
+     * ENUM: bit i is set if value i is legal for this engine. FLAGS: the set of
+     * bits this engine honours. Unused for other types.
+     */
+    uint64_t valid_values;
+
+    /** STRING only: the tier-4 default, empty when the option has none. */
+    pathime_str_t default_string;
+} pathime_option_info_t;
+
+/**
+ * A stable, machine-readable name for an option, such as "chinese-variant".
+ * Suitable as a key in a client's own configuration storage; never NULL, and
+ * never changes once an option ships. Not for display to end users.
+ * Callback-safe.
+ */
+PATHIME_API const char *pathime_option_name(pathime_option_t option);
+
+/**
+ * Describe @a option as this engine implements it. Fails with
+ * PATHIME_ERROR_INVALID_ARGUMENT only for an unrecognized option or
+ * struct_size; an option the engine does not implement is reported through
+ * pathime_option_info_t::supported, not as an error. Callback-safe.
+ */
+PATHIME_API pathime_status_t pathime_engine_option_info(const pathime_engine_t *engine,
+                                                        pathime_option_t option,
+                                                        pathime_option_info_t *out_info);
+
+/* ---- Setting ----------------------------------------------------------
+ *
+ * Each setter takes the value in its natural form. PATHIME_OPTION_ENUM and
+ * PATHIME_OPTION_FLAGS use the int form. Calling the wrong one for an option's
+ * type, or passing a value outside what the descriptor allows, is
+ * PATHIME_ERROR_INVALID_ARGUMENT and changes nothing; an option this engine
+ * does not implement is PATHIME_ERROR_UNSUPPORTED.
+ *
+ * The engine forms set the default inheriting contexts see and may dispatch
+ * composition_changed to any of them, so they are not callback-safe. The
+ * context forms affect one context.
+ */
+
+PATHIME_API pathime_status_t pathime_engine_set_option_bool(pathime_engine_t *engine,
+                                                            pathime_option_t option,
+                                                            bool value);
+PATHIME_API pathime_status_t pathime_engine_set_option_int(pathime_engine_t *engine,
+                                                           pathime_option_t option,
+                                                           int64_t value);
+PATHIME_API pathime_status_t pathime_engine_set_option_string(pathime_engine_t *engine,
+                                                              pathime_option_t option,
+                                                              const char *value);
+
+PATHIME_API pathime_status_t pathime_context_set_option_bool(pathime_context_t *ctx,
+                                                             pathime_option_t option,
+                                                             bool value);
+PATHIME_API pathime_status_t pathime_context_set_option_int(pathime_context_t *ctx,
+                                                            pathime_option_t option,
+                                                            int64_t value);
+PATHIME_API pathime_status_t pathime_context_set_option_string(pathime_context_t *ctx,
+                                                               pathime_option_t option,
+                                                               const char *value);
+
+/**
+ * Drop the value explicitly set at this level, so the option resolves from the
+ * next tier down again. Resetting an option that was never set is a no-op.
+ * Behaves in every other respect like a setter, including resetting the
+ * composition for options that require it.
+ */
+PATHIME_API pathime_status_t pathime_engine_reset_option(pathime_engine_t *engine,
+                                                         pathime_option_t option);
+PATHIME_API pathime_status_t pathime_context_reset_option(pathime_context_t *ctx,
+                                                          pathime_option_t option);
+
+/* ---- Reading ----------------------------------------------------------
+ *
+ * Getters report the resolved effective value — what the engine is actually
+ * doing — not whichever tier supplied it. A client that needs to distinguish an
+ * inherited value from an overriding one asks pathime_context_option_is_set().
+ * All are callback-safe.
+ *
+ * Strings returned are borrowed with the ordinary lifetime: valid until the
+ * next call that mutates the same engine or context.
+ */
+
+PATHIME_API pathime_status_t pathime_engine_get_option_bool(const pathime_engine_t *engine,
+                                                            pathime_option_t option,
+                                                            bool *out_value);
+PATHIME_API pathime_status_t pathime_engine_get_option_int(const pathime_engine_t *engine,
+                                                           pathime_option_t option,
+                                                           int64_t *out_value);
+PATHIME_API pathime_status_t pathime_engine_get_option_string(const pathime_engine_t *engine,
+                                                              pathime_option_t option,
+                                                              pathime_str_t *out_value);
+
+PATHIME_API pathime_status_t pathime_context_get_option_bool(const pathime_context_t *ctx,
+                                                             pathime_option_t option,
+                                                             bool *out_value);
+PATHIME_API pathime_status_t pathime_context_get_option_int(const pathime_context_t *ctx,
+                                                            pathime_option_t option,
+                                                            int64_t *out_value);
+PATHIME_API pathime_status_t pathime_context_get_option_string(const pathime_context_t *ctx,
+                                                               pathime_option_t option,
+                                                               pathime_str_t *out_value);
+
+/**
+ * True iff a value for @a option was explicitly set at this level, as opposed
+ * to inherited from a lower tier. For a settings interface distinguishing "this
+ * context overrides the default" from "this context follows it". Callback-safe.
+ */
+PATHIME_API bool pathime_engine_option_is_set(const pathime_engine_t *engine,
+                                              pathime_option_t option);
+PATHIME_API bool pathime_context_option_is_set(const pathime_context_t *ctx,
+                                               pathime_option_t option);
 
 #ifdef __cplusplus
 }  /* extern "C" */

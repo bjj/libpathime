@@ -35,28 +35,60 @@ Not started:
 
 ## 1. Design rounds not yet held
 
-The header covers the core loop only. Three areas were deliberately deferred and
-have no API surface at all:
+The header covers the core loop and options. One area remains deferred with no
+API surface at all:
 
-- **Engine options** — simplified vs. traditional Chinese, punctuation style,
-  full-width vs. half-width, kana input mode, dictionary selection, prediction
-  behaviour. Per-backend inventories already exist in `docs/*-options.md`
-  (libhangul, anthy, pyzy, ibus-table), each ending in a cross-cutting section
-  aimed at this step. They have not been reconciled into a single API. The
-  table engine is in scope for this round even though it is unwritten: which
-  table a `PATHIME_ENGINE_TABLE` engine loads has to be an option, and its
-  table-defined/user-preference split (`docs/ibus-table-options.md`) is the
-  strongest test of whatever mechanism is chosen.
-- **Negotiation** — how options are set and queried, how unsupported options are
-  reported, protocol versioning. `docs/CONCEPTS.md` §Negotiation sketches the
-  shape; nothing is in the header.
 - **Input purpose and hints** — ordinary text / name / email / URL / number /
   telephone / password, single-line vs. multiline, and the assistance toggles
   (spelling, prediction, completion, auto-capitalization).
 
-`pathime_context_set_max_candidates()` is currently the header's only setting.
-It should probably fold into whatever the options mechanism turns out to be
-rather than stay a bespoke call.
+**Engine options and negotiation are done** — the Options section of
+`include/pathime/pathime.h`. 33 options, 8 of them common to several engines and
+25 engine-specific, set through three kind-typed setters at two levels, with a
+descriptor query so a client can present options it does not know by name.
+`pathime_context_set_max_candidates()` is gone, folded in as
+`PATHIME_OPT_MAX_CANDIDATES`. `pathime_init()` gained a params struct carrying
+`data_dir`, which is the whole of the library's persistent-storage surface.
+
+Roughly three quarters of the catalogued options in `docs/*-options.md` were
+cut, in four groups: internal plumbing (encodings, backend init parameters);
+presentation, which `docs/CONCEPTS.md` already excludes (key bindings, page
+size, orientation, labels, sounds); things earlier rounds settled (thumb-shift,
+segment modes, focus-out policy, and direct/Latin passthrough, which is engine
+activation state); and options that are dead in their own reference
+implementation. The surviving inventory is in the header, not here.
+
+### Deferred out of the options round, with reasons
+
+- **Anthy dictionary selection.** The auxiliary dictionaries (zipcode, symbol,
+  old characters, era, emoji) cannot be enabled per context through anthy's
+  public API. ibus-anthy switches them by switching "personality", which is the
+  process-global write-once trap `data_dir` was chosen to avoid, and it reaches
+  past the public header to do it. Left out rather than half-delivered; revisit
+  if a supportable mechanism appears.
+- **Romaji and kana table variants.** ibus-anthy's schema ships exactly one
+  romaji table; the MS-IME, ATOK, Gairaigo, ANSI/BSI and historical-kana
+  variants named in its comments were never written. There is nothing to
+  reconcile yet, so `PATHIME_OPT_ANTHY_TYPING_METHOD` chooses the state machine
+  and not the table. Worth adding once real alternative tables exist.
+- **Hangul jamo output.** libhangul can emit decomposed jamo instead of
+  precomposed syllables. Nothing in the composition model wants it and the
+  guard field that would force it is vestigial in the shipped library.
+- **User-defined phrases.** Tables can declare that users may define their own
+  phrases, but the API has no operation for defining one, so the flag would
+  configure something unreachable. It belongs with a future editing surface.
+
+### One claim to re-check during implementation
+
+`PATHIME_OPT_PINYIN_FUZZY` and `PATHIME_OPT_PINYIN_CORRECTION` are scoped to
+Pinyin. Bopomofo consults only the incomplete-input bit directly
+(`pyzy/src/BopomofoContext.cc:57`), but it does pass the whole option mask into
+`PinyinParser::parseBopomofo` (`BopomofoContext.cc:252-255`), which reaches the
+same generic `check_flags` the Pinyin path uses. The reasoning for scoping them
+out is that fuzzy and correction rules describe alternate *Latin* spellings,
+which bopomofo keys cannot produce — but that was not traced all the way to the
+bopomofo-to-pinyin tables. If it turns out some are reachable, widening
+`supported` is additive and harmless.
 
 ## 2. The adapter layer
 
@@ -149,7 +181,7 @@ than re-deriving.
 
 Resolved by the API round, recorded so they are not reopened: candidates are
 active-region-only (greedy, no segment navigation); lazy enumeration is hidden
-behind `pathime_context_set_max_candidates()`; the canonical text unit is UTF-8
+behind `PATHIME_OPT_MAX_CANDIDATES`; the canonical text unit is UTF-8
 with all positions in Unicode scalar values.
 
 Resolved since: **the table engine is ours to write** — see §4.
@@ -170,8 +202,10 @@ schema, key-event state machine, candidate sorting — and
 What that means for the API work now:
 
 - `PATHIME_ENGINE_TABLE` is in the header. One id covers every table-driven
-  method, because they differ only in the table loaded; table selection will be
-  an engine option, from the options round, not a separate enum entry.
+  method, because they differ only in the table loaded. Table selection is
+  `PATHIME_OPT_TABLE_FILE`, a per-context option rather than a separate enum
+  entry — because the engine is ours, one engine can hold several compiled
+  tables and hand a different one to each context.
 - `PATHIME_WITH_TABLE` is in the generated `config.h`, currently always 0, and
   `pathime_has_engine(PATHIME_ENGINE_TABLE)` will be false until there is code.
 - `LIBPATHIME_WITH_TABLE` defaults OFF. Turning it on is gated in
@@ -201,3 +235,21 @@ adapter layer for the three backends that do exist.
 - **Thread-safety is a documented requirement, not an enforced one.** Nothing
   detects overlapping calls. If that proves to be a common client bug, a debug
   build could catch it cheaply with a non-recursive in-call flag per context.
+
+- **The header explains itself against the backends; one day it should not.**
+  Much of the commentary in `include/pathime/pathime.h` justifies a decision by
+  naming what a backend does — anthy's write-once personality, pyzy's
+  creation-time `InputType`, libhangul's nine built-in layouts, which engines
+  learn unconditionally. That is exactly right *now*: the implementation does
+  not exist, the reasoning is not yet embodied in code anyone can read, and
+  these notes are what keep the design honest and stop settled questions being
+  reopened. Once the library is written, the same notes become a liability — a
+  client does not care which backend forced a choice, and a reader who does can
+  find it in `docs/*-mapping.md`, which is where it belongs.
+
+  So: after the implementation lands, make a deliberate pass over the header
+  and move backend-specific justification out of it, leaving the contract and
+  the rules a client must obey. The two tests for whether a passage stays are
+  whether a client's behaviour depends on it, and whether removing it would let
+  someone reopen a question this design already closed. Do not do this early —
+  removing the reasoning before the code replaces it loses it entirely.
