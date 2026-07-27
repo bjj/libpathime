@@ -43,9 +43,10 @@ API surface at all:
   (spelling, prediction, completion, auto-capitalization).
 
 **Engine options and negotiation are done** — the Options section of
-`include/pathime/pathime.h`. 33 options, 8 of them common to several engines and
-25 engine-specific, set through three kind-typed setters at two levels, with a
-descriptor query so a client can present options it does not know by name.
+`include/pathime/pathime.h`. 32 options, 8 of them common to several engines and
+24 engine-specific, set through three kind-typed setters at two levels, with a
+descriptor query so a client can present options it does not know by name, and
+`pathime_option_count()` so it can walk options its own header never named.
 `pathime_context_set_max_candidates()` is gone, folded in as
 `PATHIME_OPT_MAX_CANDIDATES`. `pathime_init()` gained a params struct carrying
 `data_dir`, which is the whole of the library's persistent-storage surface.
@@ -77,6 +78,41 @@ implementation. The surviving inventory is in the header, not here.
 - **User-defined phrases.** Tables can declare that users may define their own
   phrases, but the API has no operation for defining one, so the flag would
   configure something unreachable. It belongs with a future editing surface.
+- **Candidate annotations.** Per-candidate readings, glosses, and table author
+  flags. `pathime_context_candidate()` returns text only. Nothing shipping in
+  v1 has an annotation to carry, and the extension is additive — a
+  `pathime_context_candidate_info()` returning a `struct_size`-versioned struct
+  — so it waits for a real consumer. Recorded in the header so the omission
+  reads as chosen.
+
+### Cut in the API review round
+
+- **Hanja conversion, entirely.** `PATHIME_OPT_HANGUL_HANJA` and
+  `PATHIME_KEY_HANGUL_HANJA` are gone, along with any use of libhangul's
+  `HanjaTable`/`HanjaList` API. Hangul now produces **no candidates at all**, so
+  `PATHIME_OPT_MAX_CANDIDATES` reports itself unsupported there, and the UCS-4
+  vs. UTF-8 split inside libhangul no longer matters to us. `docs/libhangul-*.md`
+  still describe the Hanja subsystem: they document the reference implementation,
+  not our scope.
+- **`PATHIME_KEY_HANGUL` and `PATHIME_KEY_HIRAGANA_KATAKANA`.** Neither is a key
+  any engine dispatches on. In their reference engines both are rebindable
+  hotkeys driving something this API puts on the client's side: `IBUS_Hangul`
+  only ever appears in ibus-hangul's `switch_keys` list
+  (`refs/ibus-hangul/src/engine.c:422`), which calls
+  `ibus_hangul_engine_switch_input_mode()` (`engine.c:1432`) — activation state,
+  excluded from the model; `Hiragana_Katakana` only appears in ibus-anthy's
+  keymap tables, whose handlers (`engine/python3/engine.py:2128-2160`) call
+  `__set_input_mode` and touch no composition state — that is
+  `PATHIME_OPT_ANTHY_KANA_SCRIPT`. `HENKAN` and `MUHENKAN` stay: they bind to
+  convert, cancel, and candidate navigation, which are real composition
+  operations. The general rule is now stated in the header — a key that changes
+  a mode rather than the composition belongs to the client.
+- The surrounding-text surface **stays**, and its justification changed hands:
+  not hanja but `PATHIME_HANGUL_PREEDIT_NONE`, the no-preedit mode in which the
+  syllable is built up inside the client's document by deleting the partial form
+  and recommitting a fuller one (ibus-hangul's `PREEDIT_MODE_NONE`,
+  `docs/libhangul-mapping.md:158`). It is the only thing in the library that
+  sets either `PATHIME_REQUIRES_*` bit.
 
 ### One claim to re-check during implementation
 
@@ -132,8 +168,8 @@ the reason `pathime_init()` is documented as the one slow call.
 
 ### Finding 4 — encoding is not uniform
 
-Conversion happens at every boundary. libhangul's composition API is UCS-4 while
-its Hanja API is UTF-8; anthy is UTF-8 only after
+Conversion happens at every boundary. libhangul's composition API is UCS-4 and
+everything we hand out is UTF-8; anthy is UTF-8 only after
 `anthy_context_set_encoding(ctx, ANTHY_UTF8_ENCODING)` and its `seg_len` counts
 input reading xchars, not bytes; pyzy is UTF-8 but its `cursor()` is a byte
 offset into the raw ASCII input, which must never be conflated with output
