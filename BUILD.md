@@ -117,7 +117,13 @@ runs one backend's suite.
 The suite passes on Linux (19 tests) and on Windows under both MSVC and
 clang-cl (18 — see `hangul.vendored.unittest` below for the missing one).
 
-Everything lives under `tests/<backend>/`, and each directory holds two kinds:
+`tests/api/` holds the suite for libpathime's own API surface (`api.<name>`):
+plain C11 against `<pathime/pathime.h>`, doubling as proof the header works
+from strict C. Tests registered ahead of their implementation exit 77, which
+ctest reports as *skipped* — see `tests/api/CMakeLists.txt`.
+
+Everything else lives under `tests/<backend>/`, and each directory holds two
+kinds:
 
 - `<backend>.vendor*` — the submodule's own suite. None of the three upstream
   build systems is used by this build, so the wiring is reproduced rather than

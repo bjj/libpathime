@@ -1,9 +1,10 @@
-# Test suites for the vendored backends.
+# Test suites: one directory per vendored backend, plus api/ for the
+# libpathime API surface itself.
 #
 # Reached from the top-level CMakeLists only when LIBPATHIME_BUILD_TESTS is ON,
 # by which point enable_testing() has been called.
 #
-# Two kinds of test live here, and each backend directory holds both:
+# Two kinds of test live in the backend directories, and each holds both:
 #
 #   * the vendored project's own suite, wired up as CMake targets. Upstream
 #     ships these under meson/autotools/its-own-CMake, none of which this build
@@ -28,3 +29,7 @@ endif()
 if(LIBPATHIME_WITH_PYZY)
   add_subdirectory(pyzy)
 endif()
+
+# The API-surface suite is not gated: it needs only the libpathime target,
+# which always builds.
+add_subdirectory(api)

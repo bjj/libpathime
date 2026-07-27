@@ -21,8 +21,9 @@ docs/                    # Documentation and project design information
   ibus-table-spec.md     # Clean-room behavioral spec for ibus-table (source format, DB schema, engine logic)
   *-mapping.md           # Overview of how the submodule libraries relate to the concepts
   *-options.md           # Per-library option inventories, for the options design round
-src/                     # Library implementation — empty; nothing written yet
-tests/                   # Test suites, one directory per backend — see BUILD.md
+src/                     # Library implementation — stubbed skeleton; the map is docs/source-layout.md
+  engines/               # One adapter directory per backend, plus table/ for the future table engine
+tests/                   # Test suites: one directory per backend, plus api/ — see BUILD.md
 refs/                    # Local reference clones — gitignored, not submodules
   ibus-hangul/           # Korean IBus engine (reference)
   ibus-anthy/            # Japanese IBus engine (reference)
@@ -60,6 +61,10 @@ The `refs/` directory contains IBus engine implementations and table data to stu
 - `TODO.md` — unfinished business: the design rounds not yet held, the adapter-layer constraints, the open questions, and the known loose ends. Start here for "what's next."
 - `docs/CONCEPTS.md` — defines the canonical IME concepts (engine, client, composition, etc.) that `libpathime` implements
 - `include/pathime/pathime.h` — the public C API for the core input loop. Settled. Kept in lockstep with `docs/CONCEPTS.md`; the two do not disagree, so neither carries a list of deviations from the other.
+- `docs/source-layout.md` — the map of `src/` and `tests/api/`: which file owns
+  which responsibility (keyed to `TODO.md` §2's findings), the conventions, and
+  which choices are settled versus deliberately open. Read it before adding or
+  moving implementation code.
 - `docs/ibus-table-spec.md` — the specification for our own table engine, derived clean-room from ibus-table: source `.txt` file format, compiled SQLite schema, key-event state machine, candidate sorting, and implementation notes for the C++ port
 - `docs/*-mapping.md` — per-library notes mapping each submodule's API to the concepts. Verified against the actual submodule source (see cited file/line references throughout); each ends with an "Impedance mismatches" section.
 - `docs/*-options.md` — per-library inventories of configurable options, gathered for the not-yet-held negotiation/options design round.

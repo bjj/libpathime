@@ -1,13 +1,15 @@
 # libpathime — top-level build orchestrator.
 #
-# Right now this build exists only to compile the three vendored input-method
-# submodules (libhangul, anthy-unicode, pyzy) from a single tree, on both Linux
-# and Windows. The libpathime library itself is not written yet.
+# Compiles the three vendored input-method submodules (libhangul,
+# anthy-unicode, pyzy) and the libpathime library itself, on both Linux and
+# Windows. The library is a stubbed skeleton so far — see
+# docs/source-layout.md for its layout and intent.
 #
 # Layout:
 #   cmake/               helper modules + Windows compat shims
 #   cmake/ports/<name>/  our native CMake ports of submodules that ship no CMake
 #   libhangul/           consumed via its own upstream CMake (add_subdirectory)
+#   src/                 the libpathime library target
 cmake_minimum_required(VERSION 3.21)
 
 project(libpathime
@@ -62,7 +64,7 @@ endif()
 # so cannot be wrapped; the engine described by docs/ibus-table-spec.md will be
 # written here instead, as a peer of the vendored libraries. Nothing exists to
 # compile yet, so LIBPATHIME_WITH_TABLE defaults OFF and is forced off by
-# LibpathimeDependencies if requested. No add_subdirectory() until src/ has it.
+# LibpathimeDependencies if requested; src/engines/table/ holds only a README.
 
 # --- Generated public header: include/pathime/config.h ---
 # Records which backends survived the dependency gating above, so clients can
@@ -88,19 +90,11 @@ install(FILES "${PROJECT_BINARY_DIR}/include/pathime/config.h"
               "${CMAKE_CURRENT_SOURCE_DIR}/include/pathime/pathime.h"
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pathime")
 
-# The library itself does not exist yet; this interface target carries the two
-# include directories (source tree for pathime.h, binary tree for config.h) so
-# that anything added later — or a test that just #includes the header — gets
-# both without repeating the paths.
-add_library(pathime_public_headers INTERFACE)
-add_library(libpathime::headers ALIAS pathime_public_headers)
-target_include_directories(pathime_public_headers INTERFACE
-  "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
-  "$<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>"
-  "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
-if(NOT BUILD_SHARED_LIBS)
-  target_compile_definitions(pathime_public_headers INTERFACE PATHIME_STATIC)
-endif()
+# --- The library itself: the `pathime` target, stubbed skeleton so far. It
+# carries the public include directories and the PATHIME_BUILD/PATHIME_STATIC
+# definitions — the former standalone libpathime::headers interface target is
+# folded into it and retired, as TODO.md §5 called for.
+add_subdirectory(src)
 
 # --- Tests. All test wiring — both the vendored suites and our own — lives
 # under tests/, one directory per backend, so nothing above this line has to
