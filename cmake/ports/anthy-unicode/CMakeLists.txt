@@ -38,6 +38,17 @@ endfunction()
 # either: each copy would need its own initialisation. Building the family
 # static sidesteps the whole question, and has the side benefit of making the
 # build-time codegen tools self-contained (no DLL to locate when they run).
+#
+# The cost, stated rather than discovered twice: a shared libpathime absorbs a
+# private copy of anthy, and anthy's configuration and initialised-once flags
+# are process-global state (the conf database in src-diclib/conf.c, is_init_ok
+# in src-main/main.c, dic_init_count in src-worddic/word_dic.c). So on Windows
+# any *other* module in the process that links anthy gets a second, independent
+# anthy: its anthy_conf_override() calls are invisible to libpathime's copy and
+# vice versa. ELF hides this by resolving both to one definition, which is why
+# it can pass on Linux and fail on Windows with no source difference at all.
+# Consequence for us: nothing that links libpathime may also link anthy —
+# tests/api/CMakeLists.txt is where that bit, and the way around it.
 set(_anthy_public_kind "")   # empty => honour BUILD_SHARED_LIBS
 if(WIN32)
   set(_anthy_public_kind STATIC)

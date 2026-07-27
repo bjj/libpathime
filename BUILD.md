@@ -124,7 +124,10 @@ Two of the directories are libpathime's own, and they differ in what they link:
   proof the header works from strict C and that every symbol a client needs is
   actually exported. It holds the ABI, lifecycle and options suites, plus one
   end-to-end test per engine that types real Korean, Japanese and Chinese
-  through the public API.
+  through the public API. Nothing here may link a backend library — the public
+  header is the whole interface these tests are entitled to, and on Windows
+  linking anthy alongside libpathime is actively broken (see "Why anthy is
+  static on Windows").
 - `tests/core/` (`core.<name>`) compiles the internal sources under test
   directly into each executable, because internal helpers carry no
   `PATHIME_API` and a shared build does not export them. C++17, covering
@@ -136,7 +139,10 @@ The three engine tests are the only ones under `tests/api/` gated on a
 rather than just the library — anthy's dictionary and pyzy's database, neither
 of which exists at its installed location in a build tree. That wiring lives in
 `tests/api/CMakeLists.txt`; it is a test-environment problem, not a library
-one, and the library must not grow code to hunt for data files itself.
+one, and the library must not grow code to hunt for data files itself. Both
+tests reach their data the way an installation would: anthy through a
+build-tree conf file named by the `CONFFILE` environment variable, pyzy through
+a `main.db` staged into the test's working directory.
 
 A test registered ahead of its implementation exits 77, which ctest reports as
 *skipped*. Never delete a registration.
@@ -242,6 +248,34 @@ and initialises at runtime. Windows can only import a data symbol through
 per DLL would give each copy its own uninitialised state. Building the family
 static avoids the question entirely, and has the side benefit that the codegen
 tools have no DLLs to locate when the build runs them.
+
+It has one consequence worth knowing before it bites: a shared `libpathime`
+absorbs a *private copy* of anthy, and anthy's configuration and
+initialised-once flags are process-global (the conf database in
+`src-diclib/conf.c`, `is_init_ok` in `src-main/main.c`, `dic_init_count` in
+`src-worddic/word_dic.c`). So on Windows any other module in the process that
+also links anthy gets a **second, independent anthy**: its
+`anthy_conf_override()` calls are invisible to libpathime's copy, and
+`anthy_init()` runs twice against two sets of state. ELF hides this by
+resolving both to a single definition, so the same code can pass on Linux and
+fail on Windows with no source difference at all — which is exactly how it was
+found, in `api.engine_anthy`.
+
+Nothing that links `libpathime` may therefore also link anthy. Where a test
+needs to point anthy at build-tree data, it does so the way an installation
+would — through anthy's own conf file, named by the `CONFFILE` environment
+variable; `tests/api/CMakeLists.txt` sets that up and explains it. The suites
+under `tests/anthy/` are unaffected: they link anthy and not libpathime, so
+they have exactly one copy and may keep calling `anthy_conf_override()`.
+
+`pathime_init_params_t::data_dir` is unaffected by all of this. It reaches
+anthy as `anthy_conf_override("XDG_CONFIG_HOME", data_dir)` *inside* the
+library, so it lands in the copy that matters, and the per-user state
+(`<data_dir>/anthy/last-record2_*`, the private dictionary, the lock file) is
+created there on Windows as it is on Linux — including creating a multi-level,
+backslash-separated `data_dir` from nothing, which works because of the
+generated Windows `file_dic.c` described above. The directory is created when
+the first *context* is created, not by `pathime_init()`.
 
 ### Known Windows limitations
 

@@ -33,14 +33,17 @@
 # nothing below is needed:
 #
 #   anthy reads CONFFILE at anthy_init() time and takes DIC_FILE from it. The
-#   conf file this build generates names the *install* path, which does not
+#   conf file the anthy port generates names the *install* path, which does not
 #   exist in a build tree, so anthy_init() returns -1 and pathime_has_engine()
-#   is false. anthy_conf_get_str() does fall back to getenv(), but only for
-#   names the conf file did not set — and it sets DIC_FILE — so environment
-#   variables alone cannot redirect it. The vendored suite solves this with
-#   anthy_conf_override() (tests/anthy/anthy_test_util.h) and so does
-#   engine_anthy_test.c, which is why that one API test compiles against
-#   <anthy/anthy.h>.
+#   is false. The vendored suite solves this by calling anthy_conf_override()
+#   before anthy_init() (tests/anthy/anthy_test_util.h); this test cannot,
+#   because those calls would have to reach the copy of anthy inside libpathime
+#   and on Windows there is no route to it — see "Why not anthy_conf_override()"
+#   below. Instead it is given a second, build-tree conf file through the
+#   CONFFILE environment variable: anthy_conf_get_str() falls back to getenv()
+#   for names nothing has set, and nothing sets CONFFILE before the first
+#   lookup, so the environment decides which conf file is read and that file
+#   decides DIC_FILE.
 #
 #   pyzy's Database::open() searches PKGDATADIR — again an install path — and
 #   then "main.db" relative to the process's working directory. There is no
@@ -55,6 +58,34 @@
 # tree, via pathime_init_params_t::data_dir, so a run never touches the
 # developer's real ~/.config/anthy or pyzy user database and each run starts
 # from clean learning state.
+#
+# ---------------------------------------------------------------------------
+# Why not anthy_conf_override(): one anthy per module on Windows
+# ---------------------------------------------------------------------------
+#
+# api.engine_anthy used to link anthy-unicode and make the same four
+# anthy_conf_override() calls the vendored suite makes. That worked on Linux
+# and silently could not work on Windows, and the difference is not anthy's —
+# it is linkage.
+#
+# anthy is built STATIC on Windows whatever BUILD_SHARED_LIBS says, for reasons
+# cmake/ports/anthy-unicode/CMakeLists.txt sets out. libpathime is shared, so
+# it absorbs a private copy of anthy, and anthy's configuration lives in
+# *process-global* state — the conf database in src-diclib/conf.c, plus the
+# initialised flags in src-main/main.c and src-worddic/word_dic.c. A test
+# executable that also links anthy therefore gets a *second* copy with its own
+# conf database. Its overrides land there; libpathime's anthy_init() runs
+# against the other one, finds no dictionary, and pathime_has_engine() answers
+# false. (On ELF the two resolve to a single definition, which is exactly why
+# the same code passes on Linux — nothing about the test was ever right, it was
+# being rescued by symbol interposition.)
+#
+# The rule this leaves: nothing under tests/api/ may link a backend library.
+# These are API-surface tests and the public header is the whole interface they
+# are entitled to; where a backend needs pointing at build-tree data, it has to
+# be done the way an installation would do it — through the environment and the
+# backend's own config files, as below. tests/anthy/ is unaffected: those
+# programs link anthy and nothing else, so they have exactly one copy.
 
 function(libpathime_add_api_test name source)
   add_executable(api_${name}_test "${source}")
@@ -79,32 +110,46 @@ if(LIBPATHIME_WITH_ANTHY)
       "cmake/ports/anthy-unicode.")
   endif()
 
-  # The same three defines tests/anthy/CMakeLists.txt passes its own programs,
-  # under the same names, so the two places stay comparable. The conf file and
-  # dictionary are absolute paths into the build tree; the HOME is ours alone.
+  # The data directory this run is confined to: pathime_init_params_t::data_dir
+  # below, and the HOME of last resort in the environment. Ours alone, so a run
+  # starts from clean learning state.
   set(_anthy_home "${CMAKE_CURRENT_BINARY_DIR}/home/api_engine_anthy")
   file(MAKE_DIRECTORY "${_anthy_home}")
 
-  # <anthy/anthy.h> for anthy_conf_override(), which must be called before
-  # pathime_init() — the first conf lookup reads CONFFILE and then refuses to
-  # run again. The library target already links anthy, but naming it here keeps
-  # the test linkable in a shared build too, where anthy's symbols are not
-  # re-exported from libpathime.
-  target_include_directories(api_engine_anthy_test PRIVATE "${ANTHY_TEST_SRC_DIR}")
-  target_link_libraries(api_engine_anthy_test PRIVATE anthy-unicode)
+  # The build-tree conf file, written here rather than reusing the port's
+  # ${ANTHY_TEST_CONF_FILE}: that one is generated from the submodule's
+  # anthy-unicode.conf.in for the *codegen tools* and names install paths, and
+  # the one thing this test needs is a DIC_FILE that exists now. DIC_FILE is
+  # the only key anthy_init() reads (src-diclib/file_dic.c:65); ANTHYDIR and
+  # ZIPDICT_EUC are reached only by rule parsing and the zipcode extension,
+  # neither of which a built anthy.dic goes through.
+  #
+  # NEWLINE_STYLE UNIX for the same reason the port uses it: anthy's line
+  # parser is LF-oriented and would keep the CR of a CRLF file as part of the
+  # path token. Nor may the path contain a space — read_conf_file() splits on
+  # "%s %s" — which is a constraint on where the build tree may live, and one
+  # the port's own generated conf already carries.
+  set(_anthy_conf "${CMAKE_CURRENT_BINARY_DIR}/anthy-buildtree.conf")
+  file(CONFIGURE OUTPUT "${_anthy_conf}" NEWLINE_STYLE UNIX CONTENT
+"# Generated by tests/api/CMakeLists.txt. Points anthy at the dictionary this
+# build produced; api.engine_anthy names it through the CONFFILE environment
+# variable, which is the only handle it has on a copy of anthy it does not link.
+DIC_FILE ${ANTHY_TEST_DIC_FILE}
+")
+
   target_compile_definitions(api_engine_anthy_test PRIVATE
-    "ANTHY_TEST_CONF=\"${ANTHY_TEST_CONF_FILE}\""
-    "ANTHY_TEST_DIC=\"${ANTHY_TEST_DIC_FILE}\""
     "ANTHY_TEST_HOME=\"${_anthy_home}\"")
   add_dependencies(api_engine_anthy_test anthy-dic)
 
-  # Belt and braces around the HOME the test also sets through
-  # anthy_conf_override(): anthy_get_user_dir() prefers XDG_CONFIG_HOME, and
-  # conf lookups fall back to getenv() for anything nothing overrode. Clearing
-  # it here means that even a path this test does not know about cannot reach
-  # the developer's real ~/.config/anthy.
+  # CONFFILE is what makes anthy_init() succeed; the other two are belt and
+  # braces around it. anthy_get_user_dir() prefers XDG_CONFIG_HOME over HOME,
+  # and conf lookups fall back to getenv() for anything nothing overrode —
+  # clearing one and redirecting the other means that even a path this test
+  # does not know about cannot reach the developer's real ~/.config/anthy.
+  # (In practice pathime_init()'s data_dir gets there first: it overrides
+  # XDG_CONFIG_HOME inside the library, which wins over both.)
   set_tests_properties(api.engine_anthy PROPERTIES
-    ENVIRONMENT "XDG_CONFIG_HOME=;HOME=${_anthy_home}")
+    ENVIRONMENT "CONFFILE=${_anthy_conf};XDG_CONFIG_HOME=;HOME=${_anthy_home}")
 
   # anthy *learns* on commit, and this test commits. The learned record file
   # lives at <home>/anthy/, so wiping that subdirectory before every run is

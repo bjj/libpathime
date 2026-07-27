@@ -44,16 +44,16 @@
 #include "api_test_util.h"
 
 /*
- * anthy_conf_override(), and the only reason an API-surface test includes a
- * backend header. anthy finds its dictionary through the conf database, which
- * is read once during anthy_init() and then frozen — so pointing it at the
- * build tree has to happen before pathime_init(), and there is no route to it
- * through the public API. tests/api/CMakeLists.txt explains why that is a test
- * environment problem and not a library one.
+ * No backend header, and deliberately so. This test drives anthy through
+ * <pathime/pathime.h> alone; the dictionary it needs is found by pointing
+ * anthy's CONFFILE at a build-tree conf file from the environment, which
+ * tests/api/CMakeLists.txt sets. Calling anthy_conf_override() from here
+ * instead would need this program to link anthy — and on Windows that is not
+ * merely inelegant but broken, because anthy is a *static* library absorbed
+ * into pathime.dll, so a second copy linked into the test executable has its
+ * own conf database and the library never sees the override. See
+ * tests/api/CMakeLists.txt and cmake/ports/anthy-unicode/CMakeLists.txt.
  */
-#if PATHIME_WITH_ANTHY
-#include <anthy/anthy.h>
-#endif
 
 #if !PATHIME_WITH_ANTHY
 
@@ -800,20 +800,6 @@ int main(void)
     pathime_init_params_t params;
 
     /*
-     * Before pathime_init(), because the first conf lookup reads CONFFILE and
-     * then refuses to run again. Same four overrides the vendored suite makes
-     * (tests/anthy/anthy_test_util.h) and for the same reason: without them
-     * anthy_init() cannot find a dictionary in an uninstalled build tree,
-     * returns -1, and pathime_has_engine() answers false. DIC_FILE has to be
-     * overridden rather than exported, because the generated conf file sets it
-     * and anthy's getenv() fallback only applies to names nothing set.
-     */
-    anthy_conf_override("CONFFILE", ANTHY_TEST_CONF);
-    anthy_conf_override("HOME", ANTHY_TEST_HOME);
-    anthy_conf_override("XDG_CONFIG_HOME", "");
-    anthy_conf_override("DIC_FILE", ANTHY_TEST_DIC);
-
-    /*
      * The library's own persistent-storage surface, pointed at the build tree.
      * anthy_global_init() turns this into anthy_conf_override("XDG_CONFIG_HOME",
      * ...), which is what moves the learned record file and the personal
@@ -827,8 +813,8 @@ int main(void)
 
     /*
      * Not a conditional skip. Unlike libhangul, anthy has a runtime
-     * prerequisite that can fail — but the four overrides above are exactly
-     * what makes it succeed, so a false here means the wiring in
+     * prerequisite that can fail — but the CONFFILE this test is run with is
+     * exactly what makes it succeed, so a false here means the wiring in
      * tests/api/CMakeLists.txt is broken and the right response is a failure,
      * not a quietly green run.
      */
