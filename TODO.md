@@ -157,10 +157,11 @@ are in the comment at `src/options.cc:229`.
 Both keep their `PATHIME_OPT_PINYIN_` prefix: the name describes what the rules
 are *about*, and bopomofo reaches them only by being parsed into pinyin first.
 
-**Left to do:** the header's doc comment for `PATHIME_OPT_PINYIN_FUZZY` should
-gain an explicit "Pinyin, Bopomofo." line — unlike the unprefixed options it
-names no engines, so the section heading is currently all a reader has. One
-line, at the next header pass.
+**Done (2026-07-27):** the header now names the engines on both. Fuzzy reads
+"Pinyin, Bopomofo."; correction reads "Pinyin only." and carries a paragraph
+saying *why* it does not extend — a correction repairs a Latin spelling and
+there is none to repair when the syllable was typed as bopomofo, whereas fuzzy
+rules do extend because bopomofo is parsed into pinyin before it is matched.
 
 ## 2. The adapter layer
 

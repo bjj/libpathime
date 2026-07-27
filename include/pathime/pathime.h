@@ -1320,7 +1320,7 @@ typedef enum pathime_option {
     PATHIME_OPT_PINYIN_SCHEME = 19,
 
     /**
-     * FLAGS of PATHIME_PINYIN_FUZZY_*, default every bit.
+     * FLAGS of PATHIME_PINYIN_FUZZY_*, default every bit. Pinyin, Bopomofo.
      *
      * Which pronunciation mergers the matcher tolerates. Each corresponds to a
      * real merger in some regional Mandarin — a speaker who does not
@@ -1334,12 +1334,18 @@ typedef enum pathime_option {
     PATHIME_OPT_PINYIN_FUZZY = 20,
 
     /**
-     * FLAGS of PATHIME_PINYIN_CORRECT_*, default every bit.
+     * FLAGS of PATHIME_PINYIN_CORRECT_*, default every bit. Pinyin only.
      *
      * Which mis-spellings are silently accepted — writing "iou" for "iu", "gn"
      * for "ng", and six more. Distinct from PATHIME_OPT_PINYIN_FUZZY: these are
      * typing slips with one correct form, not pronunciations that genuinely
      * differ between speakers.
+     *
+     * Unlike PATHIME_OPT_PINYIN_FUZZY this one does not extend to Bopomofo, and
+     * the reason is the distinction above: a correction repairs a Latin
+     * spelling, and there is no Latin spelling to slip in when the syllable was
+     * typed as bopomofo. Fuzzy rules do extend, because bopomofo is parsed into
+     * pinyin before it is matched and the merger applies to the result.
      */
     PATHIME_OPT_PINYIN_CORRECTION = 21,
 
