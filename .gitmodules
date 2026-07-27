@@ -7,3 +7,6 @@
 [submodule "anthy-unicode"]
 	path = anthy-unicode
 	url = https://github.com/fujiwarat/anthy-unicode
+[submodule "demo/cpp-terminal"]
+	path = demo/cpp-terminal
+	url = https://github.com/jupyter-xeus/cpp-terminal
