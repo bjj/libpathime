@@ -23,20 +23,6 @@
 
 #include "api_test_util.h"
 
-/*
- * Local rather than in api_test_util.h: that header is shared with the other
- * api tests and this is the only one that compares sizes.
- */
-#define PT_CHECK_SIZE(expr, expected)                                        \
-    do {                                                                     \
-        const size_t pt_got_sz_ = (size_t)(expr);                            \
-        const size_t pt_want_sz_ = (size_t)(expected);                       \
-        pt_checks++;                                                         \
-        if (pt_got_sz_ != pt_want_sz_)                                       \
-            PT_FAILF("%s: got %zu, expected %zu", #expr,                     \
-                     pt_got_sz_, pt_want_sz_);                               \
-    } while (0)
-
 #if !PATHIME_WITH_HANGUL
 
 int main(void)

@@ -68,4 +68,15 @@ static int pt_skip(const char *name, const char *why)
     return LIBPATHIME_TEST_SKIP;
 }
 
+/* Compare two size_t for equality */
+#define PT_CHECK_SIZE(expr, expected)                                        \
+    do {                                                                     \
+        const size_t pt_got_sz_ = (size_t)(expr);                            \
+        const size_t pt_want_sz_ = (size_t)(expected);                       \
+        pt_checks++;                                                         \
+        if (pt_got_sz_ != pt_want_sz_)                                       \
+            PT_FAILF("%s: got %zu, expected %zu", #expr,                     \
+                     pt_got_sz_, pt_want_sz_);                               \
+    } while (0)
+
 #endif /* LIBPATHIME_API_TEST_UTIL_H */
