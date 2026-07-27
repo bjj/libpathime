@@ -500,9 +500,14 @@ void PyzyContext::harvest(Composition *model, Output *out)
 
 bool PyzyContext::process_key(const KeyEvent &key,
                               const OptionReader &options,
+                              const SurroundingTextView &doc,
                               Composition *model,
                               Output *out)
 {
+    /* Unused: pyzy holds its composition in the preedit, so it never revises
+     * text already in the client's document. See backend.h. */
+    (void)doc;
+
     if (context_ == nullptr) {
         return false;
     }

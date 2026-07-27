@@ -151,6 +151,25 @@ private:
 };
 
 /**
+ * The SurroundingTextView an adapter is handed: the one question it may ask
+ * about the client's document, answered from this context's snapshot.
+ *
+ * Its predicate is deliberately the same one refresh_composition() applies
+ * when it decides whether to dispatch a deletion, so an adapter that asks
+ * before requesting gets a truthful answer rather than an optimistic one.
+ * Keeping the two in agreement is this class's whole job — if the dispatch
+ * condition changes, this changes with it.
+ */
+class ContextSurroundingText : public SurroundingTextView {
+public:
+    explicit ContextSurroundingText(const pathime_context_t *ctx) : ctx_(ctx) {}
+    bool can_delete_before(size_t count) const override;
+
+private:
+    const pathime_context_t *ctx_;
+};
+
+/**
  * Rebuild the flat composition value from the structured model, materialize
  * candidates up to the cap, and dispatch composition_changed — in that order,
  * and only after the backend has finished mutating.

@@ -41,6 +41,17 @@ int main(void)
 #define HA    "\xED\x95\x98"
 
 /*
+ * The compatibility jamo the PATHIME_HANGUL_PREEDIT_NONE tests need: ㄱ
+ * U+3131, ㅏ U+314F, ㄴ U+3134. These are what libhangul shows for a lone
+ * consonant or vowel that has not yet joined a syllable — a stranded jamo, in
+ * other words, which is exactly what the stale-snapshot recovery leaves
+ * behind.
+ */
+#define GIYEOK  "\xE3\x84\xB1"
+#define A_VOWEL "\xE3\x85\x8F"
+#define NIEUN   "\xE3\x84\xB4"
+
+/*
  * What the client saw. Callbacks append to this in the order they arrive, so
  * the dispatch order the header fixes — every deletion before any commit,
  * composition_changed always last — is checkable rather than assumed.
@@ -56,7 +67,51 @@ typedef struct {
     char last_preedit[256];
     size_t last_settled;
     size_t last_candidates;
+
+    /*
+     * A toy client document, maintained by applying the callbacks the way a
+     * real client would: commit_text appends at the cursor, and
+     * delete_surrounding_text removes a range relative to it. The cursor is
+     * always at the end, which is the only case PATHIME_HANGUL_PREEDIT_NONE
+     * produces.
+     *
+     * Only the PREEDIT_NONE tests read it. It exists because that mode's
+     * correctness is not a property of any one callback — it is whether the
+     * sequence of deletions and commits leaves the right text behind — and
+     * checking the callbacks individually would miss a syllable duplicated or
+     * a deletion applied to the wrong range.
+     */
+    char doc[512];
+    int last_delete_offset;
+    size_t last_delete_count;
+    int delete_count;
 } client_log_t;
+
+/* Scalar values in a NUL-terminated UTF-8 string: lead bytes, not bytes. */
+static size_t doc_scalars(const char *s)
+{
+    size_t n = 0;
+    for (; *s != '\0'; s++) {
+        if (((unsigned char)*s & 0xC0) != 0x80) {
+            n++;
+        }
+    }
+    return n;
+}
+
+/* Remove the last @a count scalar values, which is what an offset of -count
+ * means when the cursor sits at the end of the document. */
+static void doc_erase_tail(char *doc, size_t count)
+{
+    size_t i = strlen(doc);
+    while (count > 0 && i > 0) {
+        i--;
+        if (((unsigned char)doc[i] & 0xC0) != 0x80) {
+            count--;
+        }
+    }
+    doc[i] = '\0';
+}
 
 static void log_order(client_log_t *log, char c)
 {
@@ -77,14 +132,33 @@ static void on_commit(void *user_data, pathime_str_t text)
     /* The library promises everything it produces is NUL-terminated even
      * though len is authoritative. */
     PT_CHECK(text.bytes[text.len] == '\0');
+
+    /* Apply to the toy document as a client would: insert at the cursor. */
+    if (strlen(log->doc) + text.len < sizeof(log->doc)) {
+        memcpy(log->doc + strlen(log->doc), text.bytes, text.len);
+    }
 }
 
 static void on_delete(void *user_data, ptrdiff_t offset, size_t count)
 {
     client_log_t *log = (client_log_t *)user_data;
     log_order(log, 'd');
-    (void)offset;
-    (void)count;
+    log->delete_count++;
+    log->last_delete_offset = (int)offset;
+    log->last_delete_count = count;
+
+    /* "Never 0", per the callback's documentation. */
+    PT_CHECK(count != 0);
+
+    /*
+     * Applied only for the shape this engine produces — a range ending at the
+     * cursor. Anything else would be a bug in the library rather than
+     * something this toy client should paper over, so it is asserted instead.
+     */
+    PT_CHECK(offset == -(ptrdiff_t)count);
+    if (offset == -(ptrdiff_t)count) {
+        doc_erase_tail(log->doc, count);
+    }
 }
 
 static void on_changed(void *user_data, const pathime_composition_t *composition)
@@ -103,6 +177,23 @@ static void on_changed(void *user_data, const pathime_composition_t *composition
 static void log_reset(client_log_t *log)
 {
     memset(log, 0, sizeof(*log));
+}
+
+/*
+ * Clear the callback record but keep the document.
+ *
+ * The PATHIME_HANGUL_PREEDIT_NONE tests need to check one key's worth of
+ * callbacks against a document several keys deep, and log_reset() would throw
+ * that document away — which does not merely lose an assertion, it silently
+ * changes what the *next* deletion applies to and can make a wrong result look
+ * right.
+ */
+static void log_reset_callbacks(client_log_t *log)
+{
+    char saved[sizeof(log->doc)];
+    memcpy(saved, log->doc, sizeof(saved));
+    memset(log, 0, sizeof(*log));
+    memcpy(log->doc, saved, sizeof(saved));
 }
 
 /* Press one printable US-QWERTY key: keysym and layout_key are the same for
@@ -504,6 +595,254 @@ static void test_layout_option(pathime_engine_t *engine)
     pathime_context_destroy(ctx);
 }
 
+/* ---------------------------------------------------------------------- */
+
+/*
+ * PATHIME_HANGUL_PREEDIT_NONE: the document is the display.
+ *
+ * The mode holds nothing. Each jamo goes into the client's text as it is
+ * struck, and the syllable grows by deleting what was written a moment ago and
+ * writing the fuller form in its place. It is the only producer of
+ * delete_surrounding_text and the only reason this library has a
+ * surrounding-text surface at all.
+ *
+ * The snapshot has to be refreshed after every key, because this mode commits
+ * on every key and a commit invalidates the snapshot by definition. That is
+ * not this test being fussy — it is the obligation the option's documentation
+ * calls "keen", and test_preedit_none_stale_snapshot() below is what happens
+ * to a client that does not meet it.
+ */
+static void refresh_snapshot(pathime_context_t *ctx, client_log_t *log)
+{
+    pathime_str_t text;
+    text.bytes = log->doc;
+    text.len = strlen(log->doc);
+    PT_CHECK_STATUS(pathime_context_set_surrounding_text(ctx, text,
+                                                         doc_scalars(log->doc)),
+                    PATHIME_OK);
+}
+
+static void test_preedit_none_builds_in_document(pathime_engine_t *engine)
+{
+    pathime_client_t client;
+    pathime_context_t *ctx = NULL;
+    client_log_t log;
+
+    log_reset(&log);
+    memset(&client, 0, sizeof(client));
+    client.struct_size = sizeof(client);
+    client.commit_text = on_commit;
+    client.delete_surrounding_text = on_delete;
+    client.composition_changed = on_changed;
+
+    PT_CHECK_STATUS(pathime_context_create(engine, &client, &log, &ctx), PATHIME_OK);
+    PT_CHECK_STATUS(pathime_context_set_focused(ctx, true), PATHIME_OK);
+    PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_HANGUL_PREEDIT,
+                                                   PATHIME_HANGUL_PREEDIT_NONE),
+                    PATHIME_OK);
+    refresh_snapshot(ctx, &log);
+
+    /* g -> ㅎ. Nothing to revise yet, so no deletion — the first key of a
+     * syllable is a plain insertion. */
+    log_reset_callbacks(&log);
+    refresh_snapshot(ctx, &log);
+    PT_CHECK(press(ctx, 'g'));
+    check_str("none: after g", log.doc, HIEUH);
+    PT_CHECK_SIZE(log.delete_count, 0);
+
+    /*
+     * k -> 하. Now there is: ㅎ comes back out and 하 goes in. The dispatch
+     * order matters as much as the result, so it is checked — 'd' before 'c'.
+     *
+     * And composition_changed does *not* follow, which is right rather than an
+     * omission: this mode's composition is empty before the key and empty
+     * after it, so nothing about it changed. The header dispatches that
+     * callback when the composition data is replaced, and here it never is —
+     * all the movement is in the document. A client in this mode is one that
+     * cannot draw a preedit anyway, which is why it is allowed not to supply
+     * the callback at all.
+     */
+    refresh_snapshot(ctx, &log);
+    log_reset_callbacks(&log);
+    PT_CHECK(press(ctx, 'k'));
+    check_str("none: after k", log.doc, HA);
+    PT_CHECK_SIZE(log.delete_count, 1);
+    PT_CHECK(log.last_delete_offset == -1);
+    PT_CHECK_SIZE(log.last_delete_count, 1);
+    check_str("none: k callback order", log.order, "dc");
+    PT_CHECK_SIZE(log.changed_count, 0);
+
+    /* s -> 한. */
+    refresh_snapshot(ctx, &log);
+    log_reset_callbacks(&log);
+    PT_CHECK(press(ctx, 's'));
+    check_str("none: after s", log.doc, HAN);
+
+    /*
+     * The preedit stays empty throughout, which is the whole point: a client
+     * that cannot draw one is exactly who this mode is for.
+     */
+    check_str("none: preedit stays empty", preedit_of(ctx), "");
+    PT_CHECK_SIZE(log.last_settled, 0);
+
+    /*
+     * r -> 한 is finished and ㄱ begins. One commit carries both, after the
+     * provisional 한 is removed: a client must not see the finished syllable
+     * arrive separately from the one that follows it.
+     */
+    refresh_snapshot(ctx, &log);
+    log_reset_callbacks(&log);
+    PT_CHECK(press(ctx, 'r'));
+    check_str("none: after r", log.doc, HAN GIYEOK);
+    PT_CHECK_SIZE(log.commit_count, 1);
+    check_str("none: r commit payload", log.commits, HAN GIYEOK);
+
+    pathime_context_destroy(ctx);
+}
+
+/*
+ * Backspace in this mode deletes the committed syllable and recommits it one
+ * component shorter, which is the option's documentation almost verbatim.
+ */
+static void test_preedit_none_backspace(pathime_engine_t *engine)
+{
+    pathime_client_t client;
+    pathime_context_t *ctx = NULL;
+    client_log_t log;
+
+    log_reset(&log);
+    memset(&client, 0, sizeof(client));
+    client.struct_size = sizeof(client);
+    client.commit_text = on_commit;
+    client.delete_surrounding_text = on_delete;
+
+    PT_CHECK_STATUS(pathime_context_create(engine, &client, &log, &ctx), PATHIME_OK);
+    PT_CHECK_STATUS(pathime_context_set_focused(ctx, true), PATHIME_OK);
+    PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_HANGUL_PREEDIT,
+                                                   PATHIME_HANGUL_PREEDIT_NONE),
+                    PATHIME_OK);
+
+    refresh_snapshot(ctx, &log);
+    PT_CHECK(press(ctx, 'g'));
+    refresh_snapshot(ctx, &log);
+    PT_CHECK(press(ctx, 'k'));
+    refresh_snapshot(ctx, &log);
+    PT_CHECK(press(ctx, 's'));
+    check_str("none/bs: built 한", log.doc, HAN);
+
+    refresh_snapshot(ctx, &log);
+    PT_CHECK(press(ctx, PATHIME_KEY_BACKSPACE));
+    check_str("none/bs: back to 하", log.doc, HA);
+
+    refresh_snapshot(ctx, &log);
+    PT_CHECK(press(ctx, PATHIME_KEY_BACKSPACE));
+    check_str("none/bs: back to ㅎ", log.doc, HIEUH);
+
+    pathime_context_destroy(ctx);
+}
+
+/*
+ * Ending the composition leaves the syllable where it is.
+ *
+ * The trap this guards is a double commit. In the other two modes the pending
+ * syllable is flushed out of libhangul and committed when a non-composing key
+ * arrives; here it is already in the document, and hangul_ic_flush() returns
+ * the very same text — measured identical across all nine layouts. Committing
+ * it again would write 한한.
+ */
+static void test_preedit_none_end_composition(pathime_engine_t *engine)
+{
+    pathime_client_t client;
+    pathime_context_t *ctx = NULL;
+    client_log_t log;
+
+    log_reset(&log);
+    memset(&client, 0, sizeof(client));
+    client.struct_size = sizeof(client);
+    client.commit_text = on_commit;
+    client.delete_surrounding_text = on_delete;
+
+    PT_CHECK_STATUS(pathime_context_create(engine, &client, &log, &ctx), PATHIME_OK);
+    PT_CHECK_STATUS(pathime_context_set_focused(ctx, true), PATHIME_OK);
+    PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_HANGUL_PREEDIT,
+                                                   PATHIME_HANGUL_PREEDIT_NONE),
+                    PATHIME_OK);
+
+    refresh_snapshot(ctx, &log);
+    PT_CHECK(press(ctx, 'g'));
+    refresh_snapshot(ctx, &log);
+    PT_CHECK(press(ctx, 'k'));
+    refresh_snapshot(ctx, &log);
+    PT_CHECK(press(ctx, 's'));
+    check_str("none/end: built 한", log.doc, HAN);
+
+    /* Return ends it. The key is declined — it was never the engine's — and
+     * nothing further is written. */
+    refresh_snapshot(ctx, &log);
+    log_reset_callbacks(&log);
+    PT_CHECK(!press(ctx, PATHIME_KEY_RETURN));
+    check_str("none/end: 한 stays, undoubled", log.doc, HAN);
+    PT_CHECK_SIZE(log.commit_count, 0);
+    PT_CHECK_SIZE(log.delete_count, 0);
+
+    /* And the next jamo starts cleanly after it rather than reviving it. */
+    refresh_snapshot(ctx, &log);
+    PT_CHECK(press(ctx, 'r'));
+    check_str("none/end: new syllable follows", log.doc, HAN GIYEOK);
+
+    pathime_context_destroy(ctx);
+}
+
+/*
+ * The recovery path: a client that does not refresh the snapshot.
+ *
+ * The header fixes what happens rather than leaving it undefined — the engine
+ * "abandons the revision, discards the composition state that was to be
+ * revised, and treats what is already in the document as final, continuing
+ * from the next input as if starting fresh. No deletion is requested and no
+ * key is refused; the user sees the partial text stay where it is."
+ *
+ * So typing the three keys of 한 without ever refreshing strands each jamo in
+ * turn: ㅎㅏㄴ, not 한. That is not a good outcome for the user, and it is not
+ * meant to be — it is the determinate, non-corrupting one, and the point of
+ * testing it is that a client which falls behind gets *this* rather than a
+ * deletion applied to text the engine can no longer see.
+ */
+static void test_preedit_none_stale_snapshot(pathime_engine_t *engine)
+{
+    pathime_client_t client;
+    pathime_context_t *ctx = NULL;
+    client_log_t log;
+
+    log_reset(&log);
+    memset(&client, 0, sizeof(client));
+    client.struct_size = sizeof(client);
+    client.commit_text = on_commit;
+    client.delete_surrounding_text = on_delete;
+
+    PT_CHECK_STATUS(pathime_context_create(engine, &client, &log, &ctx), PATHIME_OK);
+    PT_CHECK_STATUS(pathime_context_set_focused(ctx, true), PATHIME_OK);
+    PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_HANGUL_PREEDIT,
+                                                   PATHIME_HANGUL_PREEDIT_NONE),
+                    PATHIME_OK);
+
+    /* Supplied once and then never again — the commit on the first key
+     * invalidates it and the client never notices. */
+    refresh_snapshot(ctx, &log);
+
+    PT_CHECK(press(ctx, 'g'));
+    PT_CHECK(press(ctx, 'k'));
+    PT_CHECK(press(ctx, 's'));
+
+    check_str("none/stale: each jamo stranded", log.doc, HIEUH A_VOWEL NIEUN);
+
+    /* Not one deletion was requested: the adapter asked first and was told no,
+     * so it never issued a range the client could not honour. */
+    PT_CHECK_SIZE(log.delete_count, 0);
+
+    pathime_context_destroy(ctx);
+}
+
 int main(void)
 {
     pathime_engine_t *engine = NULL;
@@ -528,6 +867,10 @@ int main(void)
         test_key_position_and_shift(engine);
         test_reset_and_focus(engine);
         test_layout_option(engine);
+        test_preedit_none_builds_in_document(engine);
+        test_preedit_none_backspace(engine);
+        test_preedit_none_end_composition(engine);
+        test_preedit_none_stale_snapshot(engine);
     }
 
     pathime_engine_destroy(engine);

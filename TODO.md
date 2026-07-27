@@ -348,12 +348,38 @@ The first slice — key in, composition and commit out, for all three backends �
 is implemented and tested end to end (`api.engine_hangul`, `api.engine_anthy`,
 `api.engine_pyzy`). What it deliberately did not reach:
 
-- **`PATHIME_HANGUL_PREEDIT_NONE`.** Resolved but not implemented: it currently
-  behaves as `_SYLLABLE`, which is *not* what the header documents. It is the
-  only consumer of the surrounding-text surface and the only thing that sets
-  either `PATHIME_REQUIRES_*` bit, so it is the natural next slice — it
-  exercises `Output::request_deletion()`, the delete-before-commit dispatch
-  order, and the snapshot-invalidation rule in one go.
+- ~~**`PATHIME_HANGUL_PREEDIT_NONE`.**~~ **Done (2026-07-27.)** It behaves as
+  documented: each jamo goes into the client's document as it is struck, and
+  the syllable grows by deleting what was written a moment ago and committing
+  the fuller form. Backspace does the same in reverse. Ending the composition
+  leaves the syllable where it is rather than committing it again — safe
+  because `hangul_ic_flush()` returns exactly the preedit string standing at
+  the moment of the call, measured identical across all nine built-in layouts
+  and 72 key sequences, including the three-set jaso forms that come back with
+  `U+1160` fillers intact.
+
+  The slice needed one seam change, which is the part worth knowing about:
+  `ContextBackend::process_key()` gained a `const SurroundingTextView &`. The
+  header's recovery for a snapshot that no longer covers the text — "abandon
+  the revision, treat what is already in the document as final, continue as if
+  starting fresh" — cannot be performed by the dispatch that drops the
+  deletion, because by then libhangul has already folded the key into the old
+  syllable and the commit is decided. So the adapter asks first, and
+  `hangul_ic_reset()`s when the answer is no. `src/backend.h` explains why the
+  view is one boolean question rather than a window onto the text.
+
+  Two things were found and fixed on the way. `refresh_composition()`'s
+  dispatch comment claimed it only delivered deletions "where the snapshot
+  actually covers the range" and did not in fact check the range; it does now,
+  through `range_within_snapshot()`, which is the same predicate the adapter's
+  view asks. And `composition_changed` correctly never fires in this mode —
+  the composition is empty before and after every key — which is asserted
+  rather than left to look like an omission.
+
+  Covered by four cases in `api.engine_hangul`: the build-up, backspace, the
+  no-double-commit on end, and the stale-snapshot recovery. Both guards were
+  mutation-tested: removing the end-of-composition guard produces `한한` and
+  removing the pre-flight check produces `ㅎ하한`, and the tests catch each.
 - **`PATHIME_ANTHY_TYPING_KANA`.** Marked, and declines every key rather than
   silently falling through to romaji.
 - ~~**`PATHIME_OPT_LEARNING` on pyzy.**~~ **Done (2026-07-27.)** The header used

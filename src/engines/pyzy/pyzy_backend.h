@@ -77,6 +77,7 @@ public:
 
     bool process_key(const KeyEvent &key,
                      const OptionReader &options,
+                     const SurroundingTextView &doc,
                      Composition *model,
                      Output *out) override;
 

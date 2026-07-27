@@ -119,6 +119,41 @@ public:
 };
 
 /**
+ * What an adapter may ask about the client's document before deciding to
+ * revise it.
+ *
+ * Deliberately one question, not a view of the text. An adapter that wants to
+ * delete something it committed a moment ago has to know *first* whether the
+ * deletion will actually land, because the header's recovery when it will not
+ * is not "carry on and hope": it is to abandon the revision, treat what is
+ * already in the document as final, and continue as if starting fresh. That
+ * recovery is backend-specific — hangul has to reset its input context so the
+ * next key begins a new syllable — so it cannot be done for the adapter by the
+ * dispatch that drops the request, which runs after process_key() has already
+ * decided what to commit.
+ *
+ * Why not a full document view: nothing needs one. Reading preceding context
+ * is a Hanja feature and Hanja is out of scope (TODO.md §1), so exposing the
+ * text would be a concept carried for no consumer. If a real one appears this
+ * is the place to widen.
+ */
+class SurroundingTextView {
+public:
+    virtual ~SurroundingTextView() = default;
+
+    /**
+     * True if the client's snapshot is present and covers @a count scalar
+     * values immediately before the cursor — that is, if an
+     * Output::request_deletion(-count, count) issued now would be dispatched
+     * rather than dropped.
+     *
+     * A @a count of 0 is true whether or not a snapshot exists: an adapter
+     * with nothing to revise is never blocked.
+     */
+    virtual bool can_delete_before(size_t count) const = 0;
+};
+
+/**
  * One composition in flight: the per-context handle each vendor library has
  * (HangulInputContext *, anthy_context_t, PyZy::InputContext *), wrapped.
  *
@@ -133,6 +168,11 @@ public:
     /**
      * Offer one key.
      *
+     * @a doc answers whether a revision of already-committed text would reach
+     * the client. Only the Hangul adapter under PATHIME_HANGUL_PREEDIT_NONE
+     * consults it; every other adapter ignores it, because every other adapter
+     * holds its composition in the preedit where the document is not involved.
+     *
      * @return true if the backend took responsibility for the event, in the
      *         public API's sense: the client must not also process it through
      *         its normal text-input path. This is independent of whether any
@@ -141,6 +181,7 @@ public:
      */
     virtual bool process_key(const KeyEvent &key,
                              const OptionReader &options,
+                             const SurroundingTextView &doc,
                              Composition *model,
                              Output *out) = 0;
 

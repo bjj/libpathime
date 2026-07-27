@@ -345,9 +345,10 @@ pathime_status_t pathime_context_process_key(pathime_context_t *ctx,
     ctx->output.clear();
 
     const pathime::ContextOptions options(ctx);
+    const pathime::ContextSurroundingText doc(ctx);
     bool handled = false;
     if (ctx->backend != nullptr) {
-        handled = ctx->backend->process_key(key, options, &ctx->model, &ctx->output);
+        handled = ctx->backend->process_key(key, options, doc, &ctx->model, &ctx->output);
     }
 
     /*
@@ -548,6 +549,71 @@ int64_t ContextOptions::number(pathime_option_t option) const
     return resolve_option_number(ctx_->engine, ctx_, option);
 }
 
+namespace {
+
+/**
+ * Does the scalar range [cursor + @a offset, cursor + @a offset + @a count)
+ * lie entirely within the snapshot?
+ *
+ * The one predicate behind both ContextSurroundingText::can_delete_before()
+ * and refresh_composition()'s dispatch condition — the adapter's question
+ * before the fact and the library's check after it are the same test, so they
+ * cannot disagree.
+ *
+ * Positions are scalar indices throughout, which is what makes this cheap:
+ * surrounding_cursor is already an index rather than a byte offset, so the
+ * scalars available before the cursor are the cursor itself, and only the
+ * total needs counting.
+ */
+bool range_within_snapshot(const pathime_context_t *ctx, ptrdiff_t offset, size_t count)
+{
+    if (count == 0) {
+        return true;
+    }
+    if (!ctx->has_surrounding) {
+        return false;
+    }
+
+    const ptrdiff_t cursor = static_cast<ptrdiff_t>(ctx->surrounding_cursor);
+    const ptrdiff_t start = cursor + offset;
+    if (start < 0) {
+        return false;
+    }
+
+    const size_t total = utf8_scalar_count(ctx->surrounding_text.c_str(),
+                                           ctx->surrounding_text.size());
+    /* Written as a subtraction against the total rather than as
+     * `start + count <= total` so that a large count cannot overflow. */
+    const size_t ustart = static_cast<size_t>(start);
+    return ustart <= total && count <= total - ustart;
+}
+
+}  // namespace
+
+bool ContextSurroundingText::can_delete_before(size_t count) const
+{
+    /*
+     * Nothing to revise is never blocked, and this is answered before the
+     * snapshot is consulted so that an adapter with an empty revision does not
+     * have to care whether the client supplies surrounding text at all.
+     */
+    if (count == 0) {
+        return true;
+    }
+
+    /*
+     * Otherwise: exactly the conditions the dispatch applies. Checked here
+     * rather than inferred, because an adapter asking "will this land" must
+     * get the dispatch's real answer — a view that said yes where the dispatch
+     * says no would produce exactly the document corruption the header's
+     * recovery rule exists to prevent.
+     */
+    if (ctx_->delete_surrounding_text == nullptr) {
+        return false;
+    }
+    return range_within_snapshot(ctx_, -static_cast<ptrdiff_t>(count), count);
+}
+
 void refresh_composition(pathime_context_t *ctx, bool force)
 {
     /*
@@ -614,17 +680,28 @@ void refresh_composition(pathime_context_t *ctx, bool force)
      * view of the composition matches the engine's.
      */
 
+    /*
+     * Only where the snapshot actually covers the range. An engine wanting to
+     * revise text the current snapshot does not cover abandons the revision
+     * instead — it treats what is already in the document as final and
+     * continues from the next input as if starting fresh — so a request that
+     * does not fit is dropped rather than guessed at. That is the same
+     * recovery ibus-hangul performs when its caret-sanity check fails, and it
+     * is why no key is refused and no error is reported.
+     *
+     * The range test is spelled out rather than assumed. The header does
+     * promise the engine "only ever asks to delete text it can see", and an
+     * adapter is expected to have asked SurroundingTextView::can_delete_before()
+     * before requesting — but that promise is the library's to keep, and the
+     * cost of keeping it here is one comparison against a bug that would
+     * otherwise delete the wrong text in a client's document. This condition
+     * and ContextSurroundingText::can_delete_before() are one predicate in two
+     * places; they change together.
+     */
     if (ctx->output.has_deletion && ctx->output.delete_count != 0 &&
-        ctx->delete_surrounding_text != nullptr && ctx->has_surrounding) {
-        /*
-         * Only where the snapshot actually covers the range. An engine wanting
-         * to revise text the current snapshot does not cover abandons the
-         * revision instead — it treats what is already in the document as
-         * final and continues from the next input as if starting fresh — so a
-         * request that does not fit is dropped rather than guessed at. That is
-         * the same recovery ibus-hangul performs when its caret-sanity check
-         * fails, and it is why no key is refused and no error is reported.
-         */
+        ctx->delete_surrounding_text != nullptr && ctx->has_surrounding &&
+        range_within_snapshot(ctx, ctx->output.delete_offset,
+                              ctx->output.delete_count)) {
         ctx->delete_surrounding_text(ctx->user_data,
                                      ctx->output.delete_offset,
                                      ctx->output.delete_count);

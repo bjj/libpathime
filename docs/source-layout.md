@@ -198,10 +198,25 @@ address a span other than the active one.
 
 `backend.h` follows from that: two layers matching the API's own
 (`EngineBackend`, `ContextBackend`), a `KeyEvent` the key layer has already
-validated, an `OptionReader` an adapter pulls resolved values through, and an
+validated, an `OptionReader` an adapter pulls resolved values through, a
+`SurroundingTextView` it asks before revising text it already committed, and an
 `Output` carrying the commit and deletion requests one call produced. An
 adapter mutates the model in place and never dispatches, never orders, never
 learns that options have tiers.
+
+`SurroundingTextView` is the newest of those and the narrowest: one method,
+`can_delete_before(count)`. It exists because `PATHIME_HANGUL_PREEDIT_NONE`
+builds its syllable inside the client's document, and the header's recovery
+when the snapshot no longer covers that text is not something the dispatch can
+perform on the adapter's behalf — "treat what is already there as final and
+continue as if starting fresh" means *this* key must begin a new syllable, a
+decision that has to be taken before libhangul folds the key into the old one.
+So the adapter asks first. It is deliberately not a view of the document text:
+reading preceding context is a Hanja feature and Hanja is out of scope, so
+exposing the text would be a concept carried for no consumer. Its predicate and
+`refresh_composition()`'s dispatch condition are one function,
+`range_within_snapshot()` in `context.cc`, so the answer an adapter gets before
+the fact and the check the library applies after it cannot disagree.
 
 ## Decided here, cheap to revisit
 

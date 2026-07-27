@@ -212,6 +212,7 @@ public:
 
     bool process_key(const KeyEvent &key,
                      const OptionReader &options,
+                     const SurroundingTextView &doc,
                      Composition *model,
                      Output *out) override;
 
@@ -230,8 +231,22 @@ private:
     void apply_options(const OptionReader &options);
     void harvest(int64_t preedit_mode, Composition *model, Output *out);
     void end_composition(Composition *model, Output *out);
+    bool prepare_revision(const SurroundingTextView &doc);
+    void publish_in_document(Composition *model, Output *out);
 
     HicPtr hic_;
+
+    /**
+     * PATHIME_HANGUL_PREEDIT_NONE only: the provisional syllable this adapter
+     * last wrote into the client's document, and therefore what it must delete
+     * before writing a fuller form.
+     *
+     * Empty in the other two modes, and empty in NONE whenever there is
+     * nothing provisional outstanding. It is the adapter's memory of the
+     * document, which is a thing no other mode needs because no other mode
+     * puts unfinished text there.
+     */
+    std::string in_document_;
 };
 
 /**
@@ -290,6 +305,45 @@ void HangulContextBackend::harvest(int64_t preedit_mode,
     std::string preedit;
     utf8_from_ucs4_z(hangul_ic_get_preedit_string(hic_.get()), &preedit);
 
+    if (preedit_mode == PATHIME_HANGUL_PREEDIT_NONE) {
+        /*
+         * The document is the display. Nothing is held: whatever libhangul
+         * finished and whatever it is still assembling both go into the
+         * client's text, and the provisional part is taken back out again on
+         * the next key by the deletion issued here.
+         *
+         * Deletion first and commit second is not this function's choice to
+         * make — refresh_composition() dispatches them in that order whatever
+         * order they were recorded — but the *range* is this function's
+         * responsibility: it describes text written by an earlier call, and it
+         * is only correct because process_key() confirmed through
+         * SurroundingTextView that the snapshot still covers it before letting
+         * this run.
+         */
+        const size_t stale =
+            utf8_scalar_count(in_document_.c_str(), in_document_.size());
+        if (stale != 0) {
+            out->request_deletion(-static_cast<ptrdiff_t>(stale), stale);
+        }
+
+        /*
+         * One commit carrying both parts, rather than a commit of the finished
+         * text and a second of the provisional syllable. The public API
+         * dispatches at most one commit_text per call, and a client applying
+         * this to its document must not see the syllable arrive separately
+         * from the text that precedes it.
+         */
+        out->commit += committed;
+        out->commit += preedit;
+        in_document_ = preedit;
+
+        /* Nothing is held, so there is no preedit for the client to draw —
+         * which is the entire point of the mode, and why it is the one mode a
+         * client without a preedit can use. */
+        model->active.clear();
+        return;
+    }
+
     if (!committed.empty()) {
         if (preedit_mode == PATHIME_HANGUL_PREEDIT_WORD) {
             /*
@@ -335,35 +389,114 @@ void HangulContextBackend::end_composition(Composition *model, Output *out)
     std::string flushed;
     utf8_from_ucs4_z(hangul_ic_flush(hic_.get()), &flushed);
 
+    /*
+     * PATHIME_HANGUL_PREEDIT_NONE has already put the pending syllable in the
+     * client's document, so ending the composition means letting it stand, not
+     * committing it a second time. The flushed text is dropped and the
+     * adapter simply stops tracking what it wrote.
+     *
+     * That is only safe because the flushed string and the preedit string are
+     * the same text, and they are: measured across all nine built-in layouts
+     * and 72 key sequences, hangul_ic_flush() never returned anything other
+     * than the preedit string standing at the moment of the call — including
+     * for the three-set jaso combinations that have no precomposed form and
+     * come back as U+1100 U+1160 U+11AB with the filler intact. Whatever
+     * libhangul would hand over here is byte for byte what this adapter
+     * already wrote, so committing it would duplicate the syllable rather than
+     * complete it.
+     */
+    if (!in_document_.empty()) {
+        in_document_.clear();
+        model->active.clear();
+        return;
+    }
+
     model->settled += flushed;
     model->active.clear();
     out->commit += model->settled;
     model->settled.clear();
 }
 
+/**
+ * Decide, before libhangul sees the key, whether the provisional syllable in
+ * the client's document can still be revised — and give up cleanly if it
+ * cannot.
+ *
+ * This exists because the recovery the public header specifies cannot be
+ * performed after the fact. When the snapshot no longer covers the text this
+ * adapter wrote, the rule is to "abandon the revision, discard the composition
+ * state that was to be revised, and treat what is already in the document as
+ * final, continuing from the next input as if starting fresh" — and "starting
+ * fresh" means this key must build a *new* syllable rather than extend the
+ * stranded one. By the time refresh_composition() drops the deletion request,
+ * libhangul has already combined the key into the old syllable and the commit
+ * has already been decided. So the question is asked here, first.
+ *
+ * The usual reason to answer no is not a client bug. This mode commits on
+ * every keystroke, and a commit invalidates the snapshot by definition, so a
+ * client must re-supply surrounding text after every single key to keep up.
+ * That is what PATHIME_HANGUL_PREEDIT_NONE's documentation means by requiring
+ * the surrounding-text surface "keenly".
+ *
+ * @return true if composition may continue; false if it was abandoned, in
+ *         which case libhangul has been reset and the caller should treat the
+ *         key as the start of something new.
+ */
+bool HangulContextBackend::prepare_revision(const SurroundingTextView &doc)
+{
+    if (in_document_.empty()) {
+        /* Nothing provisional is outstanding, so there is nothing to revise
+         * and no snapshot is needed. This is every key in the other two modes
+         * and the first key of a syllable in this one. */
+        return true;
+    }
+
+    const size_t stale =
+        utf8_scalar_count(in_document_.c_str(), in_document_.size());
+    if (doc.can_delete_before(stale)) {
+        return true;
+    }
+
+    /*
+     * Abandoned. hangul_ic_reset() and not hangul_ic_flush(): the syllable is
+     * already in the client's document, so there is nothing to hand over and
+     * flushing would produce a duplicate. Forgetting in_document_ is what
+     * makes the stranded text final — the next harvest() will have no deletion
+     * to issue and will simply write a new syllable after it.
+     *
+     * No key is refused and no error is reported, exactly as the header says.
+     * The user sees the partial syllable stay where it is and a new one begin.
+     */
+    hangul_ic_reset(hic_.get());
+    in_document_.clear();
+    return false;
+}
+
 bool HangulContextBackend::process_key(const KeyEvent &key,
                                        const OptionReader &options,
+                                       const SurroundingTextView &doc,
                                        Composition *model,
                                        Output *out)
 {
     apply_options(options);
 
     const int64_t preedit_mode = options.number(PATHIME_OPT_HANGUL_PREEDIT);
+
     /*
-     * TODO(impl): PATHIME_HANGUL_PREEDIT_NONE is resolved and then treated as
-     * PATHIME_HANGUL_PREEDIT_SYLLABLE by every branch below, which is *not*
-     * the documented behaviour and is stated here rather than left to be
-     * discovered. NONE holds nothing at all: each jamo is committed into the
-     * client's document as it is struck and the syllable is built up by
-     * deleting what was committed a moment ago and recommitting the fuller
-     * form, so it is the only producer of Output::request_deletion() and the
-     * only reason this library has a surrounding-text surface at all. Until
-     * that slice lands a client that selects NONE gets a preedit it said it
-     * could not display, rather than the in-document composition it asked for.
-     * The engine-level requirement bits (src/engine.cc:196-219) already treat
-     * NONE as needing both surrounding-text callbacks, so the plumbing it
-     * needs is in place and only this side is missing.
+     * 0. Under PATHIME_HANGUL_PREEDIT_NONE, settle whether the syllable this
+     * adapter put in the client's document can still be revised — before
+     * libhangul is allowed to fold this key into it. See prepare_revision().
+     *
+     * Unconditional rather than restricted to the branches that revise, and
+     * that costs nothing: in_document_ is empty in the other two modes, so the
+     * call returns true without asking anything. When it does abandon, the
+     * branches below simply act on a freshly reset input context, which is
+     * what "continuing as if starting fresh" means for each of them — a
+     * chorded or non-ASCII key ends a composition that is already over, a
+     * backspace finds nothing to remove and goes to the client, and a jamo
+     * begins a new syllable.
      */
+    prepare_revision(doc);
 
     /*
      * 1. Chorded keys are the client's, always.

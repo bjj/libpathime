@@ -85,6 +85,7 @@ public:
 
     bool process_key(const KeyEvent &key,
                      const OptionReader &options,
+                     const SurroundingTextView &doc,
                      Composition *model,
                      Output *out) override;
 
@@ -470,9 +471,14 @@ bool is_sentence_end_key(const KeyEvent &key)
 
 bool AnthyContextBackend::process_key(const KeyEvent &key,
                                       const OptionReader &options,
+                                      const SurroundingTextView &doc,
                                       Composition *model,
                                       Output *out)
 {
+    /* Unused: anthy holds its composition in the preedit, so it never revises
+     * text already in the client's document. See backend.h. */
+    (void)doc;
+
     /* Ctrl/Alt/Super chords are the client's shortcuts, never ours — even
      * mid-composition, where absorbing one would make Ctrl+S stop saving. */
     if (is_chorded(key)) return false;
