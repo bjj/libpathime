@@ -835,23 +835,25 @@ int main(void)
     PT_CHECK(pathime_has_engine(PATHIME_ENGINE_ANTHY));
     PT_CHECK_STATUS(pathime_engine_create(PATHIME_ENGINE_ANTHY, &engine), PATHIME_OK);
     PT_CHECK(engine != NULL);
-    PT_CHECK(pathime_engine_id(engine) == PATHIME_ENGINE_ANTHY);
-
-    /* Nothing in this adapter uses the surrounding-text surface: reconversion
-     * is the only route to it and anthy_set_reconversion_mode() is left at its
-     * default. */
-    PT_CHECK(pathime_engine_requirements(engine) == 0);
 
     if (engine != NULL) {
+        PT_CHECK(pathime_engine_id(engine) == PATHIME_ENGINE_ANTHY);
+
+        /* Nothing in this adapter uses the surrounding-text surface: reconversion
+        * is the only route to it and anthy_set_reconversion_mode() is left at its
+        * default. */
+        PT_CHECK(pathime_engine_requirements(engine) == 0);
+
         test_romaji_state_machine(engine);
         test_conversion_candidates(engine);
         test_multi_segment_settled_boundary(engine);
         test_commit_and_cancel(engine);
         test_options(engine);
         test_reset_and_focus(engine);
+
+        pathime_engine_destroy(engine);
     }
 
-    pathime_engine_destroy(engine);
     pathime_shutdown();
     return pt_report("api.engine_anthy");
 }
