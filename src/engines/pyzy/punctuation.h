@@ -1,0 +1,138 @@
+/*
+ * What the Chinese engines emit for a key pyzy will not take: the half/full
+ * width conversion and the Chinese punctuation substitution behind
+ * PATHIME_OPT_LATIN_WIDTH and PATHIME_OPT_PUNCTUATION_WIDTH.
+ *
+ * ---------------------------------------------------------------------------
+ * Why this is ours to write, and where the reference puts it
+ * ---------------------------------------------------------------------------
+ *
+ * pyzy takes [a-z] and the apostrophe and nothing else (Finding 6). It has no
+ * opinion about a comma, and neither of these two options exists anywhere in
+ * its API — they are ibus-pinyin's, and in ibus-pinyin they live in a separate
+ * *editor*: FallbackEditor, the one that runs when no phonetic editor claims
+ * the key (refs/ibus-pinyin/src/PYFallbackEditor.cc). This file is that
+ * editor's substance, minus the parts that are IBus plumbing.
+ *
+ * Locating it in the reference settled a question the pyzy adapter had left
+ * open with a comment in the wrong place. The substitution runs when *nothing
+ * is composing*: PinyinEditor::processPunct returns FALSE only on empty input
+ * (PYPinyinEditor.cc:82-84), which is what lets the key fall through to
+ * FallbackEditor. While composing, ibus-pinyin swallows the key and loses the
+ * character unless its auto-commit option is on. So the placement in
+ * pyzy_backend.cc is the "nothing is composing" branch, not the default arm of
+ * the composing switch.
+ *
+ * ---------------------------------------------------------------------------
+ * Two deliberate departures from ibus-pinyin
+ * ---------------------------------------------------------------------------
+ *
+ * 1. **Punctuation width governs all punctuation.** ibus-pinyin applies its
+ *    variant table first and then falls back to the *Latin* width flag for any
+ *    punctuation the table has no row for — so with full-width punctuation and
+ *    half-width Latin, its `@` stays ASCII (PYFallbackEditor.cc:198). Here the
+ *    fallback is the punctuation width, which is what the header promises
+ *    ("the same choice for punctuation") and what the anthy front end already
+ *    does with the same two options (romaji.cc's kSymbolTable covers ＠＃％ and
+ *    the rest). Latin width keeps letters, digits and space, exactly as its own
+ *    doc comment says.
+ *
+ * 2. **A key that arrives mid-composition is not lost.** ibus-pinyin's default
+ *    swallows it. The adapter ends the composition first and then emits, which
+ *    is ibus-pinyin's own auto-commit path (PYPinyinEditor.cc:117-123) promoted
+ *    from an option to the rule. Losing text the user typed is not a behaviour
+ *    worth copying.
+ *
+ * ---------------------------------------------------------------------------
+ * The state, and why there is any
+ * ---------------------------------------------------------------------------
+ *
+ * Three of the substitutions cannot be decided from the key alone: the two
+ * quote characters alternate between their opening and closing forms, and a
+ * period directly after a digit stays a period so that "1.5" is not mangled
+ * into "1。5". ibus-pinyin keeps the same three values on its FallbackEditor
+ * and clears them in reset(); PunctuationState is that, and the adapter clears
+ * it in the same places.
+ */
+
+#ifndef LIBPATHIME_SRC_ENGINES_PYZY_PUNCTUATION_H
+#define LIBPATHIME_SRC_ENGINES_PYZY_PUNCTUATION_H
+
+#include <cstdint>
+#include <string>
+
+#include <pathime/pathime.h>
+
+#include "backend.h"
+
+namespace pathime {
+
+/** The two width options plus the variant that picks a substitution table. */
+struct WidthSettings {
+    pathime_width_t latin       = PATHIME_WIDTH_HALF;
+    pathime_width_t punctuation = PATHIME_WIDTH_FULL;
+
+    /**
+     * Which of the two punctuation tables applies. Taken from
+     * PATHIME_OPT_CHINESE_VARIANT, whose valid values are narrowed to the two
+     * exclusive ones for these engines, so there is nothing else it can be.
+     */
+    bool simplified = true;
+};
+
+/** Read the three values above out of @a options. */
+WidthSettings width_settings(const OptionReader &options);
+
+/**
+ * What the alternating and look-behind substitutions need to remember.
+ *
+ * Value-initialised to the state a fresh composition starts in: the next
+ * quote of either kind is an opening one, and nothing has been emitted.
+ */
+struct PunctuationState {
+    bool quote_open        = true;  /**< Next `'` is ‘ rather than ’. */
+    bool double_quote_open = true;  /**< Next `"` is “ rather than ”. */
+    bool prev_was_digit    = false; /**< Last committed text was one ASCII digit. */
+
+    void clear() { *this = PunctuationState(); }
+
+    /**
+     * Record text that has just been committed, from here or from pyzy.
+     *
+     * The look-behind is over the *document*, not over this layer's own
+     * output, so a Chinese character committed by the engine between a digit
+     * and a period has to disarm it — otherwise "1.5" and "1好." would be
+     * punctuated the same way. Calling it for both sources, in the order the
+     * two commits actually reach the client, is what makes that true; the
+     * caller does the ordering, because only it knows which came first.
+     */
+    void note_commit(const std::string &text)
+    {
+        if (!text.empty()) {
+            prev_was_digit = text.size() == 1 && text[0] >= '0' && text[0] <= '9';
+        }
+    }
+};
+
+/**
+ * True for a keysym this layer will emit: printable ASCII, U+0020 to U+007E.
+ *
+ * The bound matters as much as the rule. Everything outside it — the named
+ * keys, the function keys, anything a keymap produces above ASCII — stays the
+ * client's, which is FallbackEditor's `default: break` and the reason it
+ * returns FALSE for them (PYFallbackEditor.cc:268-270).
+ */
+bool emittable(uint32_t keysym);
+
+/**
+ * The text for one emittable key, as UTF-8.
+ *
+ * @a state is read throughout and updated for the quote alternation only; the
+ * digit look-behind is the caller's to record through note_commit(), because
+ * pyzy's own commits count towards it too and only the caller sees those.
+ */
+std::string emit_text(char c, const WidthSettings &settings, PunctuationState *state);
+
+}  // namespace pathime
+
+#endif /* LIBPATHIME_SRC_ENGINES_PYZY_PUNCTUATION_H */

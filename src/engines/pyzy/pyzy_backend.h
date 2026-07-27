@@ -20,7 +20,10 @@
  *  - pyzy schedules its user-database save through g_timeout_add and a
  *    GTimer, which needs a GMainLoop we do not run — the save would never
  *    fire, so this adapter drives it explicitly (TODO.md §5).
- *  - Input is [a-z] and apostrophe only (Finding 6).
+ *  - Input is [a-z] and apostrophe only (Finding 6). Every other printable
+ *    ASCII key is therefore this adapter's to emit rather than pyzy's to
+ *    take, which is what PATHIME_OPT_LATIN_WIDTH and
+ *    PATHIME_OPT_PUNCTUATION_WIDTH govern; punctuation.* is that layer.
  *
  * One claim re-verified here, and the answer is split (TODO.md §1, "One claim
  * to re-check"). Tracing pyzy's bopomofo_table (PinyinParserTable.h:6622) into
@@ -50,6 +53,7 @@
 
 #include "backend.h"
 #include "engines/pyzy/observer.h"
+#include "engines/pyzy/punctuation.h"
 
 namespace pathime {
 
@@ -116,12 +120,29 @@ private:
      * the post-call assembly of Finding 5 and the only place pyzy's borrowed
      * strings are read.
      */
-    void harvest(Composition *model, Output *out);
+    void harvest(const OptionReader &options, Composition *model, Output *out);
+
+    /**
+     * End whatever is composing, the way ibus-pinyin's auto-commit path does:
+     * take the hovered candidate if there is one, then commit the rest raw.
+     * Called before emitting a character of our own, so that the punctuation
+     * lands after the text it follows rather than in front of it.
+     */
+    void finish_composition(const Composition &model);
 
     PyzyObserver observer_;
     PyZy::InputContext *context_ = nullptr;
     PyZy::InputContext::InputType type_;
     pathime_engine_id_t id_;
+
+    /**
+     * The quote alternation and digit look-behind of punctuation.h, which are
+     * per-context because a client may have two documents open with two
+     * unclosed quotes between them. Cleared wherever the composition is
+     * discarded outright — reset() and a context rebuild — because that is
+     * where ibus-pinyin clears its copy (FallbackEditor::reset()).
+     */
+    PunctuationState punctuation_;
 };
 
 /**

@@ -35,7 +35,8 @@ src/
   engines/
     hangul/             hangul_backend.h/.cc
     anthy/              anthy_backend.h/.cc, romaji.h/.cc — the composing front end
-    pyzy/               pyzy_backend.h/.cc, observer.h/.cc — the dirty-flag Observer
+    pyzy/               pyzy_backend.h/.cc, observer.h/.cc — the dirty-flag Observer,
+                        punctuation.h/.cc — width and Chinese punctuation
     table/              README.md only, until the engine of docs/ibus-table-spec.md
                         is written
 tests/
@@ -226,3 +227,13 @@ the fact and the check the library applies after it cannot disagree.
   dispatch is simple enough to live in their adapters. If the table engine
   turns out to want a shared front end, hoisting `romaji.*` into `src/` is
   cheap.
+
+- **The width and punctuation tables are per-language, and so live per
+  adapter** — `engines/pyzy/punctuation.*` for Chinese, and the same job is
+  done inline by `engines/anthy/romaji.cc`'s `kSymbolTable` for Japanese.
+  `PATHIME_OPT_LATIN_WIDTH` and `PATHIME_OPT_PUNCTUATION_WIDTH` are common
+  options, but nothing about their *content* is: the comma key is 、in
+  Japanese and ，in Chinese, and Chinese needs two tables of its own for the
+  simplified and traditional variants. Only the half-to-full-width arithmetic
+  is genuinely shared, and it is three lines. Hoisting it would buy a common
+  home for the one part that does not need one.

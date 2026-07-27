@@ -88,6 +88,18 @@ int main(void)
  * shows beside the preedit and never commits. */
 #define AUX_NI_HAO "ni hao|"
 
+/* ---- What the width and punctuation layer emits ------------------------- */
+
+#define COMMA_FW    "\xEF\xBC\x8C"  /* ，U+FF0C — the Chinese comma */
+#define PERIOD_FW   "\xE3\x80\x82"  /* 。U+3002 — the ideographic full stop */
+#define BRACKET_S_L "\xE3\x80\x90"  /* 【U+3010 — simplified */
+#define BRACKET_T_L "\xE3\x80\x8C"  /* 「U+300C — traditional */
+#define QUOTE_OPEN  "\xE2\x80\x9C"  /* “ U+201C */
+#define QUOTE_CLOSE "\xE2\x80\x9D"  /* ” U+201D */
+#define AT_FW       "\xEF\xBC\xA0"  /* ＠U+FF20 — no Chinese form, so width only */
+#define ONE_FW      "\xEF\xBC\x91"  /* １U+FF11 */
+#define SPACE_FW    "\xE3\x80\x80"  /* 　U+3000 — the ideographic space */
+
 /*
  * What the client saw. Same shape as the other two engine tests', plus one
  * extra field: a context handle, so composition_changed can exercise the
@@ -807,6 +819,299 @@ static void test_options(pathime_engine_t *pinyin, pathime_engine_t *bopomofo)
 }
 
 /*
+ * PATHIME_OPT_LATIN_WIDTH and PATHIME_OPT_PUNCTUATION_WIDTH: the keys pyzy
+ * will not take, which these engines emit themselves.
+ *
+ * The subject is a whole *class* of key rather than a feature — every
+ * printable ASCII character that is not a pinyin letter goes through the same
+ * path — so the checks are grouped by the distinction each one is drawing,
+ * and each names the distinction rather than just the expected string.
+ */
+static void test_width_and_punctuation(pathime_engine_t *pinyin,
+                                       pathime_engine_t *bopomofo)
+{
+    client_log_t log;
+    pathime_client_t client;
+    pathime_context_t *ctx;
+
+    /* --- The defaults: half-width Latin, full-width punctuation --------- */
+
+    ctx = open_context(pinyin, &client, &log);
+
+    /*
+     * Handled, not declined. That is the substantive claim: a client that has
+     * switched to this engine never sees the comma, which is the only way the
+     * width options can be honoured at all — a key the client inserts itself
+     * is one the library never saw. It is also what ibus-pinyin's
+     * FallbackEditor does with the same key.
+     */
+    PT_CHECK(press(ctx, ','));
+    check_str("comma at the default punctuation width", log.commits, COMMA_FW);
+    /* Committed outright, not composed: there is nothing to convert. */
+    check_str("no composition from a comma", preedit_of(ctx), "");
+
+    log_reset(&log);
+    PT_CHECK(press(ctx, '.'));
+    check_str("period at the default punctuation width", log.commits, PERIOD_FW);
+
+    /*
+     * A digit is Latin, not punctuation, and the two options are independent —
+     * this is the combination the header calls "the useful one" and makes the
+     * default, so it is worth pinning that they really are separate knobs.
+     */
+    log_reset(&log);
+    PT_CHECK(press(ctx, '1'));
+    check_str("digit at the default latin width", log.commits, "1");
+
+    /*
+     * Punctuation with no Chinese form still gets the full-width treatment.
+     * This is the one place the layer departs from ibus-pinyin, which falls
+     * back to the *Latin* width flag here and so leaves its '@' ASCII while
+     * its '!' is not. One option governing one class of character is what the
+     * header promises and what the anthy front end already does.
+     */
+    log_reset(&log);
+    PT_CHECK(press(ctx, '@'));
+    check_str("punctuation with no Chinese form", log.commits, AT_FW);
+
+    pathime_context_destroy(ctx);
+
+    /* --- Half-width punctuation ----------------------------------------- */
+
+    ctx = open_context(pinyin, &client, &log);
+    PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_PUNCTUATION_WIDTH,
+                                                   PATHIME_WIDTH_HALF),
+                    PATHIME_OK);
+    PT_CHECK(press(ctx, ','));
+    check_str("comma at half punctuation width", log.commits, ",");
+    /* Still handled — the engine emits it, it just emits the ASCII form. */
+    log_reset(&log);
+    PT_CHECK(press(ctx, '"'));
+    check_str("quote at half punctuation width", log.commits, "\"");
+    pathime_context_destroy(ctx);
+
+    /* --- Full-width Latin ------------------------------------------------ */
+
+    ctx = open_context(pinyin, &client, &log);
+    PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_LATIN_WIDTH,
+                                                   PATHIME_WIDTH_FULL),
+                    PATHIME_OK);
+    PT_CHECK(press(ctx, '1'));
+    check_str("digit at full latin width", log.commits, ONE_FW);
+
+    /*
+     * Space is Latin too, and the header says so. It is also the one key whose
+     * meaning depends on whether anything is composing — see below.
+     */
+    log_reset(&log);
+    PT_CHECK(press(ctx, ' '));
+    check_str("space at full latin width", log.commits, SPACE_FW);
+    pathime_context_destroy(ctx);
+
+    /* --- The variant chooses the table ---------------------------------- */
+
+    ctx = open_context(pinyin, &client, &log);
+    PT_CHECK(press(ctx, '['));
+    check_str("bracket, simplified", log.commits, BRACKET_S_L);
+    pathime_context_destroy(ctx);
+
+    ctx = open_context(pinyin, &client, &log);
+    PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_CHINESE_VARIANT,
+                                                   PATHIME_CHINESE_TRADITIONAL_ONLY),
+                    PATHIME_OK);
+    PT_CHECK(press(ctx, '['));
+    /* Not a width difference: 【 and 「 are both full width. The variant is a
+     * third input to the substitution, which is why there are two tables. */
+    check_str("bracket, traditional", log.commits, BRACKET_T_L);
+    pathime_context_destroy(ctx);
+
+    /* --- The two rules that need memory --------------------------------- */
+
+    ctx = open_context(pinyin, &client, &log);
+    PT_CHECK(press(ctx, '"'));
+    PT_CHECK(press(ctx, '"'));
+    check_str("quotes alternate", log.commits, QUOTE_OPEN QUOTE_CLOSE);
+
+    /* And a reset puts the next one back to opening: an unclosed quotation
+     * belongs to the run of text that opened it. */
+    log_reset(&log);
+    PT_CHECK_STATUS(pathime_context_reset(ctx), PATHIME_OK);
+    PT_CHECK(press(ctx, '"'));
+    check_str("quote after a reset", log.commits, QUOTE_OPEN);
+    pathime_context_destroy(ctx);
+
+    ctx = open_context(pinyin, &client, &log);
+    type(ctx, "1");
+    PT_CHECK(press(ctx, '.'));
+    type(ctx, "5");
+    check_str("a period between digits is a decimal point", log.commits, "1.5");
+
+    /*
+     * And the look-behind is over the document, not over this layer's own
+     * output: the 你 committed in between is what the second period follows,
+     * so it is a full stop again. Only tracking what *we* emitted would get
+     * this wrong, which is why the bookkeeping is ordered around pyzy's
+     * commits rather than folded into the emit call.
+     */
+    log_reset(&log);
+    type(ctx, "ni");
+    PT_CHECK(press(ctx, '.'));
+    check_str("a period after a committed character", log.commits, NI PERIOD_FW);
+    pathime_context_destroy(ctx);
+
+    /* --- Mid-composition: ended first, never lost ------------------------ */
+
+    ctx = open_context(pinyin, &client, &log);
+    type(ctx, "nihao");
+    check_str("composition before the comma", preedit_of(ctx), NI_HAO);
+
+    log_reset(&log);
+    PT_CHECK(press(ctx, ','));
+    /*
+     * The composition is taken as the user was shown it and the comma follows
+     * it, in that order and in one commit stream. ibus-pinyin's default
+     * instead swallows the key and loses the comma outright; that is the one
+     * behaviour here deliberately not copied.
+     */
+    check_str("composition then comma", log.commits, NI_HAO COMMA_FW);
+    check_str("nothing left composing", preedit_of(ctx), "");
+    pathime_context_destroy(ctx);
+
+    /* --- Space: the convert key only while composing --------------------- */
+
+    ctx = open_context(pinyin, &client, &log);
+    PT_CHECK(press(ctx, ' '));
+    check_str("space with nothing composing", log.commits, " ");
+
+    log_reset(&log);
+    type(ctx, "ni");
+    PT_CHECK(press(ctx, ' '));
+    /* Converted rather than emitted: the switch claims the key before the
+     * emit path can see it, which is the whole reason the emit path runs last. */
+    check_str("space while composing", log.commits, NI);
+    pathime_context_destroy(ctx);
+
+    /* --- The apostrophe is two different keys ---------------------------- */
+
+    ctx = open_context(pinyin, &client, &log);
+    PT_CHECK(press(ctx, '\''));
+    /*
+     * With nothing typed it is an opening quotation mark. Without the guard in
+     * insertable(), pyzy takes it as its syllable separator, accepts it, and
+     * renders nothing at all — an invisible composition and no text.
+     */
+    PT_CHECK(log.commit_count == 1);
+    check_str("leading apostrophe is a quotation mark", preedit_of(ctx), "");
+
+    log_reset(&log);
+    type(ctx, "xian");
+    PT_CHECK(press(ctx, '\''));
+    /* Between syllables it is pyzy's, and disambiguates xi'an from xian. */
+    PT_CHECK(log.commit_count == 0);
+    PT_CHECK(strlen(preedit_of(ctx)) > 0);
+    pathime_context_destroy(ctx);
+
+    /* --- Bopomofo takes more keys, and emits the rest -------------------- */
+
+    ctx = open_context(bopomofo, &client, &log);
+    /*
+     * Bopomofo's layouts bind digits and much of the punctuation as tone and
+     * symbol keys, so pyzy takes far more here than it does for pinyin — but
+     * the fallback is the same one, reached when pyzy's own insert() declines.
+     */
+    PT_CHECK(press(ctx, ','));
+    PT_CHECK(log.commit_count + (int)strlen(preedit_of(ctx)) > 0);
+    pathime_context_destroy(ctx);
+
+    /* --- Non-printable keys are still the client's ----------------------- */
+
+    ctx = open_context(pinyin, &client, &log);
+    /* The emit path is bounded at printable ASCII precisely so that these keep
+     * working: Backspace must delete the client's text and Escape must close
+     * its dialog when there is no composition to spend them on. */
+    PT_CHECK(!press(ctx, PATHIME_KEY_BACKSPACE));
+    PT_CHECK(!press(ctx, PATHIME_KEY_ESCAPE));
+    PT_CHECK(!press(ctx, PATHIME_KEY_RETURN));
+    PT_CHECK(!press(ctx, PATHIME_KEY_TAB));
+    PT_CHECK(log.commit_count == 0);
+    pathime_context_destroy(ctx);
+}
+
+/*
+ * PATHIME_OPT_PINYIN_SHOW_RAW: the keys as typed, beside the syllables they
+ * decoded to.
+ */
+static void test_show_raw(pathime_engine_t *pinyin, pathime_engine_t *bopomofo)
+{
+    client_log_t log;
+    pathime_client_t client;
+    pathime_context_t *ctx;
+
+    /*
+     * Under full pinyin it has no effect, which is what the header means by
+     * calling it meaningless there: the raw keys and the decoded syllables are
+     * the same characters, so appending them would show a duplicate.
+     */
+    ctx = open_context(pinyin, &client, &log);
+    type(ctx, "nihao");
+    PT_CHECK_STATUS(pathime_context_set_option_bool(ctx, PATHIME_OPT_PINYIN_SHOW_RAW,
+                                                    true),
+                    PATHIME_OK);
+    check_str("show-raw under full pinyin",
+              pathime_context_composition(ctx)->auxiliary.bytes, AUX_NI_HAO);
+    pathime_context_destroy(ctx);
+
+    /*
+     * Under double pinyin the two differ, which is the whole point: "nihk" is
+     * four keys and "ni hao" is what they decoded to. ibus-pinyin implements
+     * the option for this mode alone — its config key is literally
+     * "DoublePinyinShowRaw".
+     */
+    ctx = open_context(pinyin, &client, &log);
+    PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_PINYIN_SCHEME,
+                                                   PATHIME_PINYIN_SCHEME_DOUBLE_MSPY),
+                    PATHIME_OK);
+    type(ctx, "nihk");
+    check_str("double pinyin, show-raw off",
+              pathime_context_composition(ctx)->auxiliary.bytes, AUX_NI_HAO);
+
+    /*
+     * Set mid-composition and visible at once. This is the options_changed()
+     * hook doing its job for an option pyzy has never heard of: pyzy fires no
+     * auxiliaryChanged for it, so without the forced refresh the old string
+     * would sit there until the next keystroke — which may never come.
+     */
+    log_reset(&log);
+    PT_CHECK_STATUS(pathime_context_set_option_bool(ctx, PATHIME_OPT_PINYIN_SHOW_RAW,
+                                                    true),
+                    PATHIME_OK);
+    check_str("double pinyin, show-raw on",
+              pathime_context_composition(ctx)->auxiliary.bytes,
+              AUX_NI_HAO " [ nihk ]");
+    PT_CHECK(log.changed_count == 1);
+
+    /* And off again, by the same route. */
+    PT_CHECK_STATUS(pathime_context_set_option_bool(ctx, PATHIME_OPT_PINYIN_SHOW_RAW,
+                                                    false),
+                    PATHIME_OK);
+    check_str("double pinyin, show-raw off again",
+              pathime_context_composition(ctx)->auxiliary.bytes, AUX_NI_HAO);
+    pathime_context_destroy(ctx);
+
+    /*
+     * Not a Bopomofo option. Its auxiliary text is zhuyin and its raw keys are
+     * Latin, so the two do differ — but nobody typing zhuyin is checking a
+     * spelling against a scheme they are still learning, which is what the
+     * option is for. The descriptor says so and the setter refuses.
+     */
+    ctx = open_context(bopomofo, &client, &log);
+    PT_CHECK_STATUS(pathime_context_set_option_bool(ctx, PATHIME_OPT_PINYIN_SHOW_RAW,
+                                                    true),
+                    PATHIME_ERROR_UNSUPPORTED);
+    pathime_context_destroy(ctx);
+}
+
+/*
  * The other half of the fuzzy claim: the engines that do *not* implement it.
  *
  * Hangul is checked here because this test can create one. Anthy cannot be
@@ -884,6 +1189,8 @@ int main(void)
         test_callback_safety(pinyin);
         test_bopomofo(pinyin, bopomofo);
         test_options(pinyin, bopomofo);
+        test_width_and_punctuation(pinyin, bopomofo);
+        test_show_raw(pinyin, bopomofo);
         test_fuzzy_is_not_a_hangul_option();
     }
 

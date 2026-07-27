@@ -820,6 +820,13 @@ PATHIME_API void *pathime_context_user_data(const pathime_context_t *ctx);
  * typing "nihao" shows a preedit reading 你好, and Return commits "nihao". The
  * preview is a suggestion; Return declines it. Use Space, or select a
  * candidate, to accept it.
+ *
+ * A key that starts no composition may still be handled. An engine that emits
+ * punctuation or full-width text of its own — see PATHIME_OPT_LATIN_WIDTH and
+ * PATHIME_OPT_PUNCTUATION_WIDTH — commits it outright and reports the key
+ * handled, with nothing composing before or after. Where such a key arrives
+ * mid-composition, the composition is ended first and both commits are
+ * dispatched in order, so the client never has to reorder them.
  */
 PATHIME_API pathime_status_t pathime_context_process_key(pathime_context_t *ctx,
                                                          const pathime_key_event_t *event,
@@ -1120,6 +1127,14 @@ typedef enum pathime_option {
      *
      * Whether Latin letters, digits and space the engine emits are the ASCII
      * forms or their full-width CJK counterparts.
+     *
+     * "The engine emits" is the operative phrase, and it has a consequence
+     * worth stating: for these to apply at all, the engine must handle the
+     * key rather than leave it to the client. Pinyin and Bopomofo therefore
+     * report every printable key handled, including the ones they pass
+     * through unchanged at half width. Space is the exception that proves the
+     * rule — while a composition is in progress it is the conversion key and
+     * emits nothing.
      */
     PATHIME_OPT_LATIN_WIDTH = 2,
 
@@ -1131,6 +1146,18 @@ typedef enum pathime_option {
      * width setting because the useful combination is full-width punctuation
      * with half-width digits, and every reference engine models these two
      * independently for that reason. The defaults are that combination.
+     *
+     * Full width means the language's punctuation and not merely a wider
+     * glyph, so what a key produces depends on the engine and, for Chinese, on
+     * PATHIME_OPT_CHINESE_VARIANT: the comma key gives 、under Anthy, ，under
+     * Pinyin, and the bracket keys give 【】under simplified Chinese but 「」
+     * under traditional. Where a key has no counterpart in the language — @, #,
+     * % and the like — it gets the plain full-width form.
+     *
+     * Two substitutions depend on what came before. The quote keys alternate
+     * between their opening and closing forms, and a period directly after a
+     * digit stays a period so that "1.5" is not mangled. Both are reset by
+     * pathime_context_reset().
      */
     PATHIME_OPT_PUNCTUATION_WIDTH = 3,
 
@@ -1394,8 +1421,12 @@ typedef enum pathime_option {
      * BOOL, default false.
      *
      * Whether the auxiliary text shows the keys as typed alongside the syllables
-     * they decoded to. Useful while learning a double-pinyin scheme; meaningless
-     * under PATHIME_PINYIN_SCHEME_FULL, where the two are the same text.
+     * they decoded to. Useful while learning a double-pinyin scheme.
+     *
+     * It has no effect under PATHIME_PINYIN_SCHEME_FULL, where the raw keys and
+     * the decoded syllables are the same characters and showing both would show
+     * a duplicate. Setting it there succeeds and reads back — it is supported,
+     * it simply has nothing to add.
      */
     PATHIME_OPT_PINYIN_SHOW_RAW = 22,
 

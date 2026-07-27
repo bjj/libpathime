@@ -459,9 +459,65 @@ is implemented and tested end to end (`api.engine_hangul`, `api.engine_anthy`,
   the question to ask of any new option is whether the backend has derived
   state that outlives the call.
 
-- **pyzy's wrapper-only options.** `PATHIME_OPT_LATIN_WIDTH`,
-  `PATHIME_OPT_PUNCTUATION_WIDTH` and `PATHIME_OPT_PINYIN_SHOW_RAW` are
-  ibus-pinyin features with nothing behind them in pyzy itself.
+- ~~**pyzy's wrapper-only options.**~~ **Done (2026-07-27.)** All three are
+  ibus-pinyin features with nothing behind them in pyzy, but that turned out to
+  be the *only* thing they had in common — unlike `PATHIME_OPT_LEARNING`, none
+  of them ran into an obstruction, so the answer was work rather than a
+  decision, and all three are now implemented.
+
+  `PATHIME_OPT_LATIN_WIDTH` and `PATHIME_OPT_PUNCTUATION_WIDTH` are
+  `src/engines/pyzy/punctuation.*`, transcribed from ibus-pinyin's
+  FallbackEditor: two variant-specific substitution tables, the half-to-full
+  arithmetic, and the three values that need memory (the two quote
+  alternations and the digit-then-period look-behind). Full-width punctuation
+  is ordinary Chinese orthography rather than a nicety — an engine that cannot
+  produce ，and 。is not one you could write Chinese with — which is why
+  reporting them unsupported was never really on the table.
+
+  **Locating the reference settled a placement this repo had guessed wrong.**
+  `pyzy_backend.cc`'s composing switch carried a comment saying the width work
+  belonged in its `default:` arm. It does not: ibus-pinyin's
+  `PinyinEditor::processPunct` returns FALSE only on *empty* input
+  (`PYPinyinEditor.cc:82-84`), which is what lets a key fall through to the
+  FallbackEditor at all, so the substitution runs when nothing is composing.
+  The emit path now sits after the switch and the comment is gone.
+
+  Two departures from ibus-pinyin, both deliberate:
+
+  - Punctuation width governs *all* punctuation. ibus-pinyin falls back to the
+    *Latin* width flag for punctuation its table has no row for, so its `@`
+    stays ASCII while its `!` does not. The header says punctuation width is
+    "the same choice for punctuation" and the anthy front end already reads it
+    that way; one option governing one class of character beat fidelity to a
+    split the reference never explains.
+  - A key arriving mid-composition is not lost. ibus-pinyin swallows it unless
+    its auto-commit option is on; here the composition is ended first — taking
+    the hovered candidate, as Space does — and both commits are dispatched in
+    order. Losing text the user typed is not a behaviour worth copying.
+
+  The cost, stated plainly: these engines now report **every** printable key
+  handled, including ones they pass through unchanged at half width. That is
+  what ibus-pinyin does and it is the only way the width options can apply at
+  all — a key the client inserts itself is one we never saw — but it is a real
+  narrowing of what reaches the client, and it is now in the header.
+
+  Writing the emit path surfaced a latent bug it had been hiding: a leading
+  apostrophe went to pyzy as a syllable separator, which pyzy accepted and
+  rendered as nothing at all — an invisible composition and no text.
+  `insertable()` now takes the composing state and routes it the way
+  ibus-pinyin does, so with nothing typed it is an opening quotation mark.
+
+  `PATHIME_OPT_PINYIN_SHOW_RAW` is in `harvest()`: the raw input appended to
+  the auxiliary text in ibus-pinyin's brackets, minus the spaces it pads them
+  with, which are layout. Double pinyin only — the mode ibus-pinyin implements
+  it for and the only one where the two texts differ. It also needed
+  `options_changed()` to force an auxiliary refresh, because pyzy fires no
+  `auxiliaryChanged` for an option it has never heard of.
+
+  Covered by `api.engine_pyzy` (767 checks, up from 563): both variants' tables,
+  every width combination, the stateful rules, the mid-composition case, the
+  space split, the apostrophe's two meanings, and show-raw toggled live. Three
+  mutation runs confirm the guards are load-bearing.
 
 Three smaller header/implementation divergences, all pinned down by tests:
 

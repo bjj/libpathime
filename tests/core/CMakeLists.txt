@@ -81,7 +81,8 @@ endif()
 if(LIBPATHIME_WITH_PYZY)
   list(APPEND _lpi_options_sources
     "${PROJECT_SOURCE_DIR}/src/engines/pyzy/pyzy_backend.cc"
-    "${PROJECT_SOURCE_DIR}/src/engines/pyzy/observer.cc")
+    "${PROJECT_SOURCE_DIR}/src/engines/pyzy/observer.cc"
+    "${PROJECT_SOURCE_DIR}/src/engines/pyzy/punctuation.cc")
 endif()
 libpathime_add_core_test(options SOURCES ${_lpi_options_sources})
 target_include_directories(core_options_test PRIVATE

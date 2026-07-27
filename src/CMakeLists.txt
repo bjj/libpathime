@@ -79,7 +79,8 @@ endif()
 if(LIBPATHIME_WITH_PYZY)
   target_sources(pathime PRIVATE
     engines/pyzy/pyzy_backend.cc
-    engines/pyzy/observer.cc)
+    engines/pyzy/observer.cc
+    engines/pyzy/punctuation.cc)
   target_link_libraries(pathime PRIVATE pyzy)
 
   # pyzy's src/String.h shadows the C library's <string.h> on a

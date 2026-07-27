@@ -21,20 +21,28 @@
  * (docs/pyzy-mapping.md, impedance mismatch 2).
  *
  * ---------------------------------------------------------------------------
- * What this slice does not do
+ * The three options pyzy itself has nothing behind
  * ---------------------------------------------------------------------------
  *
- * Listed here rather than left to be noticed as absent. Each is wrapper logic
- * in ibus-pinyin, not something pyzy supplies:
+ * Each is wrapper logic in ibus-pinyin rather than something pyzy supplies, so
+ * each needed a decision of its own rather than a shared "not our problem".
+ * Two are implemented here and one is not:
  *
- *   - Punctuation substitution and full/half-width output
- *     (PATHIME_OPT_LATIN_WIDTH, PATHIME_OPT_PUNCTUATION_WIDTH). pyzy commits
- *     plain std::string and rejects every character outside [a-z'].
- *   - PATHIME_OPT_PINYIN_SHOW_RAW. pyzy's auxiliary text is already structured
- *     (PinyinContext.cc:160-208) and has no switch for showing the raw keys.
- *   - PATHIME_OPT_LEARNING. pyzy has no public way to withhold the learning
- *     commit, so the option reports itself unsupported for both pyzy ids
- *     rather than accepting a value it would ignore. See apply_options().
+ *   - PATHIME_OPT_LATIN_WIDTH and PATHIME_OPT_PUNCTUATION_WIDTH are
+ *     implemented, in punctuation.*, and reached from the two places
+ *     process_key() below can emit a character pyzy will not take. There was
+ *     no obstruction of the kind PATHIME_OPT_LEARNING ran into — only work —
+ *     and full-width punctuation is ordinary Chinese orthography, not a
+ *     nicety: an engine that cannot produce ，and 。is not one you could
+ *     write Chinese with.
+ *   - PATHIME_OPT_PINYIN_SHOW_RAW is implemented in harvest(), by appending
+ *     the raw input to the auxiliary text under double pinyin — which is the
+ *     only mode ibus-pinyin implements it for, and the only one where the two
+ *     texts differ.
+ *   - PATHIME_OPT_LEARNING is *not*, and reports itself unsupported for both
+ *     pyzy ids rather than accepting a value it would ignore: pyzy has no
+ *     public way to withhold the learning commit, and its learned data is
+ *     process-global while the option is per-context. See apply_options().
  */
 
 #include "engines/pyzy/pyzy_backend.h"
@@ -49,6 +57,7 @@
 #include <PyZy/Variant.h>
 
 #include "engines/pyzy/observer.h"
+#include "engines/pyzy/punctuation.h"
 
 namespace pathime {
 namespace {
@@ -323,14 +332,28 @@ unsigned int double_pinyin_schema(const OptionReader &options)
  * is the character, so the keysym is the char pyzy wants with no table in
  * between. That is the whole of Finding 6 for this backend.
  */
-bool insertable(uint32_t keysym, PyZy::InputContext::InputType type)
+bool insertable(uint32_t keysym, PyZy::InputContext::InputType type, bool composing)
 {
     if (type == PyZy::InputContext::BOPOMOFO) {
         /* Space is excluded deliberately: it is the convert key below, and no
          * bopomofo layout binds it. */
         return keysym > 0x0020 && keysym < 0x007f;
     }
-    return keysym == '\'' || (keysym >= 'a' && keysym <= 'z');
+    if (keysym == '\'') {
+        /*
+         * The apostrophe is pyzy's syllable separator, but only *between*
+         * syllables. With nothing typed it is an opening quotation mark, and
+         * this is the guard that lets it reach the emit path and become one —
+         * ibus-pinyin's, arrived at from the other side: processPunct returns
+         * FALSE on empty input before it ever gets to the apostrophe case
+         * (PYPinyinEditor.cc:82-88).
+         *
+         * Without the guard pyzy takes it, accepts it, and renders nothing:
+         * the key would produce an invisible composition and no text at all.
+         */
+        return composing;
+    }
+    return keysym >= 'a' && keysym <= 'z';
 }
 
 }  // namespace
@@ -380,6 +403,10 @@ void PyzyContext::recreate(PyZy::InputContext::InputType type)
     observer_.preedit = true;
     observer_.auxiliary = true;
     observer_.candidates = true;
+
+    /* Same reasoning one level up: an unclosed quote belongs to the run of
+     * text that opened it, and this is a new one. */
+    punctuation_.clear();
 }
 
 void PyzyContext::apply_options(const OptionReader &options)
@@ -441,7 +468,7 @@ void PyzyContext::apply_options(const OptionReader &options)
      */
 }
 
-void PyzyContext::harvest(Composition *model, Output *out)
+void PyzyContext::harvest(const OptionReader &options, Composition *model, Output *out)
 {
     if (context_ == nullptr) {
         return;
@@ -472,9 +499,31 @@ void PyzyContext::harvest(Composition *model, Output *out)
      * shows beside the preedit and never commits, which is exactly what a
      * rendering of segmentation and cursor state is — so unlike the same
      * marker appearing in the preedit, it belongs.
+     *
+     * PATHIME_OPT_PINYIN_SHOW_RAW appends the keys as typed, in the brackets
+     * ibus-pinyin uses (PYDoublePinyinEditor.cc:38-63) minus the run of spaces
+     * it pads them with, which is layout and belongs to the client.
+     *
+     * Only under double pinyin, which is the whole of ibus-pinyin's own
+     * implementation — its config key is literally "DoublePinyinShowRaw" and
+     * nothing but DoublePinyinEditor reads it. Under full pinyin the raw keys
+     * and the decoded syllables are the same characters, so the option would
+     * append a duplicate of what is already there; the header says it is
+     * meaningless in that mode, and this is what makes that true rather than
+     * merely stated. Bopomofo is out for the same reason it is out of the
+     * option's engine set in src/options.cc: its auxiliary text is zhuyin and
+     * its raw keys are Latin, but nobody typing zhuyin is checking a spelling
+     * against a scheme they are still learning.
      */
     if (observer_.auxiliary) {
         model->auxiliary = context_->auxiliaryText();
+        if (type_ == PyZy::InputContext::DOUBLE_PINYIN &&
+            options.flag(PATHIME_OPT_PINYIN_SHOW_RAW) &&
+            !context_->inputText().empty()) {
+            model->auxiliary += " [ ";
+            model->auxiliary += context_->inputText();
+            model->auxiliary += " ]";
+        }
     }
 
     /*
@@ -493,6 +542,7 @@ void PyzyContext::harvest(Composition *model, Output *out)
 
     if (observer_.committed) {
         out->commit += observer_.commit_text;
+        punctuation_.note_commit(observer_.commit_text);
     }
 
     observer_.clear();
@@ -534,24 +584,20 @@ bool PyzyContext::process_key(const KeyEvent &key,
 
     bool handled = false;
 
-    if (insertable(key.keysym, type_)) {
+    if (insertable(key.keysym, type_, !context_->inputText().empty())) {
         /*
          * insert() returns false only for a character this input type cannot
          * take; a full buffer returns true and silently drops the character
          * (docs/pyzy-mapping.md, "Handled / Unhandled"). Both of those are the
          * right answer for us as they stand: a rejected character was never
-         * ours, and a dropped one was.
+         * ours, and a dropped one was — and a rejection falls through to the
+         * emit path below, which is where the character it could not take
+         * becomes text of ours instead.
          */
         handled = context_->insert(static_cast<char>(key.keysym));
-    } else if (context_->inputText().empty()) {
-        /*
-         * Nothing is composing, so every remaining key belongs to the client —
-         * Backspace must delete its text, Escape must close its dialog. This
-         * is the first line of ibus-pinyin's processFunctionKey
-         * (PYPhoneticEditor.cc:86-87) and the same judgement.
-         */
-        handled = false;
-    } else {
+    }
+
+    if (!handled && !context_->inputText().empty()) {
         switch (key.keysym) {
         case PATHIME_KEY_SPACE:
             /*
@@ -651,21 +697,97 @@ bool PyzyContext::process_key(const KeyEvent &key,
 
         default:
             /*
-             * Declined rather than swallowed, which is where this parts company
-             * with ibus-pinyin: its editor returns TRUE for every key while
-             * composing (PYPhoneticEditor.cc:161-162) because a layer above it
-             * has already dealt with digits and punctuation. We have no such
-             * layer, so swallowing would make a comma vanish. When the
-             * punctuation and width work named at the top of this file lands,
-             * it belongs here.
+             * Not a composition key. If it is printable it is the emit path's
+             * below; if it is not — Tab, a function key, Up and Down, which
+             * navigate a candidate list docs/CONCEPTS.md puts on the client's
+             * side — it is the client's.
+             *
+             * Never swallowed, which is where this parts company with
+             * ibus-pinyin: its editor returns TRUE for every key while
+             * composing (PYPhoneticEditor.cc:161-162), so with its auto-commit
+             * option off a comma typed mid-composition simply vanishes.
              */
             handled = false;
             break;
         }
     }
 
-    harvest(model, out);
+    /*
+     * The emit path: a printable key pyzy would not take becomes text of ours,
+     * shaped by PATHIME_OPT_LATIN_WIDTH and PATHIME_OPT_PUNCTUATION_WIDTH.
+     * This is ibus-pinyin's FallbackEditor (punctuation.h says where and why),
+     * and it is the whole of what those two options mean for these engines.
+     *
+     * Two consequences worth being explicit about, because both are visible to
+     * a client:
+     *
+     *   - It runs *after* the switch, so a key the switch claimed never
+     *     reaches it. Space is the case that matters: while composing it is
+     *     the convert key, and only with nothing composing does it become an
+     *     ordinary space (or U+3000 at full width). ibus-pinyin arrives at the
+     *     same split through processSpace returning FALSE on empty input
+     *     (PYPhoneticEditor.cc:68-69).
+     *   - It makes these engines *handle* every printable key, including the
+     *     ones they merely pass through unchanged at half width. That is
+     *     correct for an IME the user has switched into — ibus-pinyin's
+     *     FallbackEditor does the same — and it is the reason the width
+     *     options can be honoured at all: a key the client inserts itself is
+     *     one we never saw.
+     */
+    std::string emitted;
+    if (!handled && emittable(key.keysym)) {
+        finish_composition(*model);
+        emitted = emit_text(static_cast<char>(key.keysym), width_settings(options),
+                            &punctuation_);
+        handled = true;
+    }
+
+    harvest(options, model, out);
+
+    /*
+     * After the harvest, so that a composition ended just above lands in
+     * out->commit first and the punctuation follows the text it punctuates.
+     * The same order is why note_commit() is called here rather than inside
+     * emit_text(): harvest() has just recorded pyzy's commit, and ours is the
+     * later of the two.
+     */
+    out->commit += emitted;
+    punctuation_.note_commit(emitted);
     return handled;
+}
+
+void PyzyContext::finish_composition(const Composition &model)
+{
+    if (context_->inputText().empty()) {
+        return;
+    }
+
+    /*
+     * Select then commit, which is ibus-pinyin's auto-commit path verbatim
+     * (PYPinyinEditor.cc:117-122). The two steps are not redundant:
+     * selectCandidate() settles the hovered candidate and moves on to the next
+     * phonetic segment rather than finishing, so the commit is what disposes
+     * of whatever is left — as raw input, which is the same TYPE_CONVERTED
+     * bargain Return makes.
+     *
+     * Selecting the hover rather than committing outright is the point. The
+     * client has been shown 你好 for "nihao" and has gone on to type the comma
+     * after it; taking the conversion the user was looking at is what makes
+     * that read as one sentence rather than as an abandoned composition.
+     */
+    if (model.cursor < model.candidates.size()) {
+        context_->selectCandidate(model.cursor);
+    }
+    context_->commit(PyZy::InputContext::TYPE_CONVERTED);
+
+    /*
+     * Recorded here and not left to harvest(), because the character about to
+     * be emitted reads this flag and harvest() does not run until afterwards.
+     * This is what makes "1好." end in 。while "1.5" keeps its decimal point:
+     * the 好 committed a moment ago is what the period is following, not the
+     * digit before it.
+     */
+    punctuation_.note_commit(observer_.commit_text);
 }
 
 void PyzyContext::reset(Composition *model, Output *out)
@@ -680,6 +802,15 @@ void PyzyContext::reset(Composition *model, Output *out)
      */
     (void)model;
     (void)out;
+
+    /*
+     * Cleared even when there is no pyzy context to reset, because this state
+     * is ours and not pyzy's. A reset is the API's "start again" — the client
+     * has changed document, or lost focus and come back to a different one —
+     * and carrying a half-open quotation mark across that is exactly the bug
+     * ibus-pinyin's FallbackEditor::reset() avoids.
+     */
+    punctuation_.clear();
 
     if (context_ == nullptr) {
         return;
@@ -716,7 +847,16 @@ void PyzyContext::options_changed(const OptionReader &options,
 
     observer_.clear();
     apply_options(options);
-    harvest(model, out);
+
+    /*
+     * Recompute the auxiliary text even though pyzy's own has not moved. It is
+     * the same problem the candidate drop below solves, one line earlier:
+     * PATHIME_OPT_PINYIN_SHOW_RAW is *ours*, so pyzy fires no auxiliaryChanged
+     * for it and harvest() would leave the old string in place until the next
+     * keystroke — which for an option toggled mid-composition may never come.
+     */
+    observer_.auxiliary = true;
+    harvest(options, model, out);
 
     /*
      * Drop the materialized list even when pyzy did not tell us to.
@@ -770,7 +910,7 @@ pathime_status_t PyzyContext::select_candidate(size_t index,
      * that — a backend disagreement rather than a caller error.
      */
     const bool ok = context_->selectCandidate(index);
-    harvest(model, out);
+    harvest(options, model, out);
     return ok ? PATHIME_OK : PATHIME_ERROR_BACKEND;
 }
 
