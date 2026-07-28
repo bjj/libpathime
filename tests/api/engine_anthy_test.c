@@ -811,7 +811,7 @@ static size_t scalar_len(const char *s)
  * PATHIME_OPT_PREDICTION on — the default — is the eager candidate strip:
  * candidates from the first keystroke, the preedit staying kana, the cursor
  * browsing without previewing until Space asks. Every check here is one of the
- * places TODO.md §4c said the obvious implementation would be quietly wrong,
+ * places docs/design-history.md §4c said the obvious implementation would be quietly wrong,
  * plus the strip-selection semantics that came with building it: selection
  * settles the leftmost segment greedily and *typing can continue*, which the
  * converting flow never needed to support.

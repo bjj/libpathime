@@ -8,7 +8,7 @@ This document catalogs every runtime-configurable option available at the API le
 per-session (ephemeral) setting, a persisted user preference, or a case where either is
 defensible. It does not propose libpathime's own options API.
 
-Per `TODO.md` finding 3 ("Two-layer lifetime everywhere"), pyzy options fall into the same two
+Per `docs/adapter-findings.md` finding 3 ("Two-layer lifetime everywhere"), pyzy options fall into the same two
 layers as pyzy's object lifetimes: **global/process** (tied to `InputContext::init()` /
 `finalize()`) and **per-context** (tied to a `PyZy::InputContext*`), with per-context further
 split into **creation-time-only** (the `InputType`) and **mutable-anytime** (`setProperty()`).
@@ -56,7 +56,7 @@ setting can.
 
 There is no double-pinyin "scheme" *value* at this layer distinct from the double-pinyin table
 (see 1.3) — `DOUBLE_PINYIN` is one `InputType` among three, and which double-pinyin *keyboard
-mapping* it uses is a separate, mutable property. As `TODO.md` and `docs/pyzy-mapping.md` both
+mapping* it uses is a separate, mutable property. As `docs/pyzy-mapping.md` and `docs/adapter-findings.md` both
 note, `InputType` is fixed for the life of the context (`InputContext.cc:67-81`); pyzy has no
 `setInputType()`. Switching between Pinyin and Bopomofo, or between full and double pinyin,
 requires destroying the context and calling `create()` again.
@@ -227,7 +227,7 @@ behavior) — flagged rather than classified.
 this GSettings key by constructing a brand-new `DoublePinyinEditor`/`FullPinyinEditor` (and thus a
 brand-new pyzy `InputContext`) in place, using `dynamic_cast` to detect the currently-installed
 editor type before swapping (`PYPinyinEngine.cc:182-191`). This is exactly the
-"destroy-and-recreate" pattern `TODO.md` calls out — the wrapper hides the recreation from the
+"destroy-and-recreate" pattern `docs/pyzy-mapping.md` calls out — the wrapper hides the recreation from the
 user by doing it transparently on config change.
 
 **Classification:** `DoublePinyin` — **user preference** (per §1.2's reasoning: durable scheme
@@ -299,7 +299,7 @@ For completeness, two things that look option-like but are per-invocation action
 | Encoding/width conversion | Full/half-width Latin and punctuation (§2.3's absence from pyzy, wrapper's `HalfFullConverter`/`FallbackEditor`) | Yes — full/half-width toggles are common across CJK IMEs generally, not Pinyin-specific |
 | Special-phrase / macro expansion | `PROPERTY_SPECIAL_PHRASE`, `phrases.txt` (§1.3, §1.5) | Engine-family-specific naming, but "user-editable expansion/macro table" is a recognizable pattern other engines may have under different names |
 | Phonetic-conversion tuning | Typo-correction rules, fuzzy-pinyin pairs, double-pinyin/Bopomofo keyboard schema (§1.3) | **Pinyin/Bopomofo-specific.** These exist because Pinyin input tolerates regional pronunciation variation and multiple keyboard-compression schemes; there is no equivalent concept in libhangul (single fixed jamo-per-key model) and anthy's romaji/kana input has no comparable "fuzzy matching" concept |
-| Global init paths | Cache/config directory for `Database`/`SpecialPhraseTable` (§1.1) | Yes, in spirit — anthy's personality/dictionary files and libhangul's external keyboard registry are the same "process-global resource location" pattern, per `TODO.md` finding 3 |
+| Global init paths | Cache/config directory for `Database`/`SpecialPhraseTable` (§1.1) | Yes, in spirit — anthy's personality/dictionary files and libhangul's external keyboard registry are the same "process-global resource location" pattern, per `docs/adapter-findings.md` finding 3 |
 
 ### 3.2 Scope/lifetime summary
 

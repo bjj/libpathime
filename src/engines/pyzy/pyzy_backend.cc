@@ -912,7 +912,7 @@ pathime_status_t PyzyContext::set_cursor(size_t index,
     }
 
     /*
-     * focusCandidate() is what TODO.md §3 recorded as reachable and undriven:
+     * focusCandidate() is what docs/design-history.md §3 recorded as reachable and undriven:
      * pyzy has always tracked a focused index and rewritten its preedit to
      * match (PhoneticContext.cc:143-155, which sets m_focused_candidate and
      * calls updatePreeditText), but nothing in this library could move it, so
@@ -1096,7 +1096,7 @@ void pyzy_global_shutdown()
     }
 
     /*
-     * This is where the user-database save gets driven (TODO.md §5), and the
+     * This is where the user-database save gets driven (docs/design-history.md §5), and the
      * entry point is the one the public header already has: finalize().
      *
      * The chain is finalize() -> Database::finalize() (Database.cc:736-740),
@@ -1104,7 +1104,7 @@ void pyzy_global_shutdown()
      * and that destructor calls saveUserDB() whenever a save is outstanding.
      * "Outstanding" is m_timeout_id != 0, which Database::modified() sets from
      * g_timeout_add_seconds after every learning write (Database.cc:460-470).
-     * The timeout itself never fires, exactly as TODO.md §5 says, because
+     * The timeout itself never fires, exactly as docs/design-history.md §5 says, because
      * nothing runs a GMainLoop; but g_timeout_add_seconds still returns a
      * non-zero source id without one, so the flag the destructor tests is set
      * regardless and the save happens here.

@@ -1,7 +1,7 @@
 /*
  * The engine-agnostic half of the key-event layer.
  *
- * The backends accept only finished input (TODO.md §2, Finding 6): anthy
+ * The backends accept only finished input (docs/adapter-findings.md, Finding 6): anthy
  * wants completed kana, pyzy accepts only [a-z] and apostrophe, libhangul
  * takes a US-QWERTY int with uppercase meaning Shift and backspace as a
  * separate call. Everything from pathime_key_event_t down — validation,

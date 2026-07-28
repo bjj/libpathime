@@ -14,7 +14,7 @@
  *    key events into kana is romaji.*, above this adapter.
  *  - anthy_init() is process-global, and "personality" is the write-once
  *    trap that shaped pathime_init()'s data_dir; the auxiliary dictionaries
- *    were deferred for exactly that reason (TODO.md §1).
+ *    were deferred for exactly that reason (docs/design-history.md §1).
  *
  * ---------------------------------------------------------------------------
  * Nothing is declared here

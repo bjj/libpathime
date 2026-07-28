@@ -78,7 +78,7 @@ changed at all.
 The key that really does re-render the preedit resolved, without committing and
 without kanji conversion, is **F6** (`convert_to_hiragana` → `__on_key_conv(0)`,
 `engine.py:1590-1600`, rendered by `__update_convert_chars` at
-`engine.py:1226-1228`). That family is deliberately out of scope — `TODO.md` §1
+`engine.py:1226-1228`). That family is deliberately out of scope — `docs/design-history.md` §1
 records the decision and what it costs.
 
 Because Tab carries both `predict` and `select_next_candidate`, what it appears
@@ -193,7 +193,7 @@ convert key, which is a deliberate difference and not an oversight.
 
 **Shipped (2026-07-28)** as `PATHIME_OPT_PREDICTION`, default on — optional
 precisely because the paragraph above describes two deliberate paradigms, not
-one behaviour and a bug. `TODO.md` §4c records the rulings and the
+one behaviour and a bug. `docs/design-history.md` §4c records the rulings and the
 strip-selection semantics that building it settled.
 
 ## 6. Preedit and auxiliary: the two engines were mirror images
@@ -278,7 +278,7 @@ Three things fall out:
 
 - **The `|` is always trailing.** cursor() equals the input length at every step
   above, because this library never sends pyzy a cursor movement — Left/Right are
-  declined while composing (`TODO.md` §3 q3, and the reason is that routing them
+  declined while composing (`TODO.md`'s in-span cursor question, and the reason is that routing them
   through made pyzy render the same `|` inside `conversionText()`). A marker that
   can only ever appear at the end carries no information.
 
@@ -316,7 +316,7 @@ know they cover only the first four kana.
 *(Accepted with the strip, 2026-07-28: no span field. pyzy has shipped exactly
 this shape all along, and one pyzy list mixes candidates covering different
 spans — 你 beside 你好 — so a composition-level span could not even be honest.
-The extension stays additive if a real client needs it. `TODO.md` §4c.)*
+The extension stays additive if a real client needs it. `docs/design-history.md` §4c.)*
 
 ## 9. Return was already consistent; the preview was not
 

@@ -7,7 +7,7 @@
  * PATHIME_OPT_ANTHY_TYPING_METHOD chooses the state machine (romaji vs kana
  * entry), not the conversion table: ibus-anthy's schema ships exactly one
  * romaji table — the MS-IME/ATOK/etc. variants named in its comments were
- * never written — so there is no table choice to offer yet (TODO.md §1).
+ * never written — so there is no table choice to offer yet (docs/design-history.md §1).
  * Thumb-shift entry was cut. The reference state machines are ibus-anthy's
  * (refs/ibus-anthy, Python): romaji.py for one, kana.py for the other.
  *
@@ -21,7 +21,7 @@
  *
  * This lives with the anthy adapter rather than in src/ because only
  * Japanese needs a composing front end before its backend sees input — the
- * per-engine answer to TODO.md §3, question 2. If the table engine turns out
+ * per-engine answer to docs/design-history.md §3, question 2. If the table engine turns out
  * to want it shared, hoisting it into src/ is cheap.
  *
  * ---------------------------------------------------------------------------

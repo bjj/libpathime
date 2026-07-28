@@ -4,7 +4,7 @@ This document catalogs every configurable option/setting available at the API le
 `anthy-unicode` submodule and every option the `ibus-anthy` reference wrapper adds on top of it.
 It is a companion to `docs/anthy-mapping.md` (which maps API *concepts*) — this document is
 scoped specifically to *configuration options*, their lifetime/scope, and how they should be
-classified for a future libpathime options API. It does not propose that API; see `TODO.md` for
+classified for a future libpathime options API. It does not propose that API; see `docs/adapter-findings.md` for
 the current design-stage thinking (in particular the two-layer global/process-init vs.
 per-context lifetime model, which this document's "Scope" column is expressed against).
 
@@ -117,7 +117,7 @@ first call to `anthy_create_context()` lazily defaults it to `"default"` via `ge
   (`refs/ibus-anthy/engine/python3/engine.py:1024-1026`). This directly contradicts the "only
   `anthy_set_personality`/`anthy_conf_override` are public, don't bind
   `anthy_do_set_personality`/`anthy_init_personality`" guidance already recorded in
-  `docs/anthy-mapping.md` and `TODO.md` — ibus-anthy's own reference implementation depends on the
+  `docs/anthy-mapping.md` and `docs/design-history.md` — ibus-anthy's own reference implementation depends on the
   internal entry points to deliver a feature (live dictionary switching) that the public API
   cannot express. This is a fact worth flagging for the libpathime design step: supporting
   user-facing "switch dictionary without restart" either means reaching past the public header (as
@@ -220,7 +220,7 @@ callback (`void (*)(int level, const char *)`) used by `anthy_log()` throughout 
 
 ### 1.8 Romaji-kana table selection — explicitly *not* a library option
 
-Per `TODO.md` finding 6 and `anthy-mapping.md`'s "What the library explicitly does not provide" section,
+Per `docs/adapter-findings.md` finding 6 and `anthy-mapping.md`'s "What the library explicitly does not provide" section,
 anthy-unicode has **no concept of keystrokes, romaji, or a kana keyboard table at all** — it only
 accepts already-assembled hiragana strings via `anthy_set_string`. Any "romaji table" option
 necessarily lives entirely in the caller (confirmed again while reading `main.c`/`anthy.h`: there
@@ -272,7 +272,7 @@ MS-IME/ATOK/Gairaigo/ANSI-BSI/historical-kana variants noted in the XML comments
 (`romaji.py`) to resolve ASCII keystroke sequences to hiragana, entirely before anything is handed
 to `anthy_set_string`. This is precisely the "romaji-kana conversion table selection" the task
 description anticipated as possibly a library-level option — confirmed here to be **wrapper-only**,
-consistent with `TODO.md` finding 6, that the backends take only finished input and anthy wants completed kana.
+consistent with `docs/adapter-findings.md` finding 6, that the backends take only finished input and anthy wants completed kana.
 
 - **Scope**: **Wrapper-global** (`method` and `list` read once and cached at class level, refreshed
   via the `CONFIG_VALUE_CHANGED` GSettings-change callback which calls `jastring.JaString.RESET`,
@@ -374,14 +374,14 @@ also acting as the client.
   personality or dictionary selection as advertised by an IBus-style property panel is working
   against the grain of the underlying library exactly as ibus-anthy is (§2.5) and will face the
   same choice: use the internal write-many functions (breaking the "public API only" constraint
-  recorded in `TODO.md`) or accept a single global personality shared by every input context the
+  recorded in `docs/design-history.md` §1) or accept a single global personality shared by every input context the
   process serves.
 - **The overwhelming majority of "options" a user would recognize as IME settings — input mode,
   typing method (romaji/kana/thumb), segment mode, focus-out behavior, candidate page size, key
   bindings, punctuation/half-width style — have no anthy-unicode counterpart whatsoever.** They are
   entirely invented and owned by ibus-anthy, because anthy-unicode's public surface is a pure
   string-conversion engine (per `anthy-mapping.md`'s "no key-event API" mismatch). This matches
-  `TODO.md` finding 6: the key-event/romaji-kana/handled layer, and by extension almost this
+  `docs/adapter-findings.md` finding 6: the key-event/romaji-kana/handled layer, and by extension almost this
   entire options catalog, is libpathime's to design, not anthy's to expose.
 - **Options common in spirit to what other engines will need** (candidate-list-related,
   conversion-behavior-related, encoding-related — flagged per the task's request to distinguish
@@ -390,12 +390,12 @@ also acting as the client.
   CONCEPTS.md this belongs to the client, not the engine, so arguably it shouldn't appear in
   libpathime's engine-options surface at all), `behavior-on-select-candidate` (commit-immediately
   vs. advance-focus is a pattern any segment/region-based conversion engine could have, compare
-  pyzy's provisional focused-candidate tracking per `TODO.md` finding 2), `behavior-on-focus-out`
+  pyzy's provisional focused-candidate tracking per `docs/adapter-findings.md` finding 2), `behavior-on-focus-out`
   (any engine with transient composition state needs a reset/preserve/commit policy — this is
   effectively CONCEPTS.md's own "what happens to preedit text when focus is lost" negotiated
   policy, named explicitly in `docs/CONCEPTS.md`'s Negotiation section), and
   `anthy_context_set_encoding`/text-encoding handling (every wrapped engine has *some* encoding
-  story — compare `TODO.md` finding 4 on libhangul's UCS-4/UTF-8 split and pyzy's byte-offset
+  story — compare `docs/adapter-findings.md` finding 4 on libhangul's UCS-4/UTF-8 split and pyzy's byte-offset
   cursor).
 - **Options unique to Japanese kana-kanji conversion**: typing-method/romaji-table/kana-table/
   thumb-shift selection (§2.2-2.4, no counterpart in Hangul or Pinyin input — Hangul composes jamo

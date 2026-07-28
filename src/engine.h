@@ -1,5 +1,5 @@
 /*
- * The engine object — the middle layer of the two-layer lifetime (TODO.md §2,
+ * The engine object — the middle layer of the two-layer lifetime (docs/adapter-findings.md,
  * Finding 3): one input method implementation plus whatever it shares across
  * every context using it.
  *

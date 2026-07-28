@@ -5,7 +5,7 @@ input for deciding what `libpathime` should expose as options (common across eng
 engine-specific). It is pure fact-finding — no libpathime API or UI design is proposed here.
 
 `libpathime` implements its own table engine rather than wrapping `ibus-table`, which is Python
-(`docs/ibus-table-spec.md`, `TODO.md` §4). So this catalog is not a survey of a foreign
+(`docs/ibus-table-spec.md`, `TODO.md`). So this catalog is not a survey of a foreign
 configuration surface we must accommodate: it is the option space of a first-class engine of ours,
 and the options round is free to keep, rename, or drop any of it.
 

@@ -1,13 +1,13 @@
 /*
  * Library lifetime — the process-global layer of the two-layer lifetime
- * (TODO.md §2, Finding 3). This file owns pathime_init() and
+ * (docs/adapter-findings.md, Finding 3). This file owns pathime_init() and
  * pathime_shutdown(): validating the init params, resolving the two
  * directories, and running each compiled-in backend's one-time global
  * initialization — anthy's dictionaries, pyzy's shared Database and
  * SpecialPhraseTable — through the lifetime hooks backend.h declares. It is
  * documented as the one slow call, so eager global work belongs here and
  * nowhere else. libhangul needs nothing at this layer in our build; the note
- * in pathime_init() says why, and corrects TODO.md §2 Finding 3 on the point.
+ * in pathime_init() says why, and corrects docs/adapter-findings.md, Finding 3 on the point.
  *
  * The pre-init introspection — version and status strings — is implemented
  * already rather than stubbed: the answers are ABI-fixed statics, and
@@ -313,7 +313,7 @@ pathime_status_t pathime_init(const pathime_init_params_t *params)
      * unavailable". PATHIME_ERROR_BACKEND from this function would mean the
      * library itself is unusable, which is a different and much rarer claim.
      *
-     * libhangul is deliberately absent, against what TODO.md §2 Finding 3 used
+     * libhangul is deliberately absent, against what docs/adapter-findings.md, Finding 3 used
      * to say. hangul_init() and hangul_fini() exist only under
      * ENABLE_EXTERNAL_KEYBOARDS (libhangul/hangul/hangul.h:99-103,
      * hangulkeyboard.c:994-1033), which our top-level CMakeLists.txt:34 turns
@@ -361,7 +361,7 @@ void pathime_shutdown(void)
      * pyzy's is the one that does real work: PyZy::InputContext::finalize() is
      * also where its user database is written, because the save it schedules
      * through g_timeout_add and a GTimer never fires without a GMainLoop we do
-     * not run (TODO.md §5). Skipping this loses the user's learned phrases.
+     * not run (docs/design-history.md §5). Skipping this loses the user's learned phrases.
      *
      * By contract every engine and context is already destroyed, so nothing
      * here has to tear down per-context state.

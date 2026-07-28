@@ -10,7 +10,7 @@ For each option we note: what it controls, its **scope** (global-process,
 per-input-context-at-creation-only, or per-input-context-mutable-anytime), and a
 **lifetime classification** — Ephemeral, User preference, or Could be either — with
 justification. "Ephemeral" and "User preference" are used in the sense of
-`TODO.md`'s two-layer lifetime model (global/process init vs. per-context state); an option's
+`docs/adapter-findings.md`'s two-layer lifetime model (finding 3) (global/process init vs. per-context state); an option's
 classification here is about where its *value* naturally belongs (session-only vs.
 persisted-across-sessions), which is a separate axis from where its *storage* lives (global
 struct vs. per-context struct).
@@ -50,8 +50,8 @@ built-in default path if `NULL`) into the process-global static `hangul_keyboard
 (possibly-empty) registered list, then falls back to
 `hangul_builtin_keyboard_list_get_keyboard()` unconditionally. So `hangul_init`/`hangul_fini`
 is purely about *discovering additional, file-defined keyboards*; it is a global,
-process-lifetime, one-time (non-reentrant, not thread-safe per `TODO.md` finding 3) operation, matching
-the "global/process init" layer of the two-layer lifetime model already identified in `TODO.md`.
+process-lifetime, one-time (non-reentrant, not thread-safe per `docs/adapter-findings.md` finding 3) operation, matching
+the "global/process init" layer of the two-layer lifetime model already identified in `docs/adapter-findings.md`.
 Classified as a user preference in the sense that *which extra keyboards exist* is an
 installation/deployment-time choice, not a per-session toggle — but it is not itself a
 "setting with a value" so much as an initialization step.
@@ -163,7 +163,7 @@ it is not mistaken for a live option; do not carry it forward into libpathime's 
 - No punctuation, full/half-width, or locale-style options — out of scope for a
   syllable-composition-only library.
 - No thread-safety / concurrency options — the two-layer model (global init vs. per-context) from
-  `TODO.md` finding 3 is the only concurrency-relevant structure, and neither layer documents thread safety
+  `docs/adapter-findings.md` finding 3 is the only concurrency-relevant structure, and neither layer documents thread safety
   guarantees.
 
 ---
@@ -333,7 +333,7 @@ GSettings' change-notification mechanism could in principle support the latter f
 ## 3. Cross-cutting observations for libpathime
 
 - **Common-in-spirit vs. Hangul-specific.** Two categories of option recur here that would be
-  expected in *any* wrapped engine, per the mapping docs' framing (`TODO.md`'s cross-cutting
+  expected in *any* wrapped engine, per the mapping docs' framing (`docs/adapter-findings.md`'s cross-cutting
   findings):
   - **Keyboard/layout selection** (`hangul-keyboard`) — every engine with more than one physical
     or phonetic input scheme needs an analogous option (pyzy has phonetic-mode-at-creation
@@ -347,7 +347,7 @@ GSettings' change-notification mechanism could in principle support the latter f
     flags** (`hanja_mode`, `input_mode`) are wrapper-invented, not library-provided, but every
     other reference wrapper is expected to need equivalents (mode-switch hotkeys, a
     candidate-window-open hotkey) since none of the three libraries has a hotkey or key-event
-    concept at all (`TODO.md` finding 6: the entire key-event → handled →
+    concept at all (`docs/adapter-findings.md` finding 6: the entire key-event → handled →
     preedit-assembly half of `docs/CONCEPTS.md` lives in libpathime).
   - **Output encoding** (`HANGUL_OUTPUT_SYLLABLE`/`JAMO`) is the closest libhangul analogue to a
     "candidate/output form" option seen elsewhere (cf. pyzy's simplified/traditional Chinese,

@@ -12,7 +12,7 @@
  * (see commit_change), which exists because a mid-composition change has to be
  * felt now rather than at the next keystroke, of which there may be none. What
  * remains marked TODO(impl) is tier 3 — the value a table file itself declares
- * — which has nothing behind it until the table engine is written (TODO.md §4).
+ * — which has nothing behind it until the table engine is written (TODO.md).
  *
  * Three things worth knowing before editing:
  *
@@ -66,7 +66,7 @@ constexpr uint32_t kTable    = engine_bit(PATHIME_ENGINE_TABLE);
  * "Anthy, Pinyin, Bopomofo, Table" — every engine that converts by choosing
  * among candidates, which is every engine except Hangul. Hangul composes
  * syllables from jamo and produces no candidates at all now that hanja is out
- * of scope (TODO.md §1, "Cut in the API review round"), so the options that
+ * of scope (docs/design-history.md §1, "Cut in the API review round"), so the options that
  * describe candidate production report themselves unsupported there.
  */
 constexpr uint32_t kConverting = kAnthy | kPinyin | kBopomofo | kTable;
@@ -175,7 +175,7 @@ constexpr OptionDescriptor kOptions[] = {
     /*
      * "Anthy, Table" and not kConverting, which is what it used to be. pyzy is
      * excluded deliberately, and the exclusion is the whole decision recorded
-     * in TODO.md §4a: pyzy learns *inside* selectCandidate() and commit() via
+     * in docs/design-history.md §4a: pyzy learns *inside* selectCandidate() and commit() via
      * PhraseEditor::commit(), with no public switch to withhold — only
      * resetCandidate() to unlearn one entry afterwards. Anthy is implementable
      * because anthy_commit_segment() is a separate call the adapter can skip.
@@ -242,7 +242,7 @@ constexpr OptionDescriptor kOptions[] = {
               enum_mask(PATHIME_PINYIN_SCHEME_DOUBLE_XHE + 1), true),
     /*
      * Both FLAGS options default to every bit. Their engine sets differ, and
-     * the difference was measured rather than reasoned — this is TODO.md §1's
+     * the difference was measured rather than reasoned — this is docs/design-history.md §1's
      * "One claim to re-check", answered while writing the pyzy adapter by
      * tracing bopomofo_table (PinyinParserTable.h:6622, 479 rows) into the
      * pinyin_table entries it points at, and confirming the result
@@ -460,7 +460,7 @@ const OptionValue *resolve_value(const pathime_engine_t *engine,
      * table's header fields, not another store. It sits below both client levels
      * and above the descriptor default, so a client that set nothing gets what
      * the table author intended. Nothing to consult until the engine of
-     * docs/ibus-table-spec.md exists (TODO.md §4).
+     * docs/ibus-table-spec.md exists (TODO.md).
      */
 
     return nullptr;  /* tier 4: the caller applies the descriptor default */
@@ -763,7 +763,7 @@ pathime_status_t set_number(pathime_engine_t *engine,
      * when the resolved table was not compiled with pinyin data — the last
      * rejection before the store, since it depends on the resolved table rather
      * than on the value. Unreachable until tables exist: PATHIME_WITH_TABLE is 0
-     * in every build (TODO.md §4), so no engine implementing this option can be
+     * in every build (TODO.md), so no engine implementing this option can be
      * created yet.
      */
 

@@ -19,13 +19,13 @@
  *    observer.* (Finding 5).
  *  - pyzy schedules its user-database save through g_timeout_add and a
  *    GTimer, which needs a GMainLoop we do not run — the save would never
- *    fire, so this adapter drives it explicitly (TODO.md §5).
+ *    fire, so this adapter drives it explicitly (docs/design-history.md §5).
  *  - Input is [a-z] and apostrophe only (Finding 6). Every other printable
  *    ASCII key is therefore this adapter's to emit rather than pyzy's to
  *    take, which is what PATHIME_OPT_LATIN_WIDTH and
  *    PATHIME_OPT_PUNCTUATION_WIDTH govern; punctuation.* is that layer.
  *
- * One claim re-verified here, and the answer is split (TODO.md §1, "One claim
+ * One claim re-verified here, and the answer is split (docs/design-history.md §1, "One claim
  * to re-check"). Tracing pyzy's bopomofo_table (PinyinParserTable.h:6622) into
  * the pinyin_table entries it points at: of its 479 rows, 75 reach an entry
  * with a non-zero `flags` field, and check_flags() (PinyinParser.cc:34-49)

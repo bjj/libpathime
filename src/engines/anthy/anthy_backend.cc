@@ -6,7 +6,7 @@
  * ---------------------------------------------------------------------------
  *
  * Two facts, four states — and the facts are deliberately separate, because
- * conflating them is the trap TODO.md §4c warned this file about. The first
+ * conflating them is the trap docs/design-history.md §4c warned this file about. The first
  * fact is whether anthy holds a conversion (segment_count_ > 0); the second is
  * whether the user *asked* for one (converting_). The eager state is the one
  * where the first is true and the second is false. It is what fills the

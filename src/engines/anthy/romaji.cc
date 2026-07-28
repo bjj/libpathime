@@ -18,7 +18,7 @@
  *                 because a different option governs their width; "-", which
  *                 the romaji table already claims for ー and therefore wins;
  *                 and "¥", whose key is not ASCII, the JIS ¥-vs-ろ case
- *                 TODO.md §5 records as unrepresentable.
+ *                 docs/design-history.md §5 records as unrepresentable.
  *   kScriptTable  hiragana_katakana_table (tables.py:594), the per-scalar
  *                 projection behind PATHIME_OPT_ANTHY_KANA_SCRIPT.
  *   kKanaTable    kana_typing_rule_static (tables.py:372) and, with it,

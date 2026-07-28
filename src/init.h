@@ -1,5 +1,5 @@
 /*
- * Process-global state — the top layer of the two-layer lifetime (TODO.md §2,
+ * Process-global state — the top layer of the two-layer lifetime (docs/adapter-findings.md,
  * Finding 3). init.cc owns the state; this header is how the other core files
  * ask the two questions they all have to ask.
  *

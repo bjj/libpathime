@@ -1,6 +1,6 @@
 /*
  * The engine layer: pathime_engine_* — what one engine shares across all of
- * its contexts (the middle layer of TODO.md §2, Finding 3). Owns:
+ * its contexts (the middle layer of docs/adapter-findings.md, Finding 3). Owns:
  *
  *  - the engine registry, keyed by pathime_engine_id_t and gated on the
  *    PATHIME_WITH_* macros from <pathime/config.h> — pathime_has_engine()
@@ -87,7 +87,7 @@ bool engine_available(pathime_engine_id_t id)
          * docs/ibus-table-spec.md, and needs no global prerequisite — so this
          * becomes an unconditional true once it exists (a context without a
          * resolved PATHIME_OPT_TABLE_FILE simply produces nothing).
-         * PATHIME_WITH_TABLE is 0 in every build for now; see TODO.md §4. */
+         * PATHIME_WITH_TABLE is 0 in every build for now; see TODO.md. */
         return false;
 #endif
 
@@ -212,7 +212,7 @@ uint32_t pathime_engine_requirements(const pathime_engine_t *engine)
 
     /*
      * PATHIME_HANGUL_PREEDIT_NONE is the only thing in the library that sets
-     * either bit (TODO.md §1, "Cut in the API review round"). It holds no
+     * either bit (docs/design-history.md §1, "Cut in the API review round"). It holds no
      * preedit at all, building each syllable inside the client's document by
      * deleting the partial form and recommitting a fuller one, so it can only
      * work against a client that both supplies surrounding text and can delete

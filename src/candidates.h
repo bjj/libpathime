@@ -4,7 +4,7 @@
  * This header exists because candidates.cc grew a second caller-visible entry
  * point. materialize_candidates() used to be declared at the top of context.cc
  * on the grounds that one function nothing else names is not worth a header of
- * its own; the cursor changed that, and TODO.md §5 recorded the trigger in
+ * its own; the cursor changed that, and docs/design-history.md §5 recorded the trigger in
  * advance. What belongs here is the seam between context.cc, which sequences a
  * mutating call, and candidates.cc, which owns the list and the hover.
  */

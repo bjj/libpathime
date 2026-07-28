@@ -15,7 +15,7 @@
  * in the docs/ per-library options inventories. One claim to re-verify while
  * implementing: PATHIME_OPT_PINYIN_FUZZY/_CORRECTION are scoped out of
  * bopomofo on reasoning that was not traced all the way through the
- * bopomofo-to-pinyin tables (TODO.md §1, "One claim to re-check"); widening
+ * bopomofo-to-pinyin tables (docs/design-history.md §1, "One claim to re-check"); widening
  * support later is additive and harmless.
  *
  * Only one level of the store lives in one object: an OptionStore is the set

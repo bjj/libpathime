@@ -2,7 +2,7 @@
 
 The map of the implementation tree: what each file is for, the conventions
 that hold across it, and which choices are settled versus deliberately still
-open. This is the starting point for implementation work; `TODO.md` §2 holds
+open. This is the starting point for implementation work; `docs/adapter-findings.md` holds
 the numbered findings this layout answers to, and `docs/CONCEPTS.md` plus
 `include/pathime/pathime.h` hold the contract being implemented.
 
@@ -102,7 +102,7 @@ splitting them would put the two halves of one resolution rule in two files.
 
 ## Who owns which finding
 
-The findings are `TODO.md` §2's; the layout gives each exactly one home.
+The findings are `docs/adapter-findings.md`'s; the layout gives each exactly one home.
 
 | Concern | Home |
 |---|---|
@@ -184,7 +184,7 @@ becoming public surface.
 
 ## The seam, as designed
 
-`backend.h` and `composition.h` were one decision — `TODO.md` §3, question 1 —
+`backend.h` and `composition.h` were one decision — `docs/design-history.md` §3, question 1 —
 and were taken against all three mapping docs at once rather than accreted
 engine by engine. The answer turned out to be smaller than expected, because
 laid side by side the three backends describe the same three-part picture:
@@ -230,7 +230,7 @@ the fact and the check the library applies after it cannot disagree.
 ## Decided here, cheap to revisit
 
 - **The romaji/kana front end lives with anthy, not in core** — the
-  per-engine answer to `TODO.md` §3, question 2. Only Japanese needs a
+  per-engine answer to `docs/design-history.md` §3, question 2. Only Japanese needs a
   composing state machine before its backend sees input; hangul and pyzy
   dispatch is simple enough to live in their adapters. If the table engine
   turns out to want a shared front end, hoisting `romaji.*` into `src/` is

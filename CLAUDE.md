@@ -4,26 +4,27 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-`libpathime` is a new IBus input method engine library. The IME concepts are described in `docs/CONCEPTS.md`.
+`libpathime` is a new IBus input method engine library. Three backends wrap
+vendored submodules (libhangul, anthy-unicode, pyzy); a fourth, the
+table-driven engine, is **ours to write** — `ibus-table` is Python, so it is
+the reference feature set, not a linkable library — and it is the next large
+piece (`TODO.md`; `docs/ibus-table-spec.md` is the specification). The build,
+the core, all three adapters, options and negotiation, and the terminal demo
+are implemented and tested on Linux and Windows.
 
-Three backends wrap vendored submodules (libhangul, anthy-unicode, pyzy). A fourth, the table-driven engine behind `PATHIME_ENGINE_TABLE`, is **ours to write**: `ibus-table` is Python and cannot be linked against, so it serves as the reference feature set only, and `docs/ibus-table-spec.md` is the specification we implement. It does not exist yet — `LIBPATHIME_WITH_TABLE` defaults OFF and is refused if turned on — but it is a real engine for API-design purposes. See `TODO.md` §4.
-
-> **Build:** a CMake build for the three submodules is in place and verified on both Linux and Windows (MSVC and clang-cl). The library itself and the first vertical slice of all three adapters are implemented and tested end to end; `TODO.md` §4a is what that slice left. `BUILD.md` is how to build; `docs/testing.md` covers the suites under `tests/`; `docs/windows-port.md` documents the compat layer, the generated source variants, and the known runtime limitations. The vendored submodule trees are never edited; if something needs a source change to compile on Windows, it goes through the compat headers or a configure-time generated copy. NOTE! If you are on Linux, you are in a sbx environment on Windows. Build in `/tmp` to avoid issues with symlinks and case-insensitivity.
+> **Build:** see `BUILD.md`. NOTE! If you are on Linux, you are in a sbx
+> environment on Windows: build in `/tmp` to avoid issues with symlinks and
+> case-insensitivity. The vendored submodule trees are **never edited** — a
+> source change needed for Windows goes through the compat headers or a
+> configure-time generated copy (`docs/windows-port.md`).
 
 ## Repository Structure
 
 ```
-TODO.md                  # Unfinished business — start here for "what's next"
+TODO.md                  # Upcoming work only — start here for "what's next"
 include/pathime/         # Public C API
   pathime.h              # The API itself; config.h is generated here by CMake
-docs/                    # Documentation and project design information
-  CONCEPTS.md            # Detailed description of all IME concepts
-  ibus-table-spec.md     # Clean-room behavioral spec for ibus-table (source format, DB schema, engine logic)
-  japanese-input-model.md # How anthy actually behaves, measured: the key model, candidate ordering, preedit vs aux
-  testing.md             # The test suites: how to run them, and what is deliberate about them
-  windows-port.md        # How the Windows port works, and its known limitations
-  *-mapping.md           # Overview of how the submodule libraries relate to the concepts
-  *-options.md           # Per-library option inventories, for the options design round
+docs/                    # Documentation — see "Where to look" below
 src/                     # Library implementation; the map is docs/source-layout.md
   backend.h              # The seam between core and adapters
   composition.h          # The structured composition model core and adapters share
@@ -32,57 +33,47 @@ tests/                   # Test suites: one per backend, plus api/ and core/ —
 demo/                    # Interactive terminal IME demo (LIBPATHIME_BUILD_DEMO=ON); README.md is the guide
   cpp-terminal/          # Submodule — portable terminal library, used only by the demo
 refs/                    # Local reference clones — gitignored, not submodules
-  ibus-hangul/           # Korean IBus engine (reference)
-  ibus-anthy/            # Japanese IBus engine (reference)
-  ibus-pinyin/           # Chinese Pinyin IBus engine (reference)
-  ibus-table/            # Table-based IBus engine (reference, self-contained)
-  ibus-table-chinese/    # Chinese table data for ibus-table (bjj/ibus-table-chinese)
+  ibus-hangul/           # C engine wrapping libhangul; straightforward single-library integration
+  ibus-anthy/            # Python engine wrapping anthy-unicode — pinned to bjj/ibus-anthy @ 0962741
+  ibus-pinyin/           # C++ engine wrapping pyzy; most complex, Pinyin and Bopomofo
+  ibus-table/            # Self-contained Python engine — the reference for our own table engine
+  ibus-table-chinese/    # Table sources (Wubi, Cangjie, …) for use as test data (bjj/ibus-table-chinese)
 
 libhangul/               # Submodule — Korean input library
 anthy-unicode/           # Submodule — Japanese kana-kanji conversion library
 pyzy/                    # Submodule — Chinese Pinyin/Bopomofo conversion library
 ```
 
-See `SUBMODULES.md` for upstream URLs and pkg-config details for each submodule.
+After cloning, `git submodule update --init --recursive`. `SUBMODULES.md` has
+upstream URLs and pkg-config details.
 
-## Submodules
+## Where to look
 
-After cloning, initialize submodules with:
+Every document opens with its own statement of what it is for; this list is
+only the routing:
 
-```bash
-git submodule update --init --recursive
-```
-
-## Reference Codebases
-
-The `refs/` directory contains IBus engine implementations and table data to study:
-
-- **ibus-hangul**: C engine wrapping `libhangul`; straightforward single-library integration
-- **ibus-anthy**: Python/GObject Introspection engine wrapping `anthy-unicode` — pinned to `bjj/ibus-anthy` @ `0962741`
-- **ibus-table**: Self-contained Python engine; no external IM library dependency — which is exactly why we reimplement it rather than wrap it (see `docs/ibus-table-spec.md`)
-- **ibus-pinyin**: C++ engine wrapping `pyzy`; most complex, supports Pinyin and Bopomofo
-- **ibus-table-chinese**: Chinese input method table sources (Wubi, Cangjie, Stroke5, Zhuyin, etc.) for use as test data
-
-## Documentation
-
-- `TODO.md` — unfinished business: the design rounds not yet held, the adapter-layer constraints, the open questions, and the known loose ends. Start here for "what's next."
-- `docs/CONCEPTS.md` — defines the canonical IME concepts (engine, client, composition, etc.) that `libpathime` implements
-- `include/pathime/pathime.h` — the public C API for the core input loop. Settled. Kept in lockstep with `docs/CONCEPTS.md`; the two do not disagree, so neither carries a list of deviations from the other.
-- `docs/source-layout.md` — the map of `src/` and `tests/api/`: which file owns
-  which responsibility (keyed to `TODO.md` §2's findings), the conventions, and
-  which choices are settled versus deliberately open. Read it before adding or
+- `TODO.md` — upcoming work, open questions, deliberate deferrals. Nothing
+  settled lives there.
+- `docs/design-history.md` — the settled design rounds, question by question,
+  with evidence and costs. **Read it before reopening anything that looks
+  undecided.** Its § numbers are the ones code comments cite.
+- `docs/adapter-findings.md` — the six numbered constraints on the adapter
+  layer, cited by number from `src/` and `docs/*-options.md`.
+- `docs/CONCEPTS.md` and `include/pathime/pathime.h` — the model and the
+  contract, kept in lockstep; neither carries deviations from the other.
+- `docs/source-layout.md` — which file owns what. Read before adding or
   moving implementation code.
-- `docs/ibus-table-spec.md` — the specification for our own table engine, derived clean-room from ibus-table: source `.txt` file format, compiled SQLite schema, key-event state machine, candidate sorting, and implementation notes for the C++ port
-- `docs/japanese-input-model.md` — what anthy and ibus-anthy actually *do*, measured rather than reasoned: why Space is three disjoint commands and not one with exceptions, why anthy's candidate 0 is "what you chose last time" and no design may assume a fixed index, what prediction really is (history completion, empty on a fresh profile), and the preedit/auxiliary mirror image between anthy and pyzy. Read it before designing anything Japanese-facing, and before trusting a candidate-order observation taken against a real profile.
-- `docs/testing.md` — the test suites: how to run them, what each of the four kinds is for, how the engine tests reach their runtime data, and which registrations are conditional. Read it before concluding a missing test is a bug.
-- `BUILD.md` — how to build, and "Shipping the data": the `pathime-data/` directory that lives beside the libpathime binary and is what `pathime_init_params_t::resource_dir` finds by default.
-- `docs/windows-port.md` — how the Windows port works: the compat layer, the generated source variants, the build-time behaviour, and the known runtime limitations.
-- `demo/README.md` — the interactive terminal demo: what each panel shows, what
-  to try in it, and what it deliberately does not do. The demo is a client of
-  the public header and nothing else — it links no backend library, for the
-  same reason `tests/api/` does not.
-- `docs/*-mapping.md` — per-library notes mapping each submodule's API to the concepts. Verified against the actual submodule source (see cited file/line references throughout); each ends with an "Impedance mismatches" section. `anthy-mapping.md` also carries the rationale for anthy being built static on Windows and the one-anthy-per-module rule that follows from it.
-- `docs/*-options.md` — per-library inventories of configurable options, gathered for the not-yet-held negotiation/options design round.
+- `docs/japanese-input-model.md` — measured anthy/ibus-anthy behaviour. Read
+  before designing anything Japanese-facing, and before trusting a
+  candidate-order observation taken against a real profile.
+- `docs/testing.md` — the suites and what is deliberate about them. Read
+  before concluding a missing test is a bug.
+- `docs/*-mapping.md` — per-backend API-to-concepts mapping, source-verified
+  with file:line citations, each ending in "Impedance mismatches".
+- `docs/*-options.md` — per-backend option inventories (the round they fed is
+  done; they remain the reference for what was cut and why).
+- `BUILD.md`, `docs/windows-port.md`, `demo/README.md` — build (including
+  "Shipping the data"), the Windows port, the demo.
 
 ## How we work
 
