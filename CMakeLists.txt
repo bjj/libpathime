@@ -96,6 +96,19 @@ install(FILES "${PROJECT_BINARY_DIR}/include/pathime/config.h"
 # that links libpathime::pathime needs no further wiring.
 add_subdirectory(src)
 
+# --- The interactive demo: a client of the public API, in a terminal. All of
+# its wiring — including the cpp-terminal submodule it draws with — lives under
+# demo/, so nothing above this line has to know it exists. Off by default; it
+# verifies nothing, it demonstrates.
+if(LIBPATHIME_BUILD_DEMO)
+  if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/demo/cpp-terminal/CMakeLists.txt")
+    message(FATAL_ERROR
+      "LIBPATHIME_BUILD_DEMO is ON but demo/cpp-terminal is empty. Run\n"
+      "  git submodule update --init --recursive")
+  endif()
+  add_subdirectory(demo)
+endif()
+
 # --- Tests. All test wiring — both the vendored suites and our own — lives
 # under tests/, one directory per backend, so nothing above this line has to
 # know that tests exist. Off by default: the suites need the build-time data

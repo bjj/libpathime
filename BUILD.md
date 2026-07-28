@@ -102,6 +102,7 @@ developer command prompt, and remember to re-set `VCPKG_ROOT` afterwards.
 | `LIBPATHIME_WITH_TABLE` | `OFF` | The table-driven backend. Not implemented yet; forced back off (or a hard error under `LIBPATHIME_REQUIRE_BACKENDS`) if enabled. |
 | `LIBPATHIME_REQUIRE_BACKENDS` | `OFF` | Turn "missing dependency ⇒ skip" into a hard error (for CI). |
 | `LIBPATHIME_BUILD_TESTS` | `OFF` | Build the test suites — see `docs/testing.md`. |
+| `LIBPATHIME_BUILD_DEMO` | `OFF` | Build the interactive terminal demo — see `demo/README.md`. Needs the `demo/cpp-terminal` submodule. |
 | `PYZY_BUILD_DB_ANDROID` | `ON` | Build pyzy's bundled Android pinyin database (needs Python 3). |
 | `BUILD_SHARED_LIBS` | `ON` | Shared vs. static libraries. On Windows the anthy family is static either way; see `docs/anthy-mapping.md`. |
 
@@ -120,6 +121,8 @@ answers false for a backend whose runtime data is missing as well.
   `libanthydic-unicode`, `libanthyinput-unicode`), `libpyzy-1.0`.
 - **Data**: `anthy.dic` (built by anthy's four-stage codegen, ~20 MB) and
   `android.db` (pyzy, ~3.4 MB / 16 tables).
+- **With `LIBPATHIME_BUILD_DEMO=ON`**: `bin/pathime-demo`, plus the
+  `cpp-terminal` library it draws with. Neither is installed.
 
 Pass `-DCMAKE_INSTALL_PREFIX=...` at **configure** time if you plan to
 install. libhangul's upstream CMake installs to `CMAKE_INSTALL_FULL_LIBDIR`,

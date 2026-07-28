@@ -28,6 +28,8 @@ src/                     # Library implementation; the map is docs/source-layout
   composition.h          # The structured composition model core and adapters share
   engines/               # One adapter directory per backend, plus table/ for the future table engine
 tests/                   # Test suites: one per backend, plus api/ and core/ — see docs/testing.md
+demo/                    # Interactive terminal IME demo (LIBPATHIME_BUILD_DEMO=ON); README.md is the guide
+  cpp-terminal/          # Submodule — portable terminal library, used only by the demo
 refs/                    # Local reference clones — gitignored, not submodules
   ibus-hangul/           # Korean IBus engine (reference)
   ibus-anthy/            # Japanese IBus engine (reference)
@@ -72,6 +74,11 @@ The `refs/` directory contains IBus engine implementations and table data to stu
 - `docs/ibus-table-spec.md` — the specification for our own table engine, derived clean-room from ibus-table: source `.txt` file format, compiled SQLite schema, key-event state machine, candidate sorting, and implementation notes for the C++ port
 - `docs/testing.md` — the test suites: how to run them, what each of the four kinds is for, how the engine tests reach their runtime data, and which registrations are conditional. Read it before concluding a missing test is a bug.
 - `docs/windows-port.md` — how the Windows port works: the compat layer, the generated source variants, the build-time behaviour, and the known runtime limitations.
+- `demo/README.md` — the interactive terminal demo: what each panel shows, what
+  to try in it, what it deliberately does not do, and how it reaches the
+  backends' data out of a build tree. The demo is a client of the public header
+  and nothing else — it links no backend library, for the same reason
+  `tests/api/` does not.
 - `docs/*-mapping.md` — per-library notes mapping each submodule's API to the concepts. Verified against the actual submodule source (see cited file/line references throughout); each ends with an "Impedance mismatches" section. `anthy-mapping.md` also carries the rationale for anthy being built static on Windows and the one-anthy-per-module rule that follows from it.
 - `docs/*-options.md` — per-library inventories of configurable options, gathered for the not-yet-held negotiation/options design round.
 

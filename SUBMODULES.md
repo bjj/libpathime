@@ -4,6 +4,8 @@ Each IBus engine in `refs/` depends on an underlying input-method library. This 
 
 One does not: `ibus-table` is self-contained Python, so there is no library to vendor and no submodule for it. Its table-driven methods are provided by an engine written inside `libpathime` instead — see the closing section.
 
+A fifth submodule, `demo/cpp-terminal`, is not an input-method library at all and the library never links it — see the closing section but one.
+
 ---
 
 ## ibus-hangul → libhangul
@@ -31,6 +33,15 @@ One does not: `ibus-table` is self-contained Python, so there is no library to v
 - **pkg-config name**: `pyzy-1.0 >= 0.0.8`
 - **Headers**: `<PyZy/InputContext.h>`, `<PyZy/Const.h>`, `<PyZy/Variant.h>`
 - **Notes**: Provides the Chinese phonetic input-context engine used throughout ibus-pinyin's editor classes. Additional build deps (sqlite3, lua 5.1, boost) are standard distro packages, not custom libraries.
+
+---
+
+## demo → cpp-terminal
+
+- **Repository**: https://github.com/jupyter-xeus/cpp-terminal
+- **pkg-config name**: none — vendored at `demo/cpp-terminal` and built by `demo/CMakeLists.txt`
+- **Headers**: `<cpp-terminal/*.hpp>`
+- **Notes**: Not an input-method dependency. It draws the interactive demo (`demo/README.md`) and is reached only when `LIBPATHIME_BUILD_DEMO=ON`; neither the library nor the tests link it, and it is not installed. MIT-licensed, header-and-source C++11, no external dependencies of its own.
 
 ---
 

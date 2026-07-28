@@ -53,6 +53,12 @@ option(LIBPATHIME_WITH_PYZY   "Build the Chinese (pyzy) backend"            ON)
 option(LIBPATHIME_WITH_TABLE  "Build the table-driven backend (not implemented yet)" OFF)
 option(LIBPATHIME_BUILD_TESTS "Build the test suites: libpathime's own, plus each submodule's where available" OFF)
 
+# The interactive terminal demo under demo/. Off by default, and for a
+# different reason than the tests: it is not part of verifying the library, and
+# it pulls in the cpp-terminal submodule, which nothing else needs.
+option(LIBPATHIME_BUILD_DEMO
+  "Build the interactive terminal demo (needs the demo/cpp-terminal submodule)" OFF)
+
 # When ON, a backend whose dependencies are missing is a hard error instead of
 # being silently skipped. Useful for CI that must build every backend.
 option(LIBPATHIME_REQUIRE_BACKENDS

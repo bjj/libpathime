@@ -1,0 +1,690 @@
+#include "app.h"
+
+#include <algorithm>
+#include <cstdio>
+#include <cstring>
+
+#include "keymap.h"
+#include "text.h"
+
+namespace demo {
+namespace {
+
+/*
+ * The engines this program offers, in the order they appear in the header, with
+ * something to type in each. Every one of them is offered only if
+ * pathime_has_engine() says so, which is false both for an engine this build
+ * does not contain and for one whose dictionaries are missing.
+ */
+struct EngineDef {
+    pathime_engine_id_t id;
+    const char *key;   /**< What --engine accepts. */
+    const char *name;
+    const char *hint;
+};
+
+const EngineDef kEngineDefs[] = {
+    {PATHIME_ENGINE_HANGUL,   "hangul",   "Korean · Hangul",
+     "type  gksrnr  for \xED\x95\x9C\xEA\xB5\xAD"},
+    {PATHIME_ENGINE_ANTHY,    "anthy",    "Japanese · Anthy",
+     "type  nihon  then Space to convert"},
+    {PATHIME_ENGINE_PINYIN,   "pinyin",   "Chinese · Pinyin",
+     "type  nihao  then Space, or 1-9 to pick"},
+    {PATHIME_ENGINE_BOPOMOFO, "bopomofo", "Chinese · Bopomofo",
+     "type  su3cl3  then Space; digits are tones here, so Alt+1-9 picks"},
+    {PATHIME_ENGINE_TABLE,    "table",    "Table-driven",
+     "needs a table file"},
+};
+
+/*
+ * How much history the log keeps. Generous, because it is not what limits what
+ * is on screen — render.cc gives the log as many rows as it has entries to
+ * fill, up to two thirds of what is left over. This is the ceiling on
+ * scrollback, and one full key press is three or four entries.
+ */
+const std::size_t kLogLines = 40;
+
+}  // namespace
+
+App::App() = default;
+
+App::~App()
+{
+    /* Contexts first: an engine may not be destroyed until every context
+     * created from it is gone. */
+    for (EngineSlot &slot : engines_) {
+        pathime_context_destroy(slot.ctx);
+        pathime_engine_destroy(slot.engine);
+    }
+}
+
+bool App::open(const std::string &initial_engine, std::string *error)
+{
+    client_.struct_size = sizeof(client_);
+    client_.commit_text = &App::on_commit;
+    client_.delete_surrounding_text = &App::on_delete;
+    client_.composition_changed = &App::on_changed;
+
+    for (const EngineDef &def : kEngineDefs) {
+        if (!pathime_has_engine(def.id)) continue;
+
+        pathime_engine_t *engine = nullptr;
+        pathime_status_t st = pathime_engine_create(def.id, &engine);
+        if (st != PATHIME_OK) continue;
+
+        /*
+         * The callback table is a member of this object and outlives every
+         * context created from it, which is what the header requires: it is
+         * borrowed by pointer and must stay valid and unchanged for the
+         * context's lifetime.
+         *
+         * Supplying all three callbacks is also what lets every option be
+         * reachable from the panel — PATHIME_HANGUL_PREEDIT_NONE needs
+         * delete_surrounding_text, and a client without it would be refused
+         * that value rather than shown it.
+         */
+        pathime_context_t *ctx = nullptr;
+        st = pathime_context_create(engine, &client_, this, &ctx);
+        if (st != PATHIME_OK) {
+            pathime_engine_destroy(engine);
+            continue;
+        }
+        engines_.push_back(EngineSlot{def.id, def.name, def.hint, engine, ctx});
+    }
+
+    if (engines_.empty()) {
+        *error =
+            "no engine is available.\n"
+            "pathime_has_engine() is false for every id, which means either "
+            "this build contains no backend or none of them could find its "
+            "runtime data.\n"
+            "Run the demo from the build tree it was built in — see "
+            "demo/README.md.";
+        return false;
+    }
+
+    if (!initial_engine.empty()) {
+        for (std::size_t i = 0; i < engines_.size(); i++) {
+            for (const EngineDef &def : kEngineDefs) {
+                if (def.id == engines_[i].id && initial_engine == def.key)
+                    active_ = i;
+            }
+        }
+    }
+
+    /* A new context starts unfocused, and focus gates input: only the one the
+     * user is typing into is focused, and the rest keep their compositions
+     * intact for when it comes back to them. */
+    pathime_context_set_focused(engines_[active_].ctx, true);
+    options_ = collect_options(engine());
+    refresh_surrounding_text();
+    note_info("ready — F1 for help");
+    return true;
+}
+
+/* ---- The client callbacks ---------------------------------------------- */
+
+void App::on_commit(void *user_data, pathime_str_t text)
+{
+    App *app = static_cast<App *>(user_data);
+    /* Deletions are dispatched before commits precisely so the document can be
+     * put right before anything is inserted into it. */
+    app->flush_deletes();
+    app->document_.append(text.bytes, text.len);
+    app->note_callback("commit_text \"" +
+                       escape_for_log(std::string(text.bytes, text.len)) + "\"");
+}
+
+void App::on_delete(void *user_data, ptrdiff_t offset, std::size_t count)
+{
+    App *app = static_cast<App *>(user_data);
+
+    char buf[96];
+    std::snprintf(buf, sizeof(buf), "delete_surrounding_text offset=%td count=%zu",
+                  offset, count);
+    std::string line = buf;
+
+    /*
+     * The range is expressed against the snapshot last given to
+     * pathime_context_set_surrounding_text(), with the origin at the cursor
+     * that call reported — not against wherever the document has since got to.
+     * A client whose document has moved on may decline rather than delete the
+     * wrong thing, and saying so out loud is more useful in a demo than
+     * silently doing nothing.
+     */
+    if (app->document_ != app->snapshot_) {
+        app->note_callback(line + "  — declined, snapshot is stale");
+        return;
+    }
+
+    const ptrdiff_t start = static_cast<ptrdiff_t>(app->snapshot_cursor_) + offset;
+    if (start < 0 ||
+        static_cast<std::size_t>(start) + count > scalar_count(app->snapshot_)) {
+        app->note_callback(line + "  — declined, outside the snapshot");
+        return;
+    }
+
+    app->deletes_.push_back(
+        PendingDelete{static_cast<std::size_t>(start), count});
+    app->note_callback(line);
+}
+
+void App::on_changed(void *user_data, const pathime_composition_t *composition)
+{
+    App *app = static_cast<App *>(user_data);
+    char buf[192];
+    /*
+     * Only the non-mutating queries may be called from inside a callback, and
+     * reading the composition is one of them — this is the same object
+     * pathime_context_composition() returns. The demo copies nothing here: it
+     * re-reads the composition when it draws, which is what the borrowed
+     * lifetime is for.
+     */
+    std::snprintf(buf, sizeof(buf),
+                  "composition_changed preedit=\"%s\" settled=%zu candidates=%zu",
+                  escape_for_log(std::string(composition->preedit.bytes,
+                                             composition->preedit.len)).c_str(),
+                  composition->preedit_settled, composition->candidate_count);
+    app->note_callback(buf);
+}
+
+/* ---- Key handling ------------------------------------------------------- */
+
+void App::on_key(const Term::Key &key)
+{
+    status_.clear();
+    last_key_ = key_label(key);
+    if (hotkey(key)) return;
+    if (pane_ == Pane::Options) {
+        options_key(key);
+        return;
+    }
+    input_key(key);
+}
+
+void App::on_paste(const std::string &text)
+{
+    status_.clear();
+    document_ += text;
+    refresh_surrounding_text();
+    last_key_ = "paste of " + std::to_string(scalar_count(text)) + " characters";
+}
+
+bool App::hotkey(const Term::Key &key)
+{
+    if (key == Term::Key::Ctrl_Q || key == Term::Key::Ctrl_C) {
+        done_ = true;
+        return true;
+    }
+    if (help_) {
+        /* Any other key closes the help page; it is a page, not a mode. */
+        help_ = false;
+        return true;
+    }
+
+    switch (key.value) {
+    case Term::Key::Ctrl_E:
+        set_active((active_ + 1) % engines_.size());
+        return true;
+
+    case Term::Key::Ctrl_R: {
+        /* Discards composition state without committing it. Not the same as
+         * Return, which ends a composition by keeping what was typed. */
+        const std::uint64_t call = note_call("context_reset");
+        const pathime_status_t st = pathime_context_reset(ctx());
+        note_result(call, st);
+        note_status("context_reset", st);
+        page_ = 0;
+        return true;
+    }
+
+    case Term::Key::Ctrl_D:
+        document_.clear();
+        refresh_surrounding_text();
+        note_info("document cleared by the client — no engine involved");
+        return true;
+
+    case Term::Key::Ctrl_Y:
+        /* The composed text, out of the terminal and into the clipboard. The
+         * demo produces text a user may well want elsewhere, and a full-screen
+         * program in raw mode is an awkward place to select it from. */
+        clipboard_ = document_;
+        status_ = clipboard_.empty()
+                      ? "nothing to copy"
+                      : "document copied — needs a terminal that honours OSC 52";
+        return true;
+
+    case Term::Key::Ctrl_L:
+        log_.clear();
+        return true;
+
+    case Term::Key::Tab:
+        pane_ = pane_ == Pane::Input ? Pane::Options : Pane::Input;
+        return true;
+
+    case Term::Key::F1:
+        help_ = true;
+        return true;
+
+    default:
+        break;
+    }
+
+    if (key.value >= Term::Key::F2 && key.value <= Term::Key::F9) {
+        const std::size_t index =
+            static_cast<std::size_t>(key.value - Term::Key::F2);
+        if (index < engines_.size()) set_active(index);
+        return true;
+    }
+    return false;
+}
+
+void App::input_key(const Term::Key &key)
+{
+    const pathime_composition_t *comp = composition();
+
+    /*
+     * Candidate selection and paging are the client's, not the engine's: the
+     * library takes an absolute index through
+     * pathime_context_select_candidate() and has nothing to say about which
+     * keys reach it or how the list is laid out. So which keys select is a
+     * decision this program makes, and it is a real one with a real cost.
+     *
+     * Digits pick from the visible page, which is what every IME does and why
+     * typing a digit into a Chinese composition selects rather than inserting
+     * the digit — except under Bopomofo, where 3, 4, 6 and 7 are the tone keys
+     * and shadowing them would make the engine's own layout untypable. Alt and
+     * a digit therefore selects under every engine, and is the only way to
+     * select under that one.
+     */
+    if (comp != nullptr && comp->candidate_count > 0) {
+        const bool alt = key.hasAlt();
+        const std::int32_t plain =
+            key.value & ~static_cast<std::int32_t>(Term::MetaKey::Value::Alt);
+        const bool digits_are_the_engine_s =
+            engines_[active_].id == PATHIME_ENGINE_BOPOMOFO;
+
+        if (plain >= Term::Key::One && plain <= Term::Key::Nine &&
+            (alt || !digits_are_the_engine_s)) {
+            select_candidate(page_ * kPageSize +
+                             static_cast<std::size_t>(plain - Term::Key::One));
+            return;
+        }
+        if (key == Term::Key::PageDown) { page_forward(); return; }
+        if (key == Term::Key::PageUp)   { page_back(); return; }
+    }
+
+    pathime_key_event_t event;
+    if (!to_pathime_key(key, &event)) {
+        status_ = key_label(key) + " is this program's own; no engine sees it";
+        return;
+    }
+
+    /*
+     * The call goes into the log before it is made, so that the callbacks it
+     * causes appear beneath it and in the order the library dispatched them;
+     * its result is filled into the same line afterwards. That ordering is the
+     * log's whole value — reading downward is reading the dispatch.
+     */
+    const std::uint64_t call = note_call("process_key  " + event_label(event));
+
+    bool handled = false;
+    const pathime_status_t st = pathime_context_process_key(ctx(), &event, &handled);
+    note_result(call, st, handled ? "handled" : "declined");
+
+    flush_deletes();
+    page_ = 0;
+    last_key_ = key_label(key) + "   " + event_label(event) +
+                (handled ? "   handled" : "   declined");
+
+    if (st != PATHIME_OK) {
+        note_status("process_key", st);
+        /*
+         * A failure — as opposed to a rejection — leaves the composition state
+         * indeterminate, and the documented recovery is to reset before
+         * trusting or displaying anything from the context.
+         */
+        if (st == PATHIME_ERROR_OUT_OF_MEMORY || st == PATHIME_ERROR_BACKEND) {
+            const std::uint64_t recovery = note_call("context_reset  (recovery)");
+            note_result(recovery, pathime_context_reset(ctx()));
+            note_info("the state was indeterminate; reset is the documented recovery");
+        }
+    } else if (!handled) {
+        unhandled_key(event);
+    }
+
+    refresh_surrounding_text();
+}
+
+void App::unhandled_key(const pathime_key_event_t &event)
+{
+    /*
+     * The engine declined, so the key is the client's to act on through its
+     * ordinary text-input path — the whole point of the handled/unhandled
+     * verdict. Note that output may still have been produced while processing
+     * it: "handled" describes the incoming event only.
+     */
+    if (event.keysym == PATHIME_KEY_BACKSPACE) {
+        if (document_.empty()) return;
+        erase_scalars(&document_, scalar_count(document_) - 1, 1);
+        return;
+    }
+
+    std::uint32_t scalar = 0;
+    if (keysym_scalar(event.keysym, &scalar) && scalar >= 0x20) {
+        document_ += utf8_encode(scalar);
+        return;
+    }
+    status_ = "declined, and this client has nothing to do with it";
+}
+
+void App::options_key(const Term::Key &key)
+{
+    if (options_.empty()) {
+        status_ = "this engine implements no options";
+        return;
+    }
+
+    const auto apply = [&](int step) {
+        const OptionRow &row = options_[option_index_];
+        /* An option set is a call like any other, and one worth watching: it
+         * can reset the composition, it re-materializes the candidate list,
+         * and at engine level it dispatches composition_changed to contexts
+         * the caller never passed. Without the call line those callbacks look
+         * like they came from nowhere. */
+        const std::uint64_t call =
+            note_call(std::string(engine_level_ ? "engine" : "context") +
+                      "_set_option  " + pathime_option_name(row.option));
+        const pathime_status_t st =
+            adjust_option(row, engine(), ctx(), engine_level_, step);
+        note_result(call, st, value_text(row, engine(), ctx(), engine_level_));
+        if (st != PATHIME_OK) {
+            note_status(pathime_option_name(row.option), st);
+            return;
+        }
+        status_ = std::string(pathime_option_name(row.option)) + " = " +
+                  value_text(row, engine(), ctx(), engine_level_) +
+                  (engine_level_ ? "   (on the engine)" : "   (on the context)");
+    };
+
+    switch (key.value) {
+    case Term::Key::Esc:
+        /* Escape means the engine's "cancel" in the text field, and this
+         * panel's "I am done here". */
+        pane_ = Pane::Input;
+        return;
+
+    case Term::Key::ArrowUp:
+        option_index_ = (option_index_ + options_.size() - 1) % options_.size();
+        return;
+    case Term::Key::ArrowDown:
+        option_index_ = (option_index_ + 1) % options_.size();
+        return;
+    case Term::Key::ArrowLeft:  apply(-1);  return;
+    case Term::Key::ArrowRight: apply(+1);  return;
+    case Term::Key::PageUp:     apply(-16); return;
+    case Term::Key::PageDown:   apply(+16); return;
+    case Term::Key::Space:
+    case Term::Key::Enter:      apply(0);   return;
+
+    case Term::Key::r:
+    case Term::Key::R:
+    case Term::Key::Backspace: {
+        const OptionRow &row = options_[option_index_];
+        const std::uint64_t call =
+            note_call(std::string(engine_level_ ? "engine" : "context") +
+                      "_reset_option  " + pathime_option_name(row.option));
+        const pathime_status_t st =
+            reset_option(row, engine(), ctx(), engine_level_);
+        note_result(call, st, value_text(row, engine(), ctx(), engine_level_));
+        if (st != PATHIME_OK) {
+            note_status(pathime_option_name(row.option), st);
+        } else {
+            status_ = std::string(pathime_option_name(row.option)) +
+                      " now resolves from below: " +
+                      value_text(row, engine(), ctx(), engine_level_);
+        }
+        return;
+    }
+
+    case Term::Key::l:
+    case Term::Key::L:
+        /* The two levels are not separate namespaces: an engine value is the
+         * default its contexts use, and a context value overrides it. */
+        engine_level_ = !engine_level_;
+        status_ = engine_level_ ? "editing the engine's values"
+                                : "editing this context's values";
+        return;
+
+    default:
+        break;
+    }
+}
+
+/* ---- Candidates --------------------------------------------------------- */
+
+void App::select_candidate(std::size_t index)
+{
+    const pathime_composition_t *comp = composition();
+    if (comp == nullptr || index >= comp->candidate_count) {
+        status_ = "no candidate at that position";
+        return;
+    }
+    const std::uint64_t call =
+        note_call("select_candidate  index " + std::to_string(index) + "  \"" +
+                  escape_for_log(candidate(index)) + "\"");
+    const pathime_status_t st = pathime_context_select_candidate(ctx(), index);
+    note_result(call, st);
+
+    flush_deletes();
+    page_ = 0;
+    if (st != PATHIME_OK) note_status("select_candidate", st);
+    refresh_surrounding_text();
+}
+
+void App::page_forward()
+{
+    const pathime_composition_t *comp = composition();
+    if (comp == nullptr) return;
+
+    std::size_t count = comp->candidate_count;
+    if ((page_ + 1) * kPageSize >= count) count = grow_candidate_list();
+    if ((page_ + 1) * kPageSize < count) page_++;
+    else status_ = "that is the whole list";
+}
+
+void App::page_back()
+{
+    if (page_ > 0) page_--;
+}
+
+std::size_t App::grow_candidate_list()
+{
+    const pathime_composition_t *comp = composition();
+    const std::size_t before = comp != nullptr ? comp->candidate_count : 0;
+
+    std::int64_t cap = 0;
+    if (pathime_context_get_option_int(ctx(), PATHIME_OPT_MAX_CANDIDATES, &cap)
+        != PATHIME_OK)
+        return before;  /* Hangul: no candidates, so no cap to raise. */
+
+    /* A list shorter than the cap was not truncated by it, so there is nothing
+     * more to be had and raising it would only leave the option changed. This
+     * is the only way to tell: the library presents what the cap allowed as
+     * the complete list, precisely so a client never has to reason about a
+     * backend that enumerates lazily. */
+    if (static_cast<std::int64_t>(before) < cap) return before;
+
+    /*
+     * The cap is composition-safe on purpose, and this is the case it was made
+     * safe for: a client showing a growing list raises it as the user scrolls.
+     * Candidates are only ever appended, never reordered, so the numbers
+     * already on screen keep meaning what they meant.
+     */
+    const std::int64_t next = cap + static_cast<std::int64_t>(kPageSize) * 4;
+    const std::uint64_t call = note_call("context_set_option  max-candidates " +
+                                         std::to_string(next) + "  (to page on)");
+    const pathime_status_t st =
+        pathime_context_set_option_int(ctx(), PATHIME_OPT_MAX_CANDIDATES, next);
+    note_result(call, st);
+    if (st != PATHIME_OK) {
+        note_status("max-candidates", st);
+        return before;
+    }
+
+    comp = composition();
+    const std::size_t after = comp != nullptr ? comp->candidate_count : 0;
+    note_info(std::to_string(after) + " candidates now, was " +
+              std::to_string(before));
+    return after;
+}
+
+/* ---- Plumbing ----------------------------------------------------------- */
+
+void App::set_active(std::size_t index)
+{
+    if (index >= engines_.size() || index == active_) return;
+
+    /* Losing focus neither commits nor discards, and dispatches nothing: the
+     * composition is exactly where the user left it when focus returns. Both
+     * calls are logged because the *absence* of callbacks between them is the
+     * thing worth seeing. */
+    const std::uint64_t leave = note_call("context_set_focused  false");
+    note_result(leave, pathime_context_set_focused(engines_[active_].ctx, false));
+    active_ = index;
+    const std::uint64_t enter = note_call("context_set_focused  true");
+    note_result(enter, pathime_context_set_focused(engines_[active_].ctx, true));
+
+    options_ = collect_options(engine());
+    option_index_ = 0;
+    page_ = 0;
+    refresh_surrounding_text();
+    note_info(std::string("now typing into ") + engines_[active_].name);
+}
+
+void App::refresh_surrounding_text()
+{
+    /*
+     * After *every* dispatch, not merely when a caret moves. The snapshot is
+     * the only text the engine can see, and the engine's own commit_text
+     * invalidates it — a client that refreshes only on caret movement finds the
+     * engine progressively unable to revise its own output, which under
+     * PATHIME_HANGUL_PREEDIT_NONE means syllables stop assembling.
+     *
+     * The cursor is always at the end of the document because this program's
+     * caret is: it is a demo text field, not an editor. text.len is in bytes,
+     * the cursor is in scalar values, and getting that pair the wrong way round
+     * is the easiest mistake in this API.
+     */
+    snapshot_ = document_;
+    snapshot_cursor_ = scalar_count(snapshot_);
+    const pathime_str_t text{snapshot_.c_str(), snapshot_.size()};
+    const pathime_status_t st =
+        pathime_context_set_surrounding_text(ctx(), text, snapshot_cursor_);
+    if (st != PATHIME_OK) note_status("set_surrounding_text", st);
+}
+
+void App::flush_deletes()
+{
+    if (deletes_.empty()) return;
+    /* Back to front, so an earlier range's coordinates are still valid when it
+     * is reached — see the declaration for why they are collected at all. */
+    std::sort(deletes_.begin(), deletes_.end(),
+              [](const PendingDelete &a, const PendingDelete &b) {
+                  return a.start > b.start;
+              });
+    for (const PendingDelete &d : deletes_) erase_scalars(&document_, d.start, d.count);
+    deletes_.clear();
+}
+
+std::uint64_t App::note_call(const std::string &line)
+{
+    const std::uint64_t id = next_log_id_++;
+    log_.push_back(LogEntry{LogKind::Call, line, id});
+    while (log_.size() > kLogLines) log_.pop_front();
+    return id;
+}
+
+void App::note_result(std::uint64_t id, pathime_status_t status,
+                      const std::string &extra)
+{
+    /* From the back: the call is the most recent entry that is not one of the
+     * callbacks it caused. It may also have been trimmed off the front while
+     * those piled up, which is why this is a search and not an index. */
+    for (auto it = log_.rbegin(); it != log_.rend(); ++it) {
+        if (it->id != id) continue;
+        it->text += "  = ";
+        it->text += status == PATHIME_OK ? "OK" : pathime_status_string(status);
+        if (!extra.empty()) it->text += ", " + extra;
+        return;
+    }
+}
+
+void App::note_callback(const std::string &line)
+{
+    log_.push_back(LogEntry{LogKind::Callback, line, 0});
+    while (log_.size() > kLogLines) log_.pop_front();
+}
+
+void App::note_info(const std::string &line)
+{
+    log_.push_back(LogEntry{LogKind::Info, line, 0});
+    while (log_.size() > kLogLines) log_.pop_front();
+}
+
+void App::note_status(const char *what, pathime_status_t status)
+{
+    if (status == PATHIME_OK) return;
+    status_ = std::string(what) + ": " + pathime_status_string(status);
+    note_info(status_);
+}
+
+std::string App::take_clipboard()
+{
+    std::string text;
+    text.swap(clipboard_);
+    return text;
+}
+
+const pathime_composition_t *App::composition() const
+{
+    return ctx() != nullptr ? pathime_context_composition(ctx()) : nullptr;
+}
+
+std::string App::candidate(std::size_t index) const
+{
+    pathime_str_t text{nullptr, 0};
+    if (ctx() == nullptr) return std::string();
+    if (pathime_context_candidate(ctx(), index, &text) != PATHIME_OK)
+        return std::string();
+    return std::string(text.bytes, text.len);
+}
+
+std::string App::option_value_text(std::size_t index) const
+{
+    if (index >= options_.size()) return std::string();
+    return value_text(options_[index], engines_[active_].engine,
+                      engines_[active_].ctx, engine_level_);
+}
+
+bool App::is_option_set_here(std::size_t index) const
+{
+    if (index >= options_.size()) return false;
+    return is_set_here(options_[index], engines_[active_].engine,
+                       engines_[active_].ctx, engine_level_);
+}
+
+bool App::is_option_shadowed(std::size_t index) const
+{
+    if (index >= options_.size()) return false;
+    return pathime_context_option_is_set(engines_[active_].ctx,
+                                         options_[index].option);
+}
+
+std::uint32_t App::requirements() const
+{
+    if (engines_.empty()) return 0;
+    return pathime_engine_requirements(engines_[active_].engine);
+}
+
+}  // namespace demo

@@ -88,6 +88,24 @@ int main(void)
 Everything the engine produces is dispatched through `client` before the call
 that caused it returns. The API is synchronous throughout and starts no threads.
 
+## Demo
+
+`demo/` is an interactive IME in a terminal: type into a text field and watch
+the preedit, the settled boundary, the candidate list, every callback the
+library makes, and the whole option inventory with everything the active engine
+implements editable live.
+
+```bash
+cmake -S . -B build -DLIBPATHIME_BUILD_DEMO=ON
+cmake --build build
+./build/bin/pathime-demo
+```
+
+It is a client of the public header and nothing else, so it also serves as a
+worked example of the parts the snippet above skips — surrounding text,
+candidate paging, and what to do with a key the engine declines. See
+`demo/README.md`.
+
 ## Tests
 
 `tests/` holds two kinds of suite, both run by `ctest`. `tests/hangul`,
@@ -106,3 +124,4 @@ them.
 - `include/pathime/pathime.h` — the API, documented in full
 - `docs/source-layout.md` — the map of `src/`
 - `docs/windows-port.md` — how the Windows port works, and its limitations
+- `demo/README.md` — the interactive terminal demo, and what to try in it

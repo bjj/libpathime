@@ -38,6 +38,11 @@ Done:
   C API and verified end to end. `src/engines/{hangul,anthy,pyzy}` implement
   `backend.h`, and `src/engines/anthy/romaji.*` is the composing front end anthy
   needs. What the slice left undone is §4a — start there.
+- **The first client.** `demo/`, an interactive IME in a terminal, behind
+  `LIBPATHIME_BUILD_DEMO`. It exists to be *used*, not to verify anything — but
+  being the first program written against the header rather than to test it
+  found six places where a client has to work around the API's shape. Those are
+  §4b, and they are the best input the next design round has.
 - **Tests: 31, all passing.** `tests/core/` compiles internal sources directly,
   because internal helpers carry no `PATHIME_API` and a shared build would not
   export them. `tests/api/` holds the ABI, lifecycle and options suites plus one
@@ -535,6 +540,180 @@ Three smaller header/implementation divergences, all pinned down by tests:
   preedit shown, because an engine may *preview* an unchosen conversion, and
   Pinyin and Bopomofo do.
 
+## 4b. What the first client found
+
+`demo/` is the first program written *against* this API rather than to test it,
+and being a client is a different exercise from being a test: a test knows what
+it is checking, so it can reach for whatever the header offers and assert on the
+answer, while a client has to build a whole interface out of what is there and
+discovers the shape of the holes. These are the holes. None of them blocked the
+demo and none is a bug; each cost it either a workaround in `demo/src/` or a
+feature it does not have. They are the places where the next design round should
+ask whether the client should have had to do that.
+
+Roughly in the order of how much a client suffers without them.
+
+- **A client cannot ask whether a candidate list is complete.** It must infer
+  it: a list shorter than `PATHIME_OPT_MAX_CANDIDATES` was not truncated by the
+  cap, so there is nothing more to be had; a list exactly as long as the cap
+  might have more behind it. The header supports the inference — it says a lazy
+  backend materializes up to the cap and stops — but it is an inference, and
+  *every* client that pages a list has to rederive it. Without it the demo
+  raised the cap each time the user reached the end of a list that was already
+  complete, leaving the option permanently changed for nothing
+  (`App::grow_candidate_list()`).
+
+  Two fixes, and they are not equivalent. Stating the rule in the header beside
+  `candidate_count` costs nothing and closes the question. A `bool
+  candidates_complete` in `pathime_composition_t` costs a struct field and makes
+  it unmissable — and it would also let the library answer honestly for a
+  backend that *knows* it has more, which the length test cannot.
+
+- **`pathime_engine_requirements()` has no context-level counterpart, and the
+  header's advice in its place is the one thing a generic client cannot
+  follow.** Requirements depend on the resolved configuration, and
+  `PATHIME_OPT_HANGUL_PREEDIT` — the option that drives them — is settable per
+  context. The header says so and tells a client that sets it per context to
+  "read the requirement from the option's own documentation rather than from
+  this call." A client whose settings interface is built by *walking the
+  inventory*, which is precisely what the header advertises the inventory for,
+  has no documentation to read at runtime.
+
+  The demo shows "engine requires: …" over its text field, and that line is
+  wrong the moment a context overrides `hangul-preedit` — it keeps saying
+  "nothing" while the context is in the mode that requires both callbacks.
+
+  A `pathime_context_requirements()` closes it exactly, is additive, and is
+  nearly free: `pathime_engine_requirements()` is one
+  `resolve_option_number(engine, nullptr, PATHIME_OPT_HANGUL_PREEDIT)`
+  (`src/engine.cc:236`), and the context form is the same call with `ctx` in
+  place of `nullptr`. One question comes with it, and `src/engine.cc`'s comment
+  is already half an answer: engine-level resolution deliberately does no
+  capability capping, so that `pathime_context_create()` can reject against the
+  true value. A context-level query should report the *effective* value — the
+  capped one — because a client asking "what do you need from me" has already
+  supplied what it has.
+
+- **The currently-shown candidate exists internally and is not exposed.**
+  `Composition::cursor` (`src/composition.h:117`) is per active span, is reset
+  when a span settles, and is fed to the backend on selection — the core tracks
+  it because neither anthy nor pyzy durably records it (§2, Finding 2). The
+  public API has no way to read it: `pathime_composition_t` carries a count and
+  `pathime_context_candidate()` carries text, and nothing says which entry the
+  preedit currently reflects.
+
+  Every candidate list a user has ever seen highlights one entry, so this is a
+  gap in the ordinary case rather than an exotic one. Under anthy it is
+  observable and unreachable at the same time: Space and Down move that cursor
+  and the preedit changes to match, and a client that wants to highlight the
+  matching row is left string-comparing the preedit against each candidate. The
+  demo does not try, and its candidate list is the one panel that looks less
+  capable than the engine behind it.
+
+  A `size_t candidate_cursor` in `pathime_composition_t`, with a documented
+  meaning when `candidate_count` is 0, is the whole fix. The question the design
+  round should settle first is whether "hovering" is a concept this model wants
+  to admit at all, given that it has no key bindings and no selection UI — but
+  the internal cursor means the model already has it, and only the projection
+  is missing.
+
+- **Whether one dispatch may contain more than one `delete_surrounding_text` is
+  unstated.** It matters because every deletion is expressed against the *same*
+  snapshot: applying the first would move the text the second is described in
+  terms of, so a client that assumes several must collect them and apply them
+  back to front, and a client that assumes one can just delete. The header fixes
+  the *ordering* — all deletions before any commit — which reads as though
+  several are possible.
+
+  The implementation permits exactly one: `Output` holds a single
+  `has_deletion` / `delete_offset` / `delete_count` triple
+  (`src/composition.h:180-182`), so a second request in one dispatch would
+  overwrite the first rather than be dispatched. So the guarantee is already
+  there and simply is not written down. The demo, reading only the header, wrote
+  the queue (`App::flush_deletes()`) — about fifteen lines of machinery for a
+  case that cannot arise. Saying "at most one per dispatch" in
+  `delete_surrounding_text`'s documentation deletes that code from every client
+  that ever reads it.
+
+  Until the header says it, the demo keeps the queue: a client is entitled to
+  program against the contract rather than against what the implementation
+  happens to do today. Do not "simplify" it away without changing the header
+  first.
+
+- **The inventory walk cannot produce a readable interface.** The header
+  advertises `pathime_option_count()` + `pathime_option_name()` +
+  `pathime_engine_option_info()` as what lets a client "build a settings
+  interface that follows the inventory rather than hardcoding it", and it does
+  — a client learns the type, the legal values, the bounds, the default. What it
+  cannot learn is what any of it is *called*. `pathime_option_name()` gives a
+  machine-readable key for the option; there is no equivalent for an enum
+  *value*, and no names at all for the bits of a FLAGS option.
+
+  So the generic client is generic right up to the point where it has to print
+  something. The demo carries its own table of thirteen enum label sets
+  (`demo/src/options_view.cc`) and falls back to "value 3" for anything it does
+  not know, which is exactly the hardcoding the inventory was meant to avoid;
+  and its FLAGS editing degrades to all-bits-or-none, because offering twenty
+  unnamed `pinyin-fuzzy` bits individually would teach a user nothing.
+
+  This is at least partly *deliberate* — display text is presentation, and
+  presentation is the client's, which is why there is no localization surface
+  here and should not be. But `pathime_option_name()` already draws the line in
+  the right place: a stable machine-readable key is not display text, it is
+  something a client maps to its own strings. The symmetric extension is a
+  `pathime_option_value_name(option, value)` returning `"kuten"`, `"full-width"`,
+  `"double-mspy"`, and a name per FLAGS bit. Additive, static, and it turns the
+  inventory walk from "types and numbers" into something a client can render
+  before it has ever heard of the option.
+
+- **An option setter invalidates the borrowed composition, and does not read
+  like it does.** The lifetime rule is "valid until the next call that mutates
+  the same input context", and an option set is such a call — it can reset the
+  composition, and it re-materializes the candidate list even when it does not.
+  A client naturally reads "mutates" as `process_key` and `select_candidate`.
+
+  The demo's paging path is where it shows: it reads `candidate_count`, calls
+  `grow_candidate_list()`, and re-reads. That one is forgiving — the struct is
+  the context's own and keeps its address, so a stale *pointer* still reads the
+  new count. What is not forgiving is a held `pathime_str_t`: the slices point
+  into `ctx->preedit` and `ctx->auxiliary`, which `refresh_composition()`
+  reassigns, so a client that copied `composition->preedit` by value across an
+  option set and then read `.bytes` has a dangling pointer. Worth naming the
+  option setters explicitly where the lifetime rule is stated, rather than
+  leaving them to be deduced from the word "mutates".
+
+Three smaller ones, recorded so they are not rediscovered:
+
+- **There is no `pathime_context_is_focused()`.** The demo does not need one —
+  it focused the context itself — but the two accessors that do exist
+  (`pathime_context_engine`, `pathime_context_user_data`) exist "for language
+  bindings", and a binding handed a bare context handle is in exactly the
+  position of not knowing.
+- **A pasted string has nowhere to go.** `pathime_context_process_key()` takes
+  one key press, so text arriving other than by typing cannot be offered to an
+  engine at all. The demo treats a paste as an ordinary client-side insertion
+  and leaves the composition alone, which is almost certainly the right answer
+  for a phone-keyboard model — recorded as considered rather than as a gap.
+- **The demo is the one client in this tree that has to guess `layout_key`.** A
+  terminal reports a decoded character and no key position, so the demo derives
+  the position from the character on a US-QWERTY assumption; on any other
+  physical layout Hangul and `anthy-typing-method = kana` will produce the wrong
+  jamo or kana. That is a property of terminals, not of the API — a client on a
+  windowing system has the scancode — but it is worth knowing that the field the
+  header calls optional is the field the demo cannot supply honestly.
+
+**What held up, since a list of holes is not a verdict.** Four things made the
+client easier to write than expected, and each was a decision that could have
+gone the other way. The rejection/failure split turned all error handling into
+two lines — retry or reset — with no per-code knowledge. Eager candidate
+materialization made `pathime_context_candidate()` a plain array read inside
+`composition_changed`, which is what lets the demo render a candidate list from
+the callback at all. Focus preserving composition state is what makes switching
+engines mid-word a demonstration rather than a bug. And the fixed dispatch
+order — deletions, then commits, then `composition_changed` last — is why the
+document is never briefly wrong on screen, and is directly visible in the
+demo's event log.
+
 ## 5. Loose ends
 
 - **pyzy's user-database save is handled — do not go looking for a save call.**
@@ -622,9 +801,35 @@ Three smaller header/implementation divergences, all pinned down by tests:
   someone reopen a question this design already closed. Do not do this early —
   removing the reasoning before the code replaces it loses it entirely.
 
-- **Build a demo app based on CPP-Terminal**
-  Create demo/ which conditionally compiles based on its own flag. Bring in CPP-Terminal https://github.com/jupyter-xeus/cpp-terminal as a submodule under demo/. It is a portable
-  windows/linux terminal library. That will let us write an interactive IME demo
-  that has one interactive input, displays preedit and aux texts, lets users select
-  candidates, etc. It can have interactive engine selection, maybe even expose options
-  to play with.
+- ~~**Build a demo app based on CPP-Terminal**~~ **Done (2026-07-27.)**
+  `demo/`, behind `LIBPATHIME_BUILD_DEMO` (OFF by default), with cpp-terminal as
+  a submodule beneath it. Everything asked for is there — one text field, the
+  preedit drawn into it with the settled boundary visible, auxiliary text,
+  candidate selection and paging, engine selection, and every option the active
+  engine implements editable at either level — plus a log of every callback the
+  library makes, which turned out to be the panel worth watching. `demo/README.md`
+  is what it shows and what to try in it.
+
+  Three things it taught, none of them a library problem:
+
+  **Digit keys cannot mean "pick a candidate" under Bopomofo.** 3, 4, 6 and 7
+  are the tone keys there, and binding them to selection makes the engine's own
+  layout untypable — `su3cl3` silently became a series of candidate picks. So
+  the demo binds Alt+digit as well, and plain digits everywhere except
+  Bopomofo. Which keys select is entirely the client's to decide, which is the
+  point, but it is the first place that freedom has actually cost something.
+
+  **A terminal cannot report a key's position, and two engines want it.**
+  `layout_key` is derived from the character on a US-QWERTY assumption; on any
+  other physical layout Hangul and `anthy-typing-method = kana` will produce the
+  wrong jamo or kana. Not fixable from a terminal — a client on a windowing
+  system reports the true key — but worth knowing that the demo is the one
+  client in this tree that has to guess.
+
+  **Raising `max-candidates` to page further needs a stop condition.** A list
+  shorter than the cap was not truncated by it, so there is nothing more to be
+  had; without that test the demo raised the option every time the user reached
+  the end of a complete list. `App::grow_candidate_list()`.
+
+  What it found about the *API* — as opposed to about terminals and key
+  bindings — is §4b, and that is the part worth acting on.
