@@ -123,6 +123,7 @@ if(LIBPATHIME_WITH_TABLE)
     "${PROJECT_SOURCE_DIR}/src/engines/table/table_db.cc"
     "${PROJECT_SOURCE_DIR}/src/engines/table/ranking.cc"
     "${PROJECT_SOURCE_DIR}/src/engines/table/variants.cc"
+    "${PROJECT_SOURCE_DIR}/src/paths.cc"
     "${PROJECT_SOURCE_DIR}/src/utf8.cc")
   target_link_libraries(core_table_test PRIVATE SQLite::SQLite3)
 endif()

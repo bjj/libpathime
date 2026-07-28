@@ -105,6 +105,30 @@ static void candidate_at(pathime_context_t *ctx, size_t index, char *out, size_t
 }
 
 /*
+ * Where @a text sits in the current candidate list, or (size_t)-1.
+ *
+ * Learning tests need this rather than a fixed index: choosing "the third
+ * candidate" repeatedly chooses a *different phrase* each time once the list
+ * starts reordering, which teaches the table three things once instead of one
+ * thing three times.
+ */
+static size_t index_of(pathime_context_t *ctx, size_t count, const char *text)
+{
+    size_t i;
+    for (i = 0; i < count; i++) {
+        pathime_str_t candidate;
+        if (pathime_context_candidate(ctx, i, &candidate) != PATHIME_OK) {
+            break;
+        }
+        if (candidate.len == strlen(text) &&
+            memcmp(candidate.bytes, text, candidate.len) == 0) {
+            return i;
+        }
+    }
+    return (size_t)-1;
+}
+
+/*
  * A context on the named table. Every test opens its own, because
  * PATHIME_OPT_TABLE_FILE is per-context and switching it mid-test would be
  * testing the switch rather than the thing under test.
@@ -509,6 +533,151 @@ static void test_enumeration(pathime_engine_t *engine)
     pathime_context_destroy(ctx);
 }
 
+/*
+ * Learning (§10.1): selecting a candidate bumps its user_freq in the user
+ * database, and user_freq outranks freq in the candidate sort (§8.2 key 3), so
+ * a phrase the user keeps choosing rises to the front.
+ *
+ * stroke5 is the table for this because it declares DYNAMIC_ADJUST — cangjie5
+ * does not, and a table that does not adapt must not, which the next test
+ * checks. Its code `m/m` has exactly three exact matches, ordered 工 (500),
+ * 士 (495), 土 (490) by frequency alone.
+ */
+static void test_learning(pathime_engine_t *engine)
+{
+    client_log_t log;
+    pathime_context_t *ctx = open_context(engine, &log, "stroke5");
+    char candidate[64];
+    int round;
+
+    if (ctx == NULL) {
+        return;
+    }
+
+    /* 工 U+5DE5, 土 U+571F — first and third of `m/m` before any learning. */
+    const char *const gong = "\xE5\xB7\xA5";
+    const char *const tu = "\xE5\x9C\x9F";
+
+    PT_CHECK(press(ctx, 'm'));
+    PT_CHECK(press(ctx, '/'));
+    PT_CHECK(press(ctx, 'm'));
+
+    candidate_at(ctx, 0, candidate, sizeof(candidate));
+    PT_CHECK(strcmp(candidate, gong) == 0);
+    candidate_at(ctx, 2, candidate, sizeof(candidate));
+    PT_CHECK(strcmp(candidate, tu) == 0);
+
+    /*
+     * Choose 土 repeatedly — by phrase, not by position, because the position
+     * moves as soon as the first selection is learned. Once would be enough to
+     * overtake two rows with user_freq 0; three times also exercises the update
+     * path rather than only the insert.
+     */
+    for (round = 0; round < 3; round++) {
+        const size_t at = index_of(ctx, log.last_candidates, tu);
+        PT_CHECK(at != (size_t)-1);
+        PT_CHECK_STATUS(pathime_context_select_candidate(ctx, at), PATHIME_OK);
+        PT_CHECK(press(ctx, 'm'));
+        PT_CHECK(press(ctx, '/'));
+        PT_CHECK(press(ctx, 'm'));
+    }
+
+    /* The learned phrase now leads, ahead of two higher-freq rows. */
+    candidate_at(ctx, 0, candidate, sizeof(candidate));
+    PT_CHECK(strcmp(candidate, tu) == 0);
+
+    pathime_context_destroy(ctx);
+}
+
+/*
+ * The client's veto. PATHIME_OPT_LEARNING off means no user_freq is written,
+ * so the order stays the table's however often a candidate is chosen.
+ */
+static void test_learning_can_be_declined(pathime_engine_t *engine)
+{
+    client_log_t log;
+    pathime_context_t *ctx = open_context(engine, &log, "stroke5");
+    char candidate[64];
+    int round;
+
+    if (ctx == NULL) {
+        return;
+    }
+
+    /* 丿 code `,n.`: 久 (500), 凡 (495), 夕 (490), 丸 (485), 么 (480). */
+    const char *const jiu = "\xE4\xB9\x85";
+    const char *const xi = "\xE5\xA4\x95";
+
+    PT_CHECK_STATUS(pathime_context_set_option_bool(ctx, PATHIME_OPT_LEARNING, false),
+                    PATHIME_OK);
+
+    for (round = 0; round < 3; round++) {
+        size_t at;
+        PT_CHECK(press(ctx, ','));
+        PT_CHECK(press(ctx, 'n'));
+        PT_CHECK(press(ctx, '.'));
+        /* Unmoved every round, which is the assertion: with learning declined
+         * the list cannot drift, so 夕 stays exactly where the table put it. */
+        candidate_at(ctx, 2, candidate, sizeof(candidate));
+        PT_CHECK(strcmp(candidate, xi) == 0);
+        at = index_of(ctx, log.last_candidates, xi);
+        PT_CHECK(at == 2);
+        PT_CHECK_STATUS(pathime_context_select_candidate(ctx, at), PATHIME_OK);
+    }
+
+    PT_CHECK(press(ctx, ','));
+    PT_CHECK(press(ctx, 'n'));
+    PT_CHECK(press(ctx, '.'));
+
+    /* Unmoved: still the table's own order. */
+    candidate_at(ctx, 0, candidate, sizeof(candidate));
+    PT_CHECK(strcmp(candidate, jiu) == 0);
+    candidate_at(ctx, 2, candidate, sizeof(candidate));
+    PT_CHECK(strcmp(candidate, xi) == 0);
+
+    pathime_context_destroy(ctx);
+}
+
+/*
+ * A table that does not declare DYNAMIC_ADJUST does not adapt, whatever the
+ * client asks for — the declaration is the table author saying this method has
+ * a fixed order, and tier 3 turns PATHIME_OPT_LEARNING off to say so.
+ */
+static void test_table_without_dynamic_adjust(pathime_engine_t *engine)
+{
+    client_log_t log;
+    pathime_context_t *ctx = open_context(engine, &log, "cangjie5");
+    char candidate[64];
+    bool learning = true;
+    int round;
+
+    if (ctx == NULL) {
+        return;
+    }
+
+    PT_CHECK(press(ctx, 'a'));
+
+    /* cangjie5 declares neither DYNAMIC_ADJUST nor USER_CAN_DEFINE_PHRASE. */
+    PT_CHECK_STATUS(pathime_context_get_option_bool(ctx, PATHIME_OPT_LEARNING, &learning),
+                    PATHIME_OK);
+    PT_CHECK(!learning);
+
+    for (round = 0; round < 3; round++) {
+        size_t at;
+        PT_CHECK(press(ctx, 'b'));
+        at = index_of(ctx, log.last_candidates, MAO);
+        PT_CHECK(at != (size_t)-1);
+        PT_CHECK_STATUS(pathime_context_select_candidate(ctx, at), PATHIME_OK);
+        PT_CHECK(press(ctx, 'a'));
+    }
+    PT_CHECK(press(ctx, 'b'));
+
+    candidate_at(ctx, 0, candidate, sizeof(candidate));
+    PT_CHECK(strcmp(candidate, MING) == 0);
+
+    pathime_context_destroy(ctx);
+}
+
 /* Reset discards without committing, which is the header's rule for it. */
 static void test_reset_discards(pathime_engine_t *engine)
 {
@@ -534,7 +703,22 @@ int main(void)
 {
     pathime_engine_t *engine = NULL;
 
+    /*
+     * A data directory of this test's own, so learning writes a user database
+     * under the build tree rather than the developer's real one. The fixture in
+     * tests/api/CMakeLists.txt empties it before each run.
+     */
+#ifdef TABLE_TEST_DATA_DIR
+    {
+        pathime_init_params_t params;
+        memset(&params, 0, sizeof(params));
+        params.struct_size = sizeof(params);
+        params.data_dir = TABLE_TEST_DATA_DIR;
+        PT_CHECK_STATUS(pathime_init(&params), PATHIME_OK);
+    }
+#else
     PT_CHECK_STATUS(pathime_init(NULL), PATHIME_OK);
+#endif
 
     if (!pathime_has_engine(PATHIME_ENGINE_TABLE)) {
         pathime_shutdown();
@@ -561,6 +745,9 @@ int main(void)
         test_max_candidates(engine);
         test_engine_cap(engine);
         test_reset_discards(engine);
+        test_learning(engine);
+        test_learning_can_be_declined(engine);
+        test_table_without_dynamic_adjust(engine);
     }
 
     pathime_engine_destroy(engine);

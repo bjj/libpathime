@@ -80,11 +80,25 @@ libpathime_add_api_test(engine_table engine_table_test.c)
 # through the default resource directory exactly as a client does, so there is
 # no path to pass in.
 #
-# Unlike the anthy and pyzy tests this one needs no clean-state fixture, because
-# it does not commit into a user database: PATHIME_OPT_LEARNING resolves to the
-# tier-3 value the shipped tables declare, and none of them declares
-# DYNAMIC_ADJUST or USER_CAN_DEFINE_PHRASE in a way this test's selections
-# reach. It will need one when learning lands (TODO.md).
+# It does need a data directory of its own, for the same reason api.engine_anthy
+# and api.engine_pyzy do: the test commits, two of the shipped tables declare
+# DYNAMIC_ADJUST, and learning writes a user database. Wiping it before every
+# run is what makes the candidate order the test asserts a property of the
+# table rather than of whatever the previous run taught it.
+if(LIBPATHIME_WITH_TABLE)
+  set(_table_home "${CMAKE_CURRENT_BINARY_DIR}/home/api_engine_table")
+  file(MAKE_DIRECTORY "${_table_home}")
+
+  target_compile_definitions(api_engine_table_test PRIVATE
+    "TABLE_TEST_DATA_DIR=\"${_table_home}\"")
+
+  add_test(NAME api.engine_table.clean
+    COMMAND ${CMAKE_COMMAND} -E rm -rf "${_table_home}/table")
+  set_tests_properties(api.engine_table.clean PROPERTIES
+    FIXTURES_SETUP api_engine_table_home)
+  set_tests_properties(api.engine_table PROPERTIES
+    FIXTURES_REQUIRED api_engine_table_home)
+endif()
 
 # --- api.engine_anthy --------------------------------------------------------
 if(LIBPATHIME_WITH_ANTHY)

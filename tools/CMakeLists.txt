@@ -14,6 +14,7 @@ if(LIBPATHIME_WITH_TABLE)
     "${PROJECT_SOURCE_DIR}/src/engines/table/table_source.cc"
     "${PROJECT_SOURCE_DIR}/src/engines/table/table_properties.cc"
     "${PROJECT_SOURCE_DIR}/src/engines/table/table_db.cc"
+    "${PROJECT_SOURCE_DIR}/src/paths.cc"
     "${PROJECT_SOURCE_DIR}/src/utf8.cc")
 
   target_compile_features(pathime-table-compile PRIVATE cxx_std_17)

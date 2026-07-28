@@ -244,8 +244,24 @@ private:
     /** Stage the current run as a segment using candidate @a index (§7.5). */
     void stage_segment(size_t index, const OptionReader &options);
 
-    /** Commit everything staged plus @a text, and clear. */
-    void commit(const std::string &text, Output *out);
+    /**
+     * Commit everything staged plus @a text, and clear.
+     *
+     * @a chosen_keys is the key run @a text was chosen for, or "" when the text
+     * is not a candidate — the literal run Return commits, or a lone character
+     * §7.6 passed through. That distinction is what learning turns on: a user
+     * who typed their way out of a composition expressed no preference, and
+     * recording one would teach the table something the user did not say.
+     */
+    void commit(const std::string &text, const std::string &chosen_keys,
+                const OptionReader &options, Output *out);
+
+    /**
+     * Record one (keys, phrase) selection in the user database (§10.1), if the
+     * table adapts and the client left learning on.
+     */
+    void learn(const std::string &keys, const std::string &phrase,
+               const OptionReader &options);
 
     TableEngine *engine_;
     std::shared_ptr<TableDatabase> table_;
@@ -433,8 +449,51 @@ void TableContext::publish(Composition *model) const
 
 /* ---- Context: transitions ------------------------------------------------- */
 
-void TableContext::commit(const std::string &text, Output *out)
+void TableContext::learn(const std::string &keys, const std::string &phrase,
+                         const OptionReader &options)
 {
+    if (table_ == nullptr || keys.empty() || phrase.empty()) {
+        return;
+    }
+
+    /*
+     * Three gates, and they are not the same question. DYNAMIC_ADJUST is the
+     * table author saying this method reorders by use at all; PATHIME_OPT_LEARNING
+     * is the client's veto over a table that does; and NO_CHECK_CHARS is the
+     * table author excluding particular characters from adjustment (§3.1).
+     */
+    if (!properties().dynamic_adjust || !options.flag(PATHIME_OPT_LEARNING)) {
+        return;
+    }
+
+    if (!properties().no_check_chars.empty()) {
+        size_t offset = 0;
+        uint32_t scalar = 0;
+        while (utf8_next_scalar(phrase.data(), phrase.size(), &offset, &scalar)) {
+            if (properties().no_check_chars.count(static_cast<char32_t>(scalar)) != 0) {
+                return;
+            }
+        }
+    }
+
+    table_->record_selection(keys, phrase);
+}
+
+void TableContext::commit(const std::string &text, const std::string &chosen_keys,
+                          const OptionReader &options, Output *out)
+{
+    /*
+     * Every staged segment reached the client as text the user chose, so each
+     * one is learned, not just the last. Learning happens before clear_state()
+     * because that is what drops the segments.
+     */
+    for (const Segment &segment : segments_) {
+        learn(segment.keys, segment.phrase, options);
+    }
+    if (!chosen_keys.empty()) {
+        learn(chosen_keys, text, options);
+    }
+
     out->commit += staged_text();
     out->commit += text;
     clear_state();
@@ -504,7 +563,7 @@ bool TableContext::take_input_scalar(uint32_t scalar, const OptionReader &option
          */
         if (matches_.size() == 1 && options.flag(PATHIME_OPT_TABLE_AUTO_COMMIT) &&
             matches_[0].tabkeys == keys_valid_) {
-            commit(matches_[0].phrase, out);
+            commit(matches_[0].phrase, keys_valid_, options, out);
         }
         return true;
     }
@@ -519,7 +578,8 @@ bool TableContext::take_input_scalar(uint32_t scalar, const OptionReader &option
          */
         keys_valid_ = previous_valid;
         matches_ = previous_matches;
-        commit(matches_[cursor_ < matches_.size() ? cursor_ : 0].phrase, out);
+        commit(matches_[cursor_ < matches_.size() ? cursor_ : 0].phrase, keys_valid_,
+               options, out);
         refresh_matches(options);
         return take_input_scalar(scalar, options, out);
     }
@@ -638,7 +698,7 @@ bool TableContext::process_key(const KeyEvent &key, const OptionReader &options,
          * right now" is inexact for this engine, and it is an open question in
          * TODO.md rather than a settled reading.
          */
-        commit(typed_run(), out);
+        commit(typed_run(), std::string(), options, out);
         publish(model);
         return true;
 
@@ -667,9 +727,9 @@ bool TableContext::process_key(const KeyEvent &key, const OptionReader &options,
              */
             if (!matches_.empty()) {
                 const size_t index = (cursor_ < matches_.size()) ? cursor_ : 0;
-                commit(matches_[index].phrase, out);
+                commit(matches_[index].phrase, keys_valid_, options, out);
             } else {
-                commit(typed_run(), out);
+                commit(typed_run(), std::string(), options, out);
             }
             publish(model);
             return true;
@@ -708,14 +768,16 @@ bool TableContext::process_key(const KeyEvent &key, const OptionReader &options,
      */
     if (composing) {
         std::string ending;
+        std::string ending_keys;
         if (options.number(PATHIME_OPT_TABLE_INVALID_INPUT) ==
                 PATHIME_TABLE_INVALID_COMMIT_CANDIDATE &&
             !matches_.empty()) {
             ending = matches_[(cursor_ < matches_.size()) ? cursor_ : 0].phrase;
+            ending_keys = keys_valid_;
         } else {
             ending = typed_run();
         }
-        commit(ending, out);
+        commit(ending, ending_keys, options, out);
         utf8_append_scalar(out->commit, scalar);
         publish(model);
         return true;
@@ -755,7 +817,7 @@ pathime_status_t TableContext::select_candidate(size_t index, const OptionReader
      * meaning for the same call would make the result depend on a modifier the
      * API does not carry.
      */
-    commit(matches_[index].phrase, out);
+    commit(matches_[index].phrase, keys_valid_, options, out);
     refresh_matches(options);
     publish(model);
     return PATHIME_OK;

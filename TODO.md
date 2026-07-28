@@ -33,7 +33,8 @@ The engine is real. `src/engines/table/` implements the source `.txt` parser
 (spec §3), the compiled SQLite schema (§4), the user-database schema (§5), the
 composition mapping (§6), the key-event state machine (§7), lookup and
 candidate ordering (§8), select and commit (§9), and Chinese variant
-classification (§11.1). `tools/table-compile` compiles tables at build time,
+classification (§11.1) and frequency learning (§10.1). `tools/table-compile`
+compiles tables at build time,
 and five of them ship: cangjie5, quick5, wubi-jidian86, stroke5, zhuyin.
 
 Table enumeration is settled and done. The installed tables are the legal values
@@ -49,18 +50,16 @@ missing.
 
 ### Not implemented, in rough priority order
 
-- **Learning (§10).** The user database is created, attached as `user_db` and
-  merged into lookups, and `user_freq` is already the third key of the
-  candidate sort — but nothing ever writes a row. So `DYNAMIC_ADJUST` and
-  `USER_CAN_DEFINE_PHRASE` are honoured as *declarations* (they decide whether
-  the union runs, and what `PATHIME_OPT_LEARNING` resolves to at tier 3) and
-  ignored as behaviour. This is the largest gap and the one with the machinery
-  already under it: §10.1 is an UPSERT on selection, and the WAL batching of
-  §5.3 is a durability detail on top.
-- **User-derived phrases (§10.2).** Needs learning first. `RULES` is parsed,
-  goucima are compiled into the database and `TableDatabase::goucima()` reads
-  them back, so the data is all present; what is missing is applying the parsed
-  rules to consecutive single-character selections to derive a compound key.
+- **User-derived phrases (§10.2).** The remaining half of learning. `RULES` is
+  parsed, goucima are compiled into the database and `TableDatabase::goucima()`
+  reads them back, so the data is all present; what is missing is applying the
+  parsed rules to consecutive single-character selections to derive a compound
+  key and insert it with `freq = -1`, `user_freq = 1`. wubi-jidian86 is the
+  shipped table that declares `USER_CAN_DEFINE_PHRASE`.
+- **Write batching (§5.3).** Not implemented, and possibly not worth it: the
+  spec's checkpoint-after-16-updates is a durability detail, and the user
+  database is in WAL mode where SQLite checkpoints on its own. Measure before
+  writing anything.
 - **Full-width conversion (§11.4).** Only the space is converted today
   (`PATHIME_OPT_LATIN_WIDTH`, in the Space branch of `process_key`).
   `PATHIME_OPT_PUNCTUATION_WIDTH` does nothing for this engine. The table is

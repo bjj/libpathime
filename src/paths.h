@@ -52,6 +52,18 @@ bool is_regular_file(const std::string &path);
  */
 std::vector<std::string> list_directory(const std::string &directory);
 
+/**
+ * Create @a directory and any missing parents. True if it exists afterwards.
+ *
+ * Needed because the table engine writes its user databases beneath
+ * pathime_init_params_t::data_dir and SQLite will not create a directory to put
+ * one in — where anthy and pyzy both create their own (anthy_check_user_dir,
+ * g_mkdir_with_parents), so this is the first place the library has to do it
+ * itself. An existing directory is success, which is what makes it safe to call
+ * on every open.
+ */
+bool make_directories(const std::string &directory);
+
 }  // namespace pathime
 
 #endif /* LIBPATHIME_SRC_PATHS_H */

@@ -116,4 +116,48 @@ std::vector<std::string> list_directory(const std::string &directory)
     return names;
 }
 
+bool make_directories(const std::string &directory)
+{
+    if (directory.empty()) {
+        return false;
+    }
+
+    /*
+     * Walk forward creating each prefix, rather than recursing from the end.
+     * An already-existing component is not an error — only the final state
+     * matters — so EEXIST is ignored throughout and the answer comes from one
+     * stat at the end.
+     */
+    for (size_t i = 1; i <= directory.size(); i++) {
+        if (i != directory.size() && directory[i] != '/' && directory[i] != kPathSeparator) {
+            continue;
+        }
+        const std::string prefix = directory.substr(0, i);
+        if (prefix.empty()) {
+            continue;
+        }
+#if defined(_WIN32)
+        const std::wstring wide = utf8_to_utf16(prefix);
+        if (!wide.empty()) {
+            CreateDirectoryW(wide.c_str(), nullptr);
+        }
+#else
+        mkdir(prefix.c_str(), 0700);
+#endif
+    }
+
+#if defined(_WIN32)
+    const std::wstring wide = utf8_to_utf16(directory);
+    if (wide.empty()) {
+        return false;
+    }
+    const DWORD attributes = GetFileAttributesW(wide.c_str());
+    return attributes != INVALID_FILE_ATTRIBUTES &&
+           (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+#else
+    struct stat info;
+    return stat(directory.c_str(), &info) == 0 && S_ISDIR(info.st_mode);
+#endif
+}
+
 }  // namespace pathime

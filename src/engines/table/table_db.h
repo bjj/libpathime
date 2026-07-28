@@ -113,6 +113,25 @@ public:
     /** The goucima for @a character, or "" when the table declares none. */
     std::string goucima(const std::string &character) const;
 
+    /**
+     * Record that the user chose @a phrase for @a tabkeys, bumping its
+     * `user_freq` in the user database (§10.1).
+     *
+     * A pair that has no user row yet gets one with `user_freq = 1` and
+     * `freq = 0` — zero rather than the system table's value, because §5.1 is
+     * explicit that a user row shadowing a system row carries no frequency of
+     * its own and the lookup merges by taking the max of each.
+     *
+     * Two statements rather than an UPSERT, because `user_db.phrases` has no
+     * unique index on `(tabkeys, phrase)` to conflict on — the schema is fixed
+     * by the data contract (§5.1) and adding an index to it would be a change
+     * ibus-table did not make to a file both programs write.
+     *
+     * False when there is no user database, which is not an error: it is what a
+     * build with no writable data directory looks like.
+     */
+    bool record_selection(const std::string &tabkeys, const std::string &phrase);
+
 private:
     TableDatabase() = default;
 

@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <sstream>
 
+#include "paths.h"
 #include "utf8.h"
 
 namespace pathime {
@@ -41,6 +42,58 @@ bool exec(sqlite3 *db, const char *sql, std::string *error)
     }
     sqlite3_free(message);
     return false;
+}
+
+/**
+ * A `file:` URI for @a path with the given mode, which is how each attached
+ * database states its own access rights independently of the connection's.
+ *
+ * The characters SQLite gives meaning to inside a URI are percent-encoded:
+ * `?` would begin the query part, `#` a fragment, and `%` an escape. Everything
+ * else — spaces, non-ASCII, the rest — is carried through, which the
+ * resource-directory arrangement requires. Backslashes become forward slashes
+ * because a URI path separator is `/` on every platform, including Windows,
+ * where SQLite accepts a drive letter after it.
+ */
+std::string uri_for(const std::string &path, const char *mode)
+{
+    std::string out = "file:";
+
+    /* An absolute Windows path (C:\...) needs a leading slash in a URI. */
+    if (path.size() > 1 && path[1] == ':') {
+        out += '/';
+    }
+
+    for (const char c : path) {
+        switch (c) {
+        case '?':
+            out += "%3f";
+            break;
+        case '#':
+            out += "%23";
+            break;
+        case '%':
+            out += "%25";
+            break;
+        case '\\':
+            out += '/';
+            break;
+        default:
+            out.push_back(c);
+            break;
+        }
+    }
+
+    out += "?mode=";
+    out += mode;
+    return out;
+}
+
+/** Everything before the last separator, or "" when there is none. */
+std::string parent_directory(const std::string &path)
+{
+    const size_t at = path.find_last_of("/\\");
+    return (at == std::string::npos) ? std::string() : path.substr(0, at);
 }
 
 /** A SQL string literal, single quotes doubled. */
@@ -365,11 +418,30 @@ std::unique_ptr<TableDatabase> TableDatabase::open(const std::string &system_pat
 {
     std::unique_ptr<TableDatabase> table(new TableDatabase());
 
-    if (sqlite3_open_v2(system_path.c_str(), &table->db_, SQLITE_OPEN_READONLY, nullptr) !=
-        SQLITE_OK) {
+    /*
+     * The connection's own main database is `:memory:` and holds nothing. Both
+     * real databases are attached beside it, which is the only arrangement that
+     * gets the access rights right in every case.
+     *
+     * The obvious alternative — open the system table as main and ATTACH the
+     * user database — does not work, and the failure is silent rather than
+     * loud. SQLite opens an attached file with the *main* connection's flags,
+     * so a system table opened READONLY attaches a read-only user database, and
+     * one that does not exist yet cannot be created at all. Opening the system
+     * table read-write instead is worse: an installed table under a system
+     * prefix is not writable, so that fails outright for the ordinary case.
+     *
+     * With an empty main, each file carries its own access mode in a URI, and
+     * the read-only system table and the read-write user database coexist on
+     * one connection — which is what the merged lookup of §8.1 needs, since a
+     * UNION cannot span two connections.
+     */
+    if (sqlite3_open_v2(":memory:", &table->db_,
+                        SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_URI,
+                        nullptr) != SQLITE_OK) {
         if (error != nullptr) {
             *error = (table->db_ != nullptr) ? sqlite3_errmsg(table->db_)
-                                             : "cannot open " + system_path;
+                                             : "cannot open a database connection";
         }
         return nullptr;
     }
@@ -377,19 +449,29 @@ std::unique_ptr<TableDatabase> TableDatabase::open(const std::string &system_pat
     if (!exec(table->db_, kPragmas, error)) {
         return nullptr;
     }
+
+    const std::string attach_system =
+        "ATTACH DATABASE " + quote(uri_for(system_path, "ro")) + " AS system;";
+    if (!exec(table->db_, attach_system.c_str(), error)) {
+        return nullptr;
+    }
+
     if (!table->read_properties(error)) {
         return nullptr;
     }
 
     if (!user_path.empty()) {
         /*
-         * A user database that cannot be attached or created is not fatal. The
+         * A user database that cannot be created or attached is not fatal. The
          * table still types; only learning is lost, and reporting the whole
          * input method unavailable because a home directory is read-only would
          * be the wrong trade.
          */
-        const std::string attach = "ATTACH DATABASE " + quote(user_path) + " AS user_db;";
-        if (exec(table->db_, attach.c_str(), nullptr) &&
+        make_directories(parent_directory(user_path));
+
+        const std::string attach_user =
+            "ATTACH DATABASE " + quote(uri_for(user_path, "rwc")) + " AS user_db;";
+        if (exec(table->db_, attach_user.c_str(), nullptr) &&
             exec(table->db_,
                  "PRAGMA user_db.journal_mode = WAL;"
                  "CREATE TABLE IF NOT EXISTS user_db.phrases "
@@ -415,7 +497,7 @@ TableDatabase::~TableDatabase()
 bool TableDatabase::read_properties(std::string *error)
 {
     sqlite3_stmt *statement = nullptr;
-    if (sqlite3_prepare_v2(db_, "SELECT attr, val FROM main.ime;", -1, &statement, nullptr) !=
+    if (sqlite3_prepare_v2(db_, "SELECT attr, val FROM system.ime;", -1, &statement, nullptr) !=
         SQLITE_OK) {
         if (error != nullptr) {
             *error = "not an ibus-table database: no ime table";
@@ -466,7 +548,7 @@ bool TableDatabase::lookup(const std::string &keys, std::vector<PhraseMatch> *ou
                                              properties_.dynamic_adjust);
 
     std::string sql =
-        "SELECT tabkeys, phrase, freq, user_freq FROM main.phrases "
+        "SELECT tabkeys, phrase, freq, user_freq FROM system.phrases "
         "WHERE tabkeys LIKE ?1 ESCAPE ?2";
     if (merge_user) {
         sql +=
@@ -516,6 +598,45 @@ bool TableDatabase::lookup(const std::string &keys, std::vector<PhraseMatch> *ou
     return true;
 }
 
+bool TableDatabase::record_selection(const std::string &tabkeys, const std::string &phrase)
+{
+    if (!has_user_db_ || tabkeys.empty() || phrase.empty()) {
+        return false;
+    }
+
+    sqlite3_stmt *statement = nullptr;
+    if (sqlite3_prepare_v2(db_,
+                           "UPDATE user_db.phrases SET user_freq = user_freq + 1 "
+                           "WHERE tabkeys = ?1 AND phrase = ?2;",
+                           -1, &statement, nullptr) != SQLITE_OK) {
+        return false;
+    }
+    sqlite3_bind_text(statement, 1, tabkeys.c_str(), static_cast<int>(tabkeys.size()),
+                      SQLITE_STATIC);
+    sqlite3_bind_text(statement, 2, phrase.c_str(), static_cast<int>(phrase.size()),
+                      SQLITE_STATIC);
+    const bool updated = sqlite3_step(statement) == SQLITE_DONE;
+    sqlite3_finalize(statement);
+
+    if (updated && sqlite3_changes(db_) > 0) {
+        return true;
+    }
+
+    if (sqlite3_prepare_v2(db_,
+                           "INSERT INTO user_db.phrases (tabkeys, phrase, freq, user_freq) "
+                           "VALUES (?1, ?2, 0, 1);",
+                           -1, &statement, nullptr) != SQLITE_OK) {
+        return false;
+    }
+    sqlite3_bind_text(statement, 1, tabkeys.c_str(), static_cast<int>(tabkeys.size()),
+                      SQLITE_STATIC);
+    sqlite3_bind_text(statement, 2, phrase.c_str(), static_cast<int>(phrase.size()),
+                      SQLITE_STATIC);
+    const bool inserted = sqlite3_step(statement) == SQLITE_DONE;
+    sqlite3_finalize(statement);
+    return inserted;
+}
+
 std::string TableDatabase::goucima(const std::string &character) const
 {
     if (!properties_.user_can_define_phrase) {
@@ -523,7 +644,7 @@ std::string TableDatabase::goucima(const std::string &character) const
     }
 
     sqlite3_stmt *statement = nullptr;
-    if (sqlite3_prepare_v2(db_, "SELECT goucima FROM main.goucima WHERE zi = ?;", -1,
+    if (sqlite3_prepare_v2(db_, "SELECT goucima FROM system.goucima WHERE zi = ?;", -1,
                            &statement, nullptr) != SQLITE_OK) {
         return std::string();
     }
