@@ -69,21 +69,50 @@ that file grows a table round (queued below).
   enough that starting from the spec alone would be building to an unexamined
   premise.
 
-  The sketch, for that conversation. With `USER_CAN_DEFINE_PHRASE = TRUE`,
-  selecting two single characters in a row makes the engine silently invent a
-  *new dictionary entry* for the pair. The key it files the pair under is not
-  the keys the user typed: each character has a `goucima` ("word-formation
-  code", §3.3/§4.3), and `RULES` (§3.5) says which positions of which
-  characters' goucima to concatenate. wubi-jidian86's
+  **What it is.** With `USER_CAN_DEFINE_PHRASE = TRUE`, committing a
+  multi-character string the system table does not already contain makes the
+  engine invent a *new dictionary entry* for it. The key it files the entry under
+  is not the keys the user typed: each character has a `goucima`
+  ("word-formation code", §3.3/§4.3), and `RULES` (§3.5) says which positions of
+  which characters' goucima to concatenate. wubi-jidian86's
   `ce2:p11+p12+p21+p22` reads "for a 2-character phrase, take characters 1 and 2
-  of the first character's goucima, then characters 1 and 2 of the second".
-  The compound is inserted into the user database with `freq = -1`,
-  `user_freq = 1`, and afterwards typing that derived code produces the phrase.
+  of the first character's goucima, then characters 1 and 2 of the second". The
+  compound goes into the user database with `freq = -1`, `user_freq = 1`
+  (`refs/ibus-table/engine/tabsqlitedb.py:1527-1587`).
 
   So it is not learning in the sense `PATHIME_OPT_LEARNING` currently means
-  (reordering by use, §10.1, already implemented). It *creates vocabulary the
-  user never asked for*, under codes they were never shown. Whether that belongs
-  behind the same option, a different one, or not at all is the discussion.
+  (reordering by use, §10.1, already implemented). It *creates vocabulary*, under
+  codes the user did not choose.
+
+  **How it interacts with typing — and the problem that makes this a discussion
+  rather than a task.** In ibus-table the feature is not silent. While a
+  multi-character run is in the preedit, the engine shows the code it *would*
+  derive in the **auxiliary text**, as `#: <code>`
+  (`refs/ibus-table/engine/table.py:1788-1790`). That is the whole
+  discoverability story: you build 天下大事 out of four separate selections, you
+  watch `#: ggdg` appear beside it, you commit, and now `ggdg` types the phrase.
+  Without that display the user gets vocabulary filed under codes they were never
+  told, which they can only rediscover by accident.
+
+  **libpathime has no auxiliary text.** That was a deliberate removal — the
+  model says what a user typed is the composition, not something supplemental to
+  it (`docs/CONCEPTS.md`; spec §6.4 and §12 both record it as unused). So the
+  channel this feature depends on for its usability is one we do not have and
+  removed on purpose. Adding it back for one feature of one shipped table is a
+  large decision; shipping the feature without it is shipping the silent half.
+
+  Two smaller things worth having in the conversation:
+
+  - The derived entry gets `user_freq = 1`, and `user_freq` is the second sort
+    key after exact match (`ranking.cc`). So a silently derived phrase does not
+    land quietly at the bottom of a candidate list — it outranks every system
+    entry that has never been chosen.
+  - The derived code can collide with a real one. Nothing checks; the phrase
+    simply becomes another candidate under that code.
+
+  **State of the code:** `RULES` is parsed, goucima are compiled into the
+  database and `TableDatabase::goucima()` reads them back, so the data is all
+  present. Only the derive-and-insert step is missing.
 
   State of the code: `RULES` is parsed, goucima are compiled into the database
   and `TableDatabase::goucima()` reads them back, so the data is all present.
@@ -152,6 +181,59 @@ that file grows a table round (queued below).
   composition); and the `AUTO_SELECT` retry recurses one level to reprocess the
   character that broke the match. Both are choices, both are commented at the
   code, and neither has a table in the shipped set that exercises it hard.
+- **How compatible are we with a distro `ibus-table-*` package, really?**
+  Raised 2026-07-28. No action proposed — the point is to have the answer
+  written down, because "we read ibus-table's format" is currently claimed more
+  broadly than it is true.
+
+  The question is sharp because distros ship **compiled databases**, not source:
+  `engines/ibus-table-chinese/tables/CMakeLists.txt` runs `ibus-table-createdb`
+  and installs `.db` files to `/usr/share/ibus-table/tables/`. So a client
+  pointing `resource_dir` at an installed ibus-table tree is a real scenario, not
+  a hypothetical one.
+
+  *Reading their `.db` — believed to work, never tested.* The schemas are
+  identical, checked side by side: `ime(attr, val)` and
+  `phrases(id, tabkeys, phrase, freq, user_freq)`, plus `goucima(zi, goucima)`,
+  `pinyin(pinyin, zi, freq)` and `suggestion(phrase, freq)`
+  (`refs/ibus-table/engine/tabsqlitedb.py:605-630` against
+  `src/engines/table/table_db.cc`). Nothing has ever been run against an actual
+  `ibus-table-createdb` output, so this is a code reading rather than a result.
+  It is also the direction that would *gain* something: their databases carry
+  the `pinyin` and `suggestion` rows ours cannot (see above).
+
+  *The user database — compatible.* Same `phrases` schema, and we write the
+  `user_db.desc` row with `version = '1.00'` that ibus-table checks for
+  (`tabsqlitedb.py:303-320`; a user database without it is treated as
+  incompatible and rebuilt). The paths differ anyway — ours is
+  `<data_dir>/table/` — so the two never actually meet unless a client points
+  them at each other.
+
+  *Them reading **our** `.db` — structurally yes, semantically no.* A table this
+  library compiles is not what `ibus-table-createdb` would produce from the same
+  source, in three ways, and the third is a behaviour change rather than
+  different data:
+
+  1. Glyph filtering removes about half the rows of cangjie5 and quick5.
+  2. Frequency transfer rewrites every frequency at or above the threshold.
+  3. We write `SINGLE_WILDCARD_CHAR = z` into `ime` for tables whose source
+     declared no wildcard — and ibus-table has **no position rule**. Its lookup
+     is a plain `str.replace(single_wildcard_char, '_')`
+     (`tabsqlitedb.py:1121-1126` and `1191-1196`), so under ibus-table a
+     *leading* `z` would become a wildcard too, and cangjie5's 496 `z`-prefixed
+     punctuation codes would be unreachable there. Under this library they work,
+     because `TableProperties::is_wildcard_at()` keeps position 0 literal.
+
+  So the honest description of today's state is **"we read and write the format,
+  and we use their sources to make our own sauce"** — not "our tables are
+  drop-in replacements for theirs". Points 1 and 2 are deliberate improvements
+  that any consumer benefits from. Point 3 is the only one that is actively
+  wrong somewhere else, and it has a cheap fix if strict compatibility is ever
+  wanted: record the derived wildcard under a private `ime` key that ibus-table
+  ignores, instead of the format's own. Not done, because nothing today reads
+  our tables but us, and the standard key is the more honest description of what
+  the table means.
+
 - **`ibus-table-chinese` is GPL-3, and its compiled tables now ship inside
   `pathime-data/`.** Still open, and now with a standing consequence: **no
   further GPL data gets vendored until it is resolved.** That is what closed the
