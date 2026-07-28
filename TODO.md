@@ -12,18 +12,19 @@ deliberate:
   adapter layer, cited by number from `src/` and `docs/*-options.md`.
 - `docs/design-history.md` — the settled design rounds, question by question,
   with the evidence each was answered against and what the answer cost. Its
-  section numbers (§1, §3, §4a–§4c, §5) are the ones code comments cite.
-  **Read it before reopening anything that looks undecided** — most things
-  that look open were closed there, on purpose, with reasons.
+  section numbers (§1, §3, §4a–§4c, §5, §6a–§6c) are the ones code comments
+  cite. **Read it before reopening anything that looks undecided** — most
+  things that look open were closed there, on purpose, with reasons. §6 is the
+  table engine, and is where most of this file's former bulk went.
 
 Status in one paragraph: the build (Linux and Windows), the core (all 44
 public entry points), **all four** adapters — hangul, anthy, pyzy and the
 table engine — options and negotiation including tier 3, the terminal demo
 client, the preedit rule, and the eager candidate strip are built and tested:
-33 suites, all passing on Linux with every backend enabled
+34 suites, all passing on Linux with every backend enabled
 (`docs/testing.md`). The table engine types real Chinese against tables
-compiled out of `ibus-table-chinese`. The detailed ledger is at the top of
-`docs/design-history.md`.
+compiled out of `ibus-table-chinese`, trimmed at build time to a font's glyph
+coverage. The detailed ledger is at the top of `docs/design-history.md`.
 
 ---
 
@@ -55,18 +56,13 @@ does not implement this operation" on Enter over `table-file` went away with
 table enumeration — `adjust_option()` returned `PATHIME_ERROR_UNSUPPORTED` only
 because `valid_value_count` was 0, and it no longer is.
 
-Six questions this engine raised were answered in the round of 2026-07-28 and
-are **built**: char prompts stay in the preedit (the header clause was widened
-to cover key legends rather than the engine changed); the table loads when
-`PATHIME_OPT_TABLE_FILE` is *set*, so a bad name fails at the setter with
-`PATHIME_ERROR_BACKEND`; `PATHIME_OPT_TABLE_PINYIN_FALLBACK` reports itself off
-unless the compiled database really carries pinyin rows; full-width conversion
-(§11.4) runs through `src/punctuation.*`, shared with the pyzy adapter rather
-than transcribed from §11.4, so one option means one thing across both Chinese
-engines; compile-time glyph filtering trims each table to a font's coverage; and
-cangjie5, quick5 and zhuyin now get Apple's `z` wildcard, derived per table
-rather than defaulted. The reasoning belongs in `docs/design-history.md` once
-that file grows a table round (queued below).
+The behaviour questions this engine raised were answered in the round of
+2026-07-28 and are **built**: char prompts, load-on-set, the pinyin-fallback
+honesty fix, shared full-width conversion, compile-time glyph filtering, and the
+derived `z` wildcard. The reasoning is `docs/design-history.md` §6 — read that
+before reopening any of them; the shape decisions taken while the engine was
+written (the single directory, the header boundary, tier 3 behind the seam,
+build-time compilation, enumeration through the option machinery) are §6a.
 
 ### Not implemented, in rough priority order
 
@@ -130,57 +126,25 @@ that file grows a table round (queued below).
 
   **State of the code:** `RULES` is parsed, goucima are compiled into the
   database and `TableDatabase::goucima()` reads them back, so the data is all
-  present. Only the derive-and-insert step is missing.
-
-  State of the code: `RULES` is parsed, goucima are compiled into the database
-  and `TableDatabase::goucima()` reads them back, so the data is all present.
-  Only the derive-and-insert step is missing.
-
-  Two shipped tables declare `USER_CAN_DEFINE_PHRASE`, not one: wubi-jidian86,
-  which also carries `RULES`, and **zhuyin, which does not**. Derivation is
-  defined entirely as applying rules to goucima, so a table without rules
-  derives nothing — zhuyin gets a `goucima` table it never uses. That needs no
-  option, but it does mean the feature would land for exactly one shipped table,
-  which is worth weighing against the discussion above.
+  present. Only the derive-and-insert step is missing — which is why the
+  decision above is about reach and desirability, not effort.
 - **Write batching (§5.3).** Not implemented, and possibly not worth it: the
   spec's checkpoint-after-16-updates is a durability detail, and the user
   database is in WAL mode where SQLite checkpoints on its own. Measure before
   writing anything.
-- **Pinyin mode (§11.2) and suggestion mode (§11.3).** **Decided: not
-  implemented, and the options stay.** Three findings closed this.
+- **Pinyin mode (§11.2) and suggestion mode (§11.3).** **Decided against**, and
+  the reasoning is `docs/design-history.md` §6b — the data would be a third
+  GPL-3 dependency, the modes were never reachable through our key model
+  anyway, and the audience is thinner than it looks. The options remain in the
+  header and now report themselves honestly.
 
-  *The data will not be vendored.* Its source (`pinyin_table.txt.bz2`,
-  `phrase.txt.bz2`) ships with **ibus-table**, not ibus-table-chinese, so
-  taking it means a third GPL-3 dependency. Not while the licensing question
-  below is open.
-
-  *It was never reachable anyway.* ibus-table binds `toggle_pinyin_mode` to
-  `Shift_R` (`org.freedesktop.ibus.engine.table.gschema.xml:50`) — a bare
-  modifier press, which this library's key model cannot express and
-  deliberately never could. `toggle_suggestion_mode` is `Super+Mod4+F6`.
-
-  *And the audience is thinner than it looks.* Cangjie and Quick are the Hong
-  Kong methods, where the user speaks Cantonese and Mandarin pinyin is close to
-  useless to them; the Cantonese analogue would be Jyutping, which ibus-table
-  does not offer. Only wubi-jidian86 targets a Mandarin-speaking audience for
-  whom the fallback is genuinely worth something — and it declares `PINYIN_MODE
-  = TRUE` alongside cangjie5, quick5 and stroke5, which do not benefit.
-
-  What was left was a **bug, not a feature gap**, and it is fixed: tier 3
-  reported `PATHIME_OPT_TABLE_PINYIN_FALLBACK` *on* for those four tables while
-  their compiled `pinyin` table was empty, so the option read as enabled and did
-  nothing. `TableProperties::pinyin_data` now records whether the database
-  actually carries rows, tier 3 consults it, and turning the option on without
-  them is `PATHIME_ERROR_UNSUPPORTED` at the setter as the header always
-  promised.
-
-  *The alternative, if this is ever revisited:* satisfy the fallback from
-  **pyzy** rather than from vendored data. Rejected for now on two grounds, both
-  independent of effort. It would make table input's behaviour depend on
-  `LIBPATHIME_WITH_PYZY`, so turning off an unrelated engine silently removes a
-  table feature; and it would put pyzy's candidate ordering and learning inside
-  a table candidate list, which is exactly the cross-engine inconsistency the
-  "second pinyin" question was asking about.
+  One live note kept here rather than in the history, because it is an
+  alternative rather than a decision: if this is ever revisited, the fallback
+  could be satisfied from **pyzy** instead of vendored data. Rejected for now
+  on two grounds independent of effort — it would make table input depend on
+  `LIBPATHIME_WITH_PYZY`, so disabling an unrelated engine would silently
+  remove a table feature, and it would put pyzy's candidate ordering and
+  learning inside a table candidate list.
 - **One of the nine sort keys (§8.2).** Key 2 (the pinyin tone-suffix penalty)
   is now moot: pinyin mode is not being implemented. Key 8 (Big5 code of the
   first character, Cangjie and Quick only) needs a Big5 mapping this library
@@ -259,46 +223,26 @@ that file grows a table round (queued below).
   taking it would have added a third GPL-3 source. A licensing question about
   what libpathime distributes, not a technical one, and to be pursued
   separately from the engine work.
-- **Glyph-coverage filtering: the compile-time half is built; the runtime half
-  is still deferred.**
+- **Glyph-coverage filtering: the runtime half, and Windows.** The compile-time
+  half is built and `docs/design-history.md` §6b records why it takes the shape
+  it does. Two things remain.
 
-  The purpose, since it is not obvious from the code: a table method is not
-  really a candidate-driven input method. Its whole advantage over pinyin is
-  determinism — Cangjie can be typed with your eyes closed, and unlike pinyin it
-  produces text without ever consulting a completion. Candidates are shown
-  anyway, because we have them. But the stock candidates for a partial code are
-  frequently *obscure*, and that costs twice over: the stock Cangjie table
-  carries roughly twice as many characters as the most capable font, and vastly
-  more than a typical font with nothing like 30,000 glyphs. So a user one
-  keystroke into the weeds sees a candidate list of tofu.
+  **Windows has no generator.** `read_charset()` in
+  `tools/generate-coverage.py` is the only platform-specific piece and knows
+  only fontconfig. That function's docstring is the brief for the session that
+  closes it — `GetFontUnicodeRanges` is the equivalent call, the UTF-16
+  surrogate trap is named, and the instruction is to ship a *second* generated
+  header rather than overwrite the Linux one, because a single map generated on
+  whichever machine ran last is exactly the non-reproducibility the design
+  avoids. `docs/windows-port.md` carries the same note. Nothing is blocked on
+  it.
 
-  Frequency augmentation keeps useful characters at the front; coverage
-  filtering keeps unrenderable ones out entirely.
-
-  **Built (Linux):** `tools/generate-coverage.py` bakes a font's coverage into
-  `src/engines/table/coverage_data.h`, `src/engines/table/coverage.*` reads it,
-  and `tools/table-compile` drops any phrase carrying an uncovered character.
-  The current map is Noto Sans CJK — 44,810 code points in 2,032 ranges — and it
-  removes about half of cangjie5 and quick5, which is the measured version of
-  the "twice as many characters as the most capable font" claim.
-
-  Deliberately *not* the fork's approach of reading a font at build time: that
-  makes a compiled `.db` a function of which fonts the build machine happens to
-  have, so two builds of the same commit ship different data. The map is
-  checked in, the same bargain `variants_data.h` makes with Unicode data.
-  Regeneration sits behind `LIBPATHIME_TABLE_REGENERATE_COVERAGE` (default OFF).
-
-  **Not built: Windows.** `read_charset()` in the generator is the only
-  platform-specific piece, and it currently has only the fontconfig answer. The
-  Windows session that closes this out will find a full brief in that
-  function's docstring — `GetFontUnicodeRanges` is the equivalent call, the
-  surrogate-pair trap is named, and the instruction is to ship a *second*
-  generated header rather than overwrite the Linux one, since a single map
-  generated on whichever machine ran last is the non-reproducibility this whole
-  design avoids. Nothing else is blocked on it.
-
-  **The runtime half is still deferred**, and not only for effort. Four things
-  have to be answered first, and none of them is about tables:
+  **The runtime half is deferred**, and not only for effort. An embedder should
+  be able to *guarantee* their candidate list stays renderable on their target —
+  that is a promise about their UI, not a preference about their table — and the
+  shape it should take is runtime strictly narrowing compile time, so the
+  shipped `.db` stays the upper bound. Four things have to be answered first,
+  and none of them is about tables:
 
   - *What does it mean for the other three backends?* A coverage set that
     filters table candidates but not anthy's or pyzy's would be a promise the
@@ -314,32 +258,6 @@ that file grows a table round (queued below).
   - *Can it be done without touching the vendored trees?* pyzy and anthy choose
     their own output; filtering theirs means intercepting it at the adapter, or
     it means patching submodules, which is the rule this project does not break.
-
-  The shape it should take when it does land is **runtime strictly narrowing
-  compile time**: the shipped `.db` stays the upper bound and a client-supplied
-  set can only remove more, so nothing ever has to be added back to a table that
-  no longer carries it. That is why the compile-time map is taken from a
-  deliberately inclusive font rather than a typical one.
-
-- **Is it worth implementing the input methods the other backends already
-  cover?** **Answered: no, and the question was narrower than it looked.**
-
-  The worry was two code paths reaching the same input method — two places to
-  be inconsistent about candidate order, about `PATHIME_OPT_CHINESE_VARIANT`,
-  about learning — against an API that deliberately presents one behaviour per
-  concept.
-
-  §11.2 turns out not to be a second pinyin IME at all. It is a lookup escape
-  hatch *within* a table method: type pinyin to find a character whose table
-  code you do not know, against the same phrase set, and carry on. It competes
-  with nothing pyzy does. So the general question mostly dissolves, and what is
-  left is the specific one — **should this library ever ship a table that is
-  itself a pinyin table?** ibus-table-chinese has several. The answer is no, for
-  the original reason: that would be a genuine second pinyin, and the
-  inconsistency would be real.
-
-  Recorded here rather than dropped so the option inventory in
-  `docs/ibus-table-options.md` stops reading as undecided.
 
 ### Not verified
 
@@ -362,19 +280,13 @@ that file grows a table round (queued below).
   closed. The table engine has landed, so this is now unblocked — and it should
   pick up `PATHIME_OPT_TABLE_*`, whose doc comments were written before there
   was an implementation to check them against.
-- **`docs/design-history.md` has no round for the table engine.** The decisions
-  taken while writing it — the single-directory layout and the data/behaviour
-  header boundary, tier 3 living behind the seam rather than in the option
-  store, bare-name table resolution, compiling at build time with a tool built
-  from the same sources — are recorded in code comments and in
-  `src/engines/table/README.md` but not in the history. They should be, in the
-  form the other rounds take.
 - **`docs/ibus-table-mapping.md` does not exist.** Every other backend has a
   source-verified API-to-concepts mapping ending in "Impedance mismatches".
   This engine has the spec instead, which is a different document: it describes
-  ibus-table, not the adapter. The mismatches are real (the mid-preedit caret,
-  the commit-key policy, the Return conflict above) and are currently scattered
-  across code comments.
+  ibus-table, not the adapter. The mismatches are real — the mid-preedit caret,
+  the commit-key policy, the char-prompt commit — and are currently split
+  between code comments and `docs/design-history.md` §6, neither of which is
+  the per-backend mapping a reader of the other three would expect to find.
 
 ## Open questions
 

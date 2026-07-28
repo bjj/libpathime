@@ -8,7 +8,8 @@ answer cost. It was split out of `TODO.md` on 2026-07-28; the section numbers
 (§1, §3, §4a, §4b, §4c, §5) are preserved from that file because code
 comments and other docs cite them, and they must not be renumbered. The
 adapter-layer findings that were §2 live in `docs/adapter-findings.md`,
-likewise under their original numbers.
+likewise under their original numbers. §6, the table engine, was written here
+directly rather than carried over, and follows the same rule.
 
 Nothing here is pending. For what is, read `TODO.md`; for the model, read
 `docs/CONCEPTS.md`; for the contract, `include/pathime/pathime.h`.
@@ -59,26 +60,17 @@ Done:
   Space adopts it. The end of §4c records the rulings — optional and why,
   default, adoption, one option spanning anthy and table, the span gap
   accepted — and the strip-selection semantics built with it.
-- **Tests: 31, all passing.** `tests/core/` compiles internal sources directly,
+- **The table engine.** §6 — the fourth engine, written here rather than
+  wrapped, to `docs/ibus-table-spec.md`. Shape in §6a, the behaviour round in
+  §6b, and what was ruled out of scope in §6c. Five tables ship, trimmed at
+  build time to a font's glyph coverage.
+- **Tests: 34, all passing.** `tests/core/` compiles internal sources directly,
   because internal helpers carry no `PATHIME_API` and a shared build would not
   export them. `tests/api/` holds the ABI, lifecycle and options suites plus one
   end-to-end test per engine; those three need their backend's *data*, which is
   why they are the first thing there that is gated —
   `tests/api/CMakeLists.txt` explains why that is a test-environment problem
   rather than a library one.
-
-Landed since, without a round of its own here:
-
-- The table-driven engine, in `src/engines/table/`, to
-  `docs/ibus-table-spec.md`. Its decisions — the single-directory layout with a
-  data/behaviour header boundary rather than a standalone library, tier 3 living
-  behind the seam instead of in the option store, bare-name table resolution
-  against the resource directory, and compiling tables at build time with a tool
-  built from the engine's own sources — are recorded in code comments and in
-  `src/engines/table/README.md`. Writing them up in the form the rounds below
-  take is queued in `TODO.md`.
-
----
 
 ---
 
@@ -1112,3 +1104,196 @@ again:
   `pathime_context_set_candidate_cursor()` rather than forwarding them,
   highlights the hovered entry, keeps the page and the highlight together, and
   names every enum value and flags bit from `pathime_option_value_name()`
+
+---
+
+## 6. The table engine (2026-07-27 / 2026-07-28)
+
+The fourth engine, and the only one written here rather than wrapped. `ibus-table`
+is Python, so there was nothing to link against: it supplied a proven feature set,
+`docs/ibus-table-spec.md` was derived from it clean-room, and the implementation
+answers to that spec. What follows is the decisions taken along the way, in two
+groups — the ones about *shape*, taken while the engine was being built, and the
+ones about *behaviour*, taken in a round of questions the finished engine raised.
+
+### 6a. Shape
+
+**One directory under `src/`, not a library under `engines/`.** The alternative
+considered was a standalone `engines/table/` with its own clean surface, wrapped
+by an adapter in `src/engines/table/` like the other three. Rejected: that
+surface would have needed its own key-event type, its own composition
+representation and its own option carrier, each translated by an adapter that did
+nothing else — a second IME API invented purely so the first one could have
+something to wrap. The three real adapters exist because upstream imposed a shape
+on us; here nothing would have imposed it but the directory choice. `engines/`
+also means something specific in this tree — vendored, never edited — and this
+code is ours.
+
+What replaces the library boundary is a *header* boundary, and it is load-bearing
+rather than decorative: **`table_backend.cc` is the only file in the directory
+that includes `backend.h`.** Nothing else names a `Composition`, a `KeyEvent`, an
+`Output` or an `OptionReader`. That is what lets `tools/table-compile` build the
+parser and the database writer without pulling in the engine, and what lets
+`tests/core/table_test.cc` reach the awkward cases directly. Both link short,
+explicit source lists, so a link error in either is the first sign something has
+reached back across the seam. `src/engines/table/README.md` is the map.
+
+**Tier 3 lives behind the seam, not in the option store.** A table declares the
+behaviour its author chose — `AUTO_COMMIT`, the wildcards, `LANGUAGE_FILTER` —
+and those values apply wherever the client expressed no preference. The value
+belongs to a data file only the backend can read, so `options.cc` consults
+`EngineBackend::declared_number()` / `declared_text()` between the engine store
+and the descriptor default, and the table's declaration never enters the store.
+Two methods rather than one because the option kinds are two, and inventing a
+variant for a seam with one implementor would cost more than the duplication.
+
+**Tables are named, not pathed.** `PATHIME_OPT_TABLE_FILE` takes a bare name
+resolved inside the resource directory. A client picking a table should not have
+to know where the data landed.
+
+**Compiled at build time, by a tool built from the engine's own sources.**
+`ibus-table-chinese` distributes source `.txt` only; upstream compiles it with
+`ibus-table-createdb`, which is part of ibus-table and therefore Python, through a
+pipeline of sed, iconv and awk. `tools/table-compile` replaces all of that with a
+C++ program sharing the data layer, which is what makes the table data build
+identically on Windows.
+
+**Enumeration reuses the option machinery rather than adding entry points.** The
+installed tables are the legal values of `PATHIME_OPT_TABLE_FILE`:
+`pathime_option_info_t::valid_value_count` says how many and
+`pathime_option_value_name()` names each by index, exactly as for an enum. No
+display names, icons or language lists — what comes back is the machine-readable
+key the setter accepts, because presentation is the client's domain. Measured
+first: opening all five tables and reading `ime` costs 1.1 ms, which killed the
+build-time-manifest alternative.
+
+### 6b. Behaviour
+
+Six questions the finished engine raised, answered together.
+
+**Char prompts stay in the preedit; the header's clause is what gave.** Spec §7.4
+makes the essential operation "commit the literal input", so Cangjie `a`+`b`
+commits `ab` while the preedit reads 日月 — against the header's promise that the
+preedit "is the text that would be committed if the composition ended right now".
+Resolved in favour of the display, because `BEGIN_CHAR_PROMPTS` is the *keycap
+legend*: cangjie5 maps `a`→日, `b`→月 … `y`→卜, which is what is printed on a
+Cangjie keyboard. The preedit is the physical keyboard rendered back at the user,
+and that is the feature. Four of the five shipped tables carry prompts, so this is
+the normal case, not an edge. Return dropping to the QWERTY letters is a
+deliberate quirk and a useful one — quick access to Latin text out of a composing
+state. The clause in `pathime_composition_t::preedit` and `docs/CONCEPTS.md` now
+names key legends as a second permitted departure alongside §4c's commit-time
+normalizations. **Cost:** a client reading the preedit as literal committable text
+is wrong for four tables, and has to know it.
+
+**The table loads when `PATHIME_OPT_TABLE_FILE` is set.** Previously
+`declared_number()` read the *loaded* table and would not load one, so the same
+query returned the descriptor default before the first keystroke and the table's
+declaration after it. Now `EngineBackend::prepare_string()` runs before the store
+and a name that does not resolve is `PATHIME_ERROR_BACKEND`. The deciding reason
+was not predictability but attribution: the setter is the last point at which the
+failure can still be blamed on the name that caused it. **Cost:** one setter in
+this API does file I/O and can fail.
+
+**Pinyin mode (§11.2) and suggestion mode (§11.3) are not implemented, and the
+options stay.** Three findings closed this. The data ships with **ibus-table**,
+not ibus-table-chinese, so taking it means a third GPL-3 dependency while the
+licensing question is open. It was never reachable anyway: ibus-table binds
+`toggle_pinyin_mode` to `Shift_R`, a bare modifier press this library's key model
+cannot express. And the audience is thinner than it looks — Cangjie and Quick are
+the Hong Kong methods, where the user speaks Cantonese and Mandarin pinyin is
+close to useless to them. What *was* wrong was a lie rather than a gap: tier 3
+reported the option on for four tables whose compiled `pinyin` table is empty.
+`TableProperties::pinyin_data` now records whether the rows exist.
+
+This also resolved the wider question of whether to reimplement input methods
+pyzy already covers. §11.2 turns out not to be a second pinyin at all — it is a
+lookup escape hatch *within* a table method, for finding a character whose table
+code you do not know. So the duplication worry mostly dissolved; what remains is
+the narrower ruling that **this library will not ship a table that is itself a
+pinyin table**, which would be a genuine second pinyin.
+
+**Full-width conversion (§11.4) is shared with pyzy, not transcribed from the
+spec.** The two references disagree on four characters — `^`, `[`, `<`, and the
+period, where ibus-table switches on sentence position while ibus-pinyin keeps
+"1.5" intact. Following each per engine would make
+`PATHIME_OPT_PUNCTUATION_WIDTH` mean two things depending on which Chinese engine
+a client picked, against an API that presents one behaviour per concept. So
+`src/engines/pyzy/punctuation.*` was hoisted to `src/punctuation.*` — no
+`engines/common/`, because shared code does not get a subdirectory — and the
+variant mapping widened from pyzy's two values to all five. Which table applies
+comes from `PATHIME_OPT_CHINESE_VARIANT`, which for a table resolves through tier
+3 to its own `LANGUAGE_FILTER`, so cangjie5 (`cm1`) punctuates the traditional way
+and wubi-jidian86 (`cm2`) the simplified way with no client involvement.
+**Cost:** ibus-table parity on those four characters.
+
+One consequence had to be swallowed rather than chosen: a CJK table now claims
+*every* printable ASCII key, including ones the conversion leaves unchanged. The
+first attempt handled only keys the conversion changed, which is tidier — but the
+documented default is full-width punctuation with half-width Latin, so a digit
+converts to itself, and an engine that declined it would never see the `1` in
+"1.5", never disarm the decimal-point rule, and would commit "1。5". A key the
+client inserts itself is one the engine never saw.
+
+**Glyph filtering: build-time, from a checked-in map.** A table method is not
+really a candidate-driven input method — Cangjie's advantage is that it is
+deterministic — but candidates get shown anyway, and the stock ones for a partial
+code are frequently obscure. Measured: filtering cangjie5 and quick5 to Noto Sans
+CJK removes about half of each, which is the empirical form of "twice as many
+characters as the most capable font". Frequency augmentation keeps useful
+characters at the front; this keeps unrenderable ones out.
+
+Deliberately *not* the fork's approach of shelling out to `fc-query` during
+preprocessing: that makes a compiled `.db` a function of which fonts the build
+machine happens to have, so two builds of the same commit ship different data.
+The map is generated once into `coverage_data.h` and checked in — the same bargain
+`variants_data.h` makes with Unicode data — with regeneration behind a CMake
+option defaulting OFF. The map comes from a deliberately *inclusive* font because
+it is the upper bound: the deferred runtime half can only narrow it, and narrowing
+only works if nothing has to be added back to a table that no longer carries it.
+`coverage.*` is the one pair in `engines/table/` the **library does not link**;
+only the compile tool does.
+
+**The `z` wildcard is derived per table, not defaulted once.** Apple's Cangjie
+makes `Z` stand for a part of a decomposition the user cannot recall, which is a
+real ergonomic win on a method whose difficulty is precisely recalling
+decompositions. But `z` is not free everywhere: erbi, scj6, yong, easy-big, wu,
+cantonhk, cangjie3 and cangjie-big all use it inside a code — and so does the
+shipped **wubi-jidian86**, whose punctuation codes are spelled `zzbd`. A tier-4
+default in `options.cc` would have broken them silently and kept breaking them as
+tables were added. So `tools/table-compile` checks the rows being compiled and
+declares `SINGLE_WILDCARD_CHAR` only where `z` never appears after the first key.
+cangjie5, quick5 and zhuyin get it; wubi-jidian86 is declined by the check, which
+is the check earning its place rather than a hypothetical.
+
+The leading occurrences survive because of a second rule: a wildcard that is *also*
+one of the table's own input characters is literal at position 0 and a wildcard
+everywhere after (`TableProperties::is_wildcard_at()`). Nothing else can
+distinguish the two readings, and the literal one is the one that loses data —
+cangjie5's 496 `z`-prefixed rows are its punctuation codes, reachable no other
+way, whereas a search beginning with a wildcard is a search for everything.
+
+### 6c. What was ruled out of scope, and what compatibility actually means
+
+**User-derived phrases (§10.2) are out of scope for the first phase.** The
+deciding argument is reach: only wubi-jidian86 can use the feature at all, and
+that is the table this library has least reason to lead with. The investigation
+is preserved in `TODO.md` because it found something worth not rediscovering —
+the feature depends on **auxiliary text**, which §4c removed on purpose.
+ibus-table shows the code it would derive as `#: <code>` while the phrase sits in
+the preedit; without that channel the feature files vocabulary under codes the
+user is never told. The same reach test now applies by default to anything else
+reachable only through wubi.
+
+**"Compatible with ibus-table" is true of the format and not of the tables.** The
+schemas are identical and the user database interoperates, so reading a
+distro-installed `.db` should work — untested, but a code reading against
+`tabsqlitedb.py`. The reverse is where the claim has to be qualified: a table this
+library compiles is *not* what `ibus-table-createdb` would produce from the same
+source. Glyph filtering removes rows, frequency transfer rewrites frequencies, and
+the derived `z` wildcard is a behaviour change rather than different data —
+ibus-table's lookup does a plain `str.replace` with no position rule, so under
+ibus-table a leading `z` would become a wildcard too and cangjie5's punctuation
+codes would be unreachable there. The honest description is **"we read and write
+the format, and we use their sources to make our own sauce"**. `TODO.md` carries
+the detail and the cheap fix, should strict compatibility ever be wanted.
