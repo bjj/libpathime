@@ -3,14 +3,14 @@
 # Two groups, per the convention in ../CMakeLists.txt:
 #
 #   hangul.vendored.*  libhangul's own test programs, wired up here because
-#                      the top-level build descends into libhangul/hangul
+#                      the top-level build descends into engines/libhangul/hangul
 #                      rather than the libhangul top level (whose CMakeLists
 #                      pulls in po/ and needs msgfmt), so upstream's
-#                      libhangul/test/CMakeLists.txt is never processed.
+#                      engines/libhangul/test/CMakeLists.txt is never processed.
 #   hangul.<name>      tests written for libpathime, whose job is to make the
 #                      Windows build prove it behaves like the Linux one.
 #
-# Nothing under libhangul/ is modified: the vendored sources are compiled from
+# Nothing under engines/libhangul/ is modified: the vendored sources are compiled from
 # where they sit, with the compile definitions upstream's test/CMakeLists.txt
 # gives them (retargeted at this tree's paths).
 
@@ -18,9 +18,9 @@
 # own CMakeLists only sets a PRIVATE one — so every consumer has to name the
 # header directory itself. Upstream's tests dodge this with "../hangul/hangul.h";
 # ours use <hangul.h>, which is also how an installed libhangul is consumed.
-set(_hangul_include_dir "${PROJECT_SOURCE_DIR}/libhangul/hangul")
+set(_hangul_include_dir "${PROJECT_SOURCE_DIR}/engines/libhangul/hangul")
 
-set(_hanja_txt "${PROJECT_SOURCE_DIR}/libhangul/data/hanja/hanja.txt")
+set(_hanja_txt "${PROJECT_SOURCE_DIR}/engines/libhangul/data/hanja/hanja.txt")
 
 # ---------------------------------------------------------------------------
 # Group 1: the vendored programs.
@@ -44,7 +44,7 @@ endforeach()
 
 # --- hanja.c: dictionary load + prefix match, driven from stdin.
 add_executable(hangul_vendored_hanja
-  "${PROJECT_SOURCE_DIR}/libhangul/test/hanja.c")
+  "${PROJECT_SOURCE_DIR}/engines/libhangul/test/hanja.c")
 target_link_libraries(hangul_vendored_hanja PRIVATE hangul)
 # Upstream points TEST_HANJA_TXT at ${CMAKE_SOURCE_DIR}/data/hanja/hanja.txt,
 # which is correct when libhangul is the top-level project and wrong here. It
@@ -76,7 +76,7 @@ add_test(NAME hangul.vendored.hanja
 find_package(Iconv QUIET)
 if(Iconv_FOUND)
   add_executable(hangul_vendored_hangul
-    "${PROJECT_SOURCE_DIR}/libhangul/test/hangul.c")
+    "${PROJECT_SOURCE_DIR}/engines/libhangul/test/hangul.c")
   target_link_libraries(hangul_vendored_hangul PRIVATE hangul Iconv::Iconv)
   # Inert here: the source only calls hangul_init() under
   # ENABLE_EXTERNAL_KEYBOARDS, which the top-level CMakeLists turns off (it
@@ -95,7 +95,7 @@ if(Iconv_FOUND)
 else()
   message(STATUS
     "libpathime: hangul.vendored.hangul skipped — no iconv "
-    "(libhangul/test/hangul.c uses it to print UCS-4 as UTF-8)")
+    "(engines/libhangul/test/hangul.c uses it to print UCS-4 as UTF-8)")
 endif()
 
 # --- test.c: upstream's Check suite.
@@ -123,10 +123,10 @@ endif()
 
 if(CHECK_FOUND AND LIBPATHIME_SIZEOF_WCHAR_T EQUAL 4)
   add_executable(hangul_vendored_unittest
-    "${PROJECT_SOURCE_DIR}/libhangul/test/test.c")
+    "${PROJECT_SOURCE_DIR}/engines/libhangul/test/test.c")
   target_compile_definitions(hangul_vendored_unittest PRIVATE
     TEST_LIBHANGUL_KEYBOARD_PATH=\"${PROJECT_BINARY_DIR}/data/keyboards\"
-    TEST_SOURCE_DIR=\"${PROJECT_SOURCE_DIR}/libhangul/test\")
+    TEST_SOURCE_DIR=\"${PROJECT_SOURCE_DIR}/engines/libhangul/test\")
   target_include_directories(hangul_vendored_unittest PRIVATE ${CHECK_INCLUDE_DIRS})
   target_link_libraries(hangul_vendored_unittest PRIVATE hangul ${CHECK_LDFLAGS})
   add_test(NAME hangul.vendored.unittest

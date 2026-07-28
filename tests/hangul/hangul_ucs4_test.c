@@ -11,7 +11,7 @@
  * in the library, not in the test's idea of a character.
  *
  * The syllable-iterator and jamo_to_cjamo cases are transcribed from
- * libhangul/test/test.c, which cannot run here (no Check on Windows).
+ * engines/libhangul/test/test.c, which cannot run here (no Check on Windows).
  * The rest is ours.
  *
  * Kept pure ASCII deliberately -- see the note in hangul_ic_test.c.
@@ -115,7 +115,7 @@ static void test_classification(void)
     HT_CHECK(!hangul_is_syllable(0x1D11Eu)); /* non-BMP must not be mistaken */
 }
 
-/* Transcribed from libhangul/test/test.c: test_hangul_jamo_to_cjamo. */
+/* Transcribed from engines/libhangul/test/test.c: test_hangul_jamo_to_cjamo. */
 static void test_jamo_to_cjamo(void)
 {
     HT_CHECK(hangul_jamo_to_cjamo(0x11F2) == 0x3183);
@@ -123,7 +123,7 @@ static void test_jamo_to_cjamo(void)
     HT_CHECK(hangul_jamo_to_cjamo(0xD7F9) == 0x3149);
 }
 
-/* Transcribed from libhangul/test/test.c: test_syllable_iterator.
+/* Transcribed from engines/libhangul/test/test.c: test_syllable_iterator.
  * The iterator walks a raw ucschar array by pointer arithmetic, so every
  * expectation below is an element offset -- the one thing that changes if the
  * element width is ever wrong. */

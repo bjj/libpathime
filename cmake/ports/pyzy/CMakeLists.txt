@@ -6,7 +6,7 @@
 # Python codegen is needed to build the library — Python is used only for the
 # optional runtime android.db.
 
-set(PYZY_SRC "${CMAKE_SOURCE_DIR}/pyzy")
+set(PYZY_SRC "${CMAKE_SOURCE_DIR}/engines/pyzy")
 
 # --- config.h (HAVE_LIBUUID; HAVE_OPENCC intentionally left undefined) ------
 set(HAVE_LIBUUID 1)   # libuuid on Unix; the Rpcrt4 shim on Windows
@@ -51,7 +51,7 @@ configure_file(config.h.in "${CMAKE_CURRENT_BINARY_DIR}/config.h" @ONLY)
 #      where wchar_t is 32-bit; where it is 16-bit the zhuyin auxiliary text
 #      silently comes out empty.
 #
-# The mirror is produced at configure time: editing pyzy/src needs a re-run of
+# The mirror is produced at configure time: editing engines/pyzy/src needs a re-run of
 # cmake to take effect.
 set(_pyzy_dir "${CMAKE_CURRENT_BINARY_DIR}/src")
 file(GLOB _pyzy_mirror_files "${PYZY_SRC}/src/*.h" "${PYZY_SRC}/src/*.cc")

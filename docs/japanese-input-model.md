@@ -132,7 +132,7 @@ than history-driven when you meet it casually.
 ## 4. Prediction is history completion, and nothing else
 
 `anthy_set_prediction_string` fills `ac->prediction` from
-`anthy_traverse_record_for_prediction` (`anthy-unicode/src-main/context.c:484`) —
+`anthy_traverse_record_for_prediction` (`engines/anthy-unicode/src-main/context.c:484`) —
 the user's record. Not the dictionary.
 
 **measured**, fresh record: every reading tried returned **0 predictions**. After

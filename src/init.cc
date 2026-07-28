@@ -93,7 +93,7 @@ std::string env_or_empty(const char *name)
  * The header commits to "a platform-appropriate default beneath the user's
  * configuration directory", so this is a real decision rather than a
  * placeholder, and it is made the same way libhangul makes it for its own
- * keyboard data (libhangul/hangul/hangulkeyboard.c:913-949): the platform's
+ * keyboard data (engines/libhangul/hangul/hangulkeyboard.c:913-949): the platform's
  * per-user roaming application-data directory on Windows, the XDG
  * configuration directory on everything else.
  *
@@ -315,7 +315,7 @@ pathime_status_t pathime_init(const pathime_init_params_t *params)
      *
      * libhangul is deliberately absent, against what docs/adapter-findings.md, Finding 3 used
      * to say. hangul_init() and hangul_fini() exist only under
-     * ENABLE_EXTERNAL_KEYBOARDS (libhangul/hangul/hangul.h:99-103,
+     * ENABLE_EXTERNAL_KEYBOARDS (engines/libhangul/hangul/hangul.h:99-103,
      * hangulkeyboard.c:994-1033), which our top-level CMakeLists.txt:34 turns
      * off to avoid an EXPAT dependency and a sed-based codegen step. Without it
      * there is no keyboard registry to populate: the nine built-in layouts are

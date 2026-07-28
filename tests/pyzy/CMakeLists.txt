@@ -59,7 +59,7 @@ endif()
 #     resolve relative to themselves, as they do when pyzy compiles itself.
 #
 # Both are configure-time copies of ${PYZY_EFFECTIVE_SRC_DIR} — on Windows the
-# rewritten mirror, not pyzy/src. Building a test against the raw submodule
+# rewritten mirror, not engines/pyzy/src. Building a test against the raw submodule
 # headers there would give it a String with a different operator<< set from
 # the one inside the DLL.
 file(COPY

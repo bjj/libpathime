@@ -8,11 +8,11 @@ classified for a future libpathime options API. It does not propose that API; se
 the current design-stage thinking (in particular the two-layer global/process-init vs.
 per-context lifetime model, which this document's "Scope" column is expressed against).
 
-Sources read: `anthy-unicode/anthy/anthy.h`, `anthy-unicode/anthy/conf.h`,
-`anthy-unicode/src-main/main.c`, `anthy-unicode/src-main/main.h`,
-`anthy-unicode/src-main/context.c`, `anthy-unicode/src-diclib/conf.c`,
-`anthy-unicode/src-worddic/priv_dic.c`, `anthy-unicode/src-worddic/dic_personality.h`,
-`anthy-unicode/anthy/{ordering,prediction,record,logger}.h`,
+Sources read: `engines/anthy-unicode/anthy/anthy.h`, `engines/anthy-unicode/anthy/conf.h`,
+`engines/anthy-unicode/src-main/main.c`, `engines/anthy-unicode/src-main/main.h`,
+`engines/anthy-unicode/src-main/context.c`, `engines/anthy-unicode/src-diclib/conf.c`,
+`engines/anthy-unicode/src-worddic/priv_dic.c`, `engines/anthy-unicode/src-worddic/dic_personality.h`,
+`engines/anthy-unicode/anthy/{ordering,prediction,record,logger}.h`,
 `refs/ibus-anthy/data/org.freedesktop.ibus.engine.anthy.gschema.xml.in`,
 `refs/ibus-anthy/engine/python3/engine.py`, `refs/ibus-anthy/engine/python3/jastring.py`,
 `refs/ibus-anthy/setup/python3/anthyprefs.py`.

@@ -70,7 +70,7 @@ if(LIBPATHIME_WITH_HANGUL)
   # libhangul's target publishes no interface include directory (its own
   # CMakeLists sets only a PRIVATE one), so consumers name it themselves.
   target_include_directories(pathime PRIVATE
-    "${PROJECT_SOURCE_DIR}/libhangul/hangul")
+    "${PROJECT_SOURCE_DIR}/engines/libhangul/hangul")
 endif()
 
 if(LIBPATHIME_WITH_ANTHY)
@@ -102,7 +102,7 @@ if(LIBPATHIME_WITH_PYZY)
   # This is the same trick tests/pyzy/CMakeLists.txt uses, minus the generated
   # forwarding headers — those exist there to reach pyzy's *private* headers,
   # which an adapter has no business touching. Copying from
-  # PYZY_EFFECTIVE_SRC_DIR rather than pyzy/src matters on Windows, where it is
+  # PYZY_EFFECTIVE_SRC_DIR rather than engines/pyzy/src matters on Windows, where it is
   # the rewritten mirror the DLL was actually built from.
   if(NOT PYZY_EFFECTIVE_SRC_DIR)
     message(FATAL_ERROR

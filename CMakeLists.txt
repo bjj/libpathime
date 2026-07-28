@@ -9,7 +9,8 @@
 # Layout:
 #   cmake/               helper modules + Windows compat shims
 #   cmake/ports/<name>/  our native CMake ports of submodules that ship no CMake
-#   libhangul/           consumed via its own upstream CMake (add_subdirectory)
+#   engines/<name>/      the vendored submodules; libhangul is consumed via
+#                        its own upstream CMake (add_subdirectory)
 #   src/                 the libpathime library target
 cmake_minimum_required(VERSION 3.21)
 
@@ -36,12 +37,12 @@ if(LIBPATHIME_WITH_HANGUL)
   set(ENABLE_EXTERNAL_KEYBOARDS OFF)  # avoids EXPAT + a `sed -i` codegen step
   include(CheckIncludeFile)
   check_include_file(glob.h HAVE_GLOB_H)
-  configure_file("${CMAKE_CURRENT_SOURCE_DIR}/libhangul/config.h.cmake.in"
+  configure_file("${CMAKE_CURRENT_SOURCE_DIR}/engines/libhangul/config.h.cmake.in"
                  "${CMAKE_BINARY_DIR}/config.h")
-  set(LIBHANGUL_SOVERSION_MAJOR 1)  # values from libhangul/CMakeLists.txt:24-26
+  set(LIBHANGUL_SOVERSION_MAJOR 1)  # values from engines/libhangul/CMakeLists.txt:24-26
   set(LIBHANGUL_SOVERSION_MINOR 1)
   set(LIBHANGUL_SOVERSION_PATCH 0)
-  add_subdirectory(libhangul/hangul)
+  add_subdirectory(engines/libhangul/hangul)
   add_library(libpathime::hangul ALIAS hangul)
   # Upstream's install() gives a single bare DESTINATION, which on Windows puts
   # the DLL in lib/ alongside its import library — where the loader will never

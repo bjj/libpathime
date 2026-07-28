@@ -11,7 +11,7 @@
  * it would silently return the wrong hanja for a key. Hence a test.
  *
  * Three dictionaries are exercised:
- *   1. the real 6 MB libhangul/data/hanja/hanja.txt, for a key far enough into
+ *   1. the real 6 MB engines/libhangul/data/hanja/hanja.txt, for a key far enough into
  *      the file that the recorded offset is large and the seek is real;
  *   2. a small generated dictionary with LF line endings;
  *   3. the same content with CRLF line endings.

@@ -1,6 +1,6 @@
 # Small hanja dictionary for the hangul.vendored.hanja test.
 #
-# Format (see the HanjaTable docs in libhangul/hangul/hanja.c): UTF-8,
+# Format (see the HanjaTable docs in engines/libhangul/hangul/hanja.c): UTF-8,
 # key:value:comment, one entry per line, sorted ascending by key bytes, '#'
 # introduces a comment line. Keeping the dictionary tiny and ours keeps the
 # expected output stable — driving the vendored program against the shipped

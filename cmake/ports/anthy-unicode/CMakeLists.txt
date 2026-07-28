@@ -6,7 +6,7 @@
 # pipeline that compiles the `anthy.dic` dictionary. Source lists are copied
 # verbatim from the per-directory meson.build files.
 
-set(ANTHY_SRC "${CMAKE_SOURCE_DIR}/anthy-unicode")
+set(ANTHY_SRC "${CMAKE_SOURCE_DIR}/engines/anthy-unicode")
 
 # --- config.h ---------------------------------------------------------------
 include(CheckFunctionExists)

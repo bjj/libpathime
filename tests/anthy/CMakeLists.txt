@@ -3,7 +3,7 @@
 # Two groups, both registered under the `anthy.` prefix:
 #
 #   anthy.vendor.*  upstream's own test/ programs, wired up the way
-#                   anthy-unicode/test/meson.build wires them.
+#                   engines/anthy-unicode/test/meson.build wires them.
 #   anthy.*         tests written here, whose job is to show that the Windows
 #                   port behaves the same as the Linux one. They are plain C11
 #                   and are meant to run on both.
@@ -69,7 +69,7 @@ function(_anthy_test_exe target)
 endfunction()
 
 # ---------------------------------------------------------------------------
-# Upstream's suite (anthy-unicode/test/meson.build)
+# Upstream's suite (engines/anthy-unicode/test/meson.build)
 # ---------------------------------------------------------------------------
 #
 # SRCDIR and TEST_HOME are compiled in, exactly as meson does it. TEST_HOME

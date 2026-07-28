@@ -178,7 +178,7 @@ linking `libpathime::pathime` needs no further wiring.
   prints the configuration summary.
 - `cmake/LibpathimeCompat.cmake`, `cmake/compat/win32/` — the Windows compat
   layer; `docs/windows-port.md`.
-- `libhangul/` ships modern CMake, so the build descends into its `hangul/`
+- `engines/libhangul/` ships modern CMake, so the build descends into its `hangul/`
   library directory (skipping its `po/` and `tools/`, which need gettext) and
   generates its `config.h`.
 - `cmake/ports/anthy-unicode/`, `cmake/ports/pyzy/` — native CMake ports for the

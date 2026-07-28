@@ -2,9 +2,9 @@
  *
  * Configured into the build tree by tests/pyzy/CMakeLists.txt; @VAR@ is
  * substituted with the directory whose sources the pyzy library was actually
- * built from (pyzy/src on Unix, the rewritten mirror on Windows).
+ * built from (engines/pyzy/src on Unix, the rewritten mirror on Windows).
  *
- * Why the indirection: pyzy/src/String.h shadows the C library's <string.h> on
+ * Why the indirection: engines/pyzy/src/String.h shadows the C library's <string.h> on
  * a case-insensitive filesystem, so that directory must never appear in an
  * include path — see the header comment in cmake/ports/pyzy/CMakeLists.txt.
  * pyzy's own sources dodge this because they sit *in* src/ and include each

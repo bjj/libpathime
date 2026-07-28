@@ -1,6 +1,6 @@
 # CTest driver for libhangul's two vendored test programs.
 #
-# libhangul/test/hangul.c and hanja.c are not self-checking tests: they are
+# engines/libhangul/test/hangul.c and hanja.c are not self-checking tests: they are
 # stdin -> stdout filters written to be driven by hand. To use them as
 # regression tests something has to feed them and judge the result, and
 # add_test() cannot redirect stdin. This script is that something; it is run

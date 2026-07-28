@@ -1,7 +1,7 @@
 /*
  * libhangul input-context / automata tests.
  *
- * Why this exists when libhangul/test/test.c already covers the same ground:
+ * Why this exists when engines/libhangul/test/test.c already covers the same ground:
  * that file is written against the Check framework and against a 32-bit
  * wchar_t (see hangul_test_util.h). Check is not present on a stock Windows
  * host and the wchar_t assumption is wrong there even when it is, so the whole
@@ -10,7 +10,7 @@
  * plain C11 against ucschar, so that Linux and Windows are held to one
  * standard.
  *
- * The expected values are transcribed from libhangul/test/test.c as code
+ * The expected values are transcribed from engines/libhangul/test/test.c as code
  * points. The source is kept pure ASCII on purpose: MSVC interprets narrow and
  * wide literals in a non-BOM file using the host ANSI code page unless it is
  * told otherwise, so a file containing Hangul would mean different things to

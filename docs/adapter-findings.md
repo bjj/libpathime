@@ -37,7 +37,7 @@ separate from per-context handles (`HangulInputContext*`, `anthy_context_t`,
 **Corrected during the `src/` stub-out:** this finding used to name libhangul's
 keyboard registry via `hangul_init()` as a third case. It is not one in our
 build. `hangul_init()`/`hangul_fini()` exist only under
-`ENABLE_EXTERNAL_KEYBOARDS` (`libhangul/hangul/hangul.h:99-103`,
+`ENABLE_EXTERNAL_KEYBOARDS` (`engines/libhangul/hangul/hangul.h:99-103`,
 `hangulkeyboard.c:994-1033`), which the top-level `CMakeLists.txt:34` turns off
 to avoid an EXPAT dependency and a `sed -i` codegen step. Without it the nine
 built-in layouts are static tables and hangul has **no** process-global setup at

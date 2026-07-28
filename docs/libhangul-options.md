@@ -19,8 +19,8 @@ struct vs. per-context struct).
 
 ## 1. libhangul library-level options
 
-Source consulted: `libhangul/hangul/hangul.h` (public API declarations),
-`libhangul/hangul/hangulinputcontext.c` (implementation), `libhangul/hangul/hangulkeyboard.c`
+Source consulted: `engines/libhangul/hangul/hangul.h` (public API declarations),
+`engines/libhangul/hangul/hangulinputcontext.c` (implementation), `engines/libhangul/hangul/hangulkeyboard.c`
 (keyboard registry).
 
 ### 1.1 Summary table

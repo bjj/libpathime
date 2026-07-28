@@ -39,13 +39,13 @@ refs/                    # Local reference clones — gitignored, not submodules
   ibus-table/            # Self-contained Python engine — the reference for our own table engine
   ibus-table-chinese/    # Table sources (Wubi, Cangjie, …) for use as test data (bjj/ibus-table-chinese)
 
-libhangul/               # Submodule — Korean input library
-anthy-unicode/           # Submodule — Japanese kana-kanji conversion library
-pyzy/                    # Submodule — Chinese Pinyin/Bopomofo conversion library
+engines/                 # The vendored backend libraries, as submodules
+  libhangul/             # Korean input library
+  anthy-unicode/         # Japanese kana-kanji conversion library
+  pyzy/                  # Chinese Pinyin/Bopomofo conversion library
 ```
 
-After cloning, `git submodule update --init --recursive`. `SUBMODULES.md` has
-upstream URLs and pkg-config details.
+After cloning, `git submodule update --init --recursive`.
 
 ## Where to look
 

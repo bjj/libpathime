@@ -13,7 +13,7 @@
  *
  *  1. hangul_ic_process() takes one US-QWERTY ASCII int. There is no modifier
  *     state: case *is* the shift state, and the value indexes a 0x80-entry
- *     table (libhangul/hangul/hangulkeyboard.c:70, :444-460) whose contents
+ *     table (engines/libhangul/hangul/hangulkeyboard.c:70, :444-460) whose contents
  *     depend on the selected layout.
  *  2. The preedit and commit strings are UCS-4, borrowed, and overwritten at
  *     the *start* of the next process/backspace call
@@ -46,7 +46,7 @@ namespace {
  *
  * The nine values of PATHIME_OPT_HANGUL_LAYOUT against the nine built-in
  * tables. Every id below was read out of the built-in array in
- * libhangul/hangul/hangulkeyboard.c:133-217 — the HangulKeyboard literals and
+ * engines/libhangul/hangul/hangulkeyboard.c:133-217 — the HangulKeyboard literals and
  * the hangul_builtin_keyboards[] list that indexes them — and then confirmed
  * at runtime by enumerating hangul_keyboard_list_get_keyboard_id() and looking
  * each one up again. Three of them are not what a reader would guess, which is
@@ -654,7 +654,7 @@ public:
 
 /*
  * Both no-ops, and neither can fail. hangul_init() and hangul_fini() exist
- * only under ENABLE_EXTERNAL_KEYBOARDS (libhangul/hangul/hangul.h:99-103),
+ * only under ENABLE_EXTERNAL_KEYBOARDS (engines/libhangul/hangul/hangul.h:99-103),
  * which the top-level CMakeLists.txt:34 turns off, and the nine built-in
  * layouts are static tables that resolve without any initialization — so
  * hangul is the one backend with no process-global setup at all. src/init.cc

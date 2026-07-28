@@ -6,7 +6,7 @@
  * borrow the host's wide-character machinery.
  *
  * libhangul's public API speaks `ucschar`, a typedef for uint32_t (hangul.h).
- * Upstream's own suite (libhangul/test/test.c) compares those buffers with
+ * Upstream's own suite (engines/libhangul/test/test.c) compares those buffers with
  *
  *     wcscmp((const wchar_t*)hangul_ic_get_preedit_string(ic), L"...")
  *

@@ -526,7 +526,7 @@ without a backend whose list length genuinely misleads.
   because the shape of the answer depended on it: anthy knows its total for free
   (`anthy_get_segment_stat().nr_candidate`), pyzy genuinely does not (candidates
   fill twelve at a time from a SQLite query, `FILL_GRAN` in
-  `pyzy/src/PhraseEditor.h:30`), hangul has none, and the table engine's will be
+  `engines/pyzy/src/PhraseEditor.h:30`), hangul has none, and the table engine's will be
   ours. So the cap is not a wart that could be removed by enumerating
   everything: pyzy is what it exists for.
 
@@ -1000,7 +1000,7 @@ again:
 
 - **pyzy's user-database save is handled — do not go looking for a save call.**
   This used to read as an open obligation: `Database` schedules its save with
-  `g_timeout_add_seconds` (`pyzy/src/Database.h:98-101`) and the timeout never
+  `g_timeout_add_seconds` (`engines/pyzy/src/Database.h:98-101`) and the timeout never
   fires, because nothing runs a `GMainLoop`. But the timeout id is still set,
   which is exactly what `~Database` tests before saving, so
   `Database::finalize()` at our global-shutdown does the save. Recorded because

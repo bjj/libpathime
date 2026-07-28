@@ -13,7 +13,8 @@ than merely compiling.
 
 ## The rule
 
-Nothing under `libhangul/`, `anthy-unicode/` or `pyzy/` is ever edited. A
+Nothing under `engines/` — `libhangul/`, `anthy-unicode/`, `pyzy/` — is ever
+edited. A
 vendored source that will not compile as it stands is handled by one of the
 three mechanisms below, never by a patch to the submodule tree.
 
@@ -41,29 +42,29 @@ change to reach the copy.
 
 Two of them are not Windows-specific and are generated on every platform:
 
-- `anthy-unicode/src-diclib/conf.c` expands `${NAME}` references inside every
+- `engines/anthy-unicode/src-diclib/conf.c` expands `${NAME}` references inside every
   value stored, and reads its compiled-in conf file unconditionally. The copy
   stores `anthy_conf_override()` values verbatim and treats an empty `CONFFILE`
   as "there is no conf file", which together make the override API an exact and
   complete way to configure anthy.
-- `pyzy/src/Database.cc` and `SpecialPhraseTable.cc` name their data by a
+- `engines/pyzy/src/Database.cc` and `SpecialPhraseTable.cc` name their data by a
   compiled-in `PKGDATADIR` and by the process's working directory. The copies
   take it from `pyzy_set_data_dir()` instead — `DataDir.h`, which the port adds
   to pyzy.
 
 The Windows-only ones:
 
-- `anthy-unicode/src-diclib/alloc.c` casts heap pointers through `unsigned
+- `engines/anthy-unicode/src-diclib/alloc.c` casts heap pointers through `unsigned
   long`, which is 32-bit under LLP64; the copy uses `uintptr_t`.
-- `anthy-unicode/src-diclib/file_dic.c` walks paths POSIX-style and so cannot
+- `engines/anthy-unicode/src-diclib/file_dic.c` walks paths POSIX-style and so cannot
   create `%USERPROFILE%\.config\anthy`; the copy teaches it drive letters and
   `\`. This is what lets `pathime_init_params_t::data_dir` name a multi-level
   Windows path that does not exist yet.
-- `anthy-unicode/src-diclib/filemap.c` opens the dictionary with the narrow
+- `engines/anthy-unicode/src-diclib/filemap.c` opens the dictionary with the narrow
   `open()`, which decodes its argument in the active code page; the copy
   converts from UTF-8 and calls `_wopen`, so an install path outside that code
   page still works.
-- `pyzy/src/`'s Windows fixes ride on the same mirror as the data-directory
+- `engines/pyzy/src/`'s Windows fixes ride on the same mirror as the data-directory
   change above. `PinyinParserTable.h` uses GNU labelled-field initialisers;
   `String.h` is missing `operator<<` overloads that only LP64 made unnecessary;
   `PhraseEditor.h` forward-declares `class Config` where it is a `struct`,
@@ -71,7 +72,7 @@ The Windows-only ones:
   `const wchar_t *` to UCS-4, which is only correct where `wchar_t` is 32 bits.
 
 Consumers of pyzy's headers must use `PYZY_EFFECTIVE_SRC_DIR` rather than
-`pyzy/src`: the mirror is what the library was actually built from, on every
+`engines/pyzy/src`: the mirror is what the library was actually built from, on every
 platform. `src/CMakeLists.txt` does this when it stages the public headers for
 the adapter.
 
