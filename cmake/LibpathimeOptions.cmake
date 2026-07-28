@@ -26,6 +26,21 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # Shared libraries need PIC; also lets the codegen host tools link the libs.
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# --- Parallel compilation with MSBuild ---------------------------------------
+# MSBuild has two independent levels of parallelism and neither is on by
+# default. `cmake --build -j` gives it the first (/m: several .vcxproj at once)
+# — the build presets pass it. The second is per-project: without /MP, the
+# ClCompile task hands cl.exe one source file at a time, so a 13-file library
+# like anthy's src-worddic compiles on one core no matter what /m is set to.
+#
+# Restricted to real cl.exe on a multi-config (Visual Studio) generator. Ninja
+# already schedules one cl.exe per source itself, so adding /MP there would
+# oversubscribe the machine by its own job count squared; and clang-cl accepts
+# the flag only to ignore it.
+if(MSVC AND CMAKE_C_COMPILER_ID STREQUAL "MSVC" AND _lpi_multi_config)
+  add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:/MP>")
+endif()
+
 # --- Only steer global/build-tree settings when we are the top-level project. ---
 if(PROJECT_IS_TOP_LEVEL)
   set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/lib")
