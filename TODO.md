@@ -48,6 +48,13 @@ missing.
 
 `src/engines/table/README.md` is the map. What follows is only what is missing.
 
+Two smaller items from the same round are closed and need no entry of their
+own: `LIBPATHIME_WITH_TABLE` already defaults to `ON` with auto-disable when
+SQLite is missing (`cmake/LibpathimeOptions.cmake:77`), and the demo's "engine
+does not implement this operation" on Enter over `table-file` went away with
+table enumeration — `adjust_option()` returned `PATHIME_ERROR_UNSUPPORTED` only
+because `valid_value_count` was 0, and it no longer is.
+
 Six questions this engine raised were answered in the round of 2026-07-28 and
 are **built**: char prompts stay in the preedit (the header clause was widened
 to cover key legends rather than the engine changed); the table loads when
@@ -63,11 +70,22 @@ that file grows a table round (queued below).
 
 ### Not implemented, in rough priority order
 
-- **User-derived phrases (§10.2). DISCUSS BEFORE BUILDING — do not just
-  implement this.** Flagged 2026-07-28: what the feature *is* and whether this
-  library wants it has not been talked through, and the mechanism is unusual
-  enough that starting from the spec alone would be building to an unexamined
-  premise.
+- **User-derived phrases (§10.2). OUT OF SCOPE for the first phase**, decided
+  2026-07-28. Kept here in full because the investigation behind the decision is
+  worth not repeating, not because it is queued.
+
+  The deciding argument is reach, not difficulty. Only **wubi-jidian86** can use
+  the feature at all: cangjie5 and quick5 declare
+  `USER_CAN_DEFINE_PHRASE = FALSE`, stroke5 declares nothing, and zhuyin
+  declares the flag but carries no `RULES`, so it derives nothing. wubi is also
+  the table this library has least reason to lead with — it was included to
+  broaden the shipped set, not because anything depends on it. A feature that
+  reaches one table, and that table the least central one, does not earn its way
+  into a first implementation.
+
+  **The same test applies to anything else wubi-only.** If a spec section turns
+  out to be reachable only through wubi-jidian86, it is out of scope for this
+  phase by default rather than by a fresh argument each time.
 
   **What it is.** With `USER_CAN_DEFINE_PHRASE = TRUE`, committing a
   multi-character string the system table does not already contain makes the

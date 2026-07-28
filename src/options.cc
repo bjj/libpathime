@@ -684,9 +684,11 @@ pathime_status_t commit_change(pathime_engine_t *engine,
                                pathime_option_t option)
 {
     /*
-     * TODO(impl): PATHIME_OPT_TABLE_FILE additionally resolves and compiles the
-     * named table here, sharing the compiled result across every context naming
-     * the same path, and it is where tier 3 becomes readable.
+     * PATHIME_OPT_TABLE_FILE loads its table earlier than this, in
+     * set_string()'s call to EngineBackend::prepare_string() — before the store,
+     * so a name that does not resolve fails at the setter rather than arriving
+     * here as a change to broadcast. That is also what makes tier 3 readable
+     * from the moment the option is set.
      *
      * Everything else reaches the backend through ContextBackend's
      * options_changed() hook below, which each affected context is given before
