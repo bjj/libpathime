@@ -1059,7 +1059,8 @@ uint64_t option_valid_values(pathime_option_t option, pathime_engine_id_t engine
     /*
      * The only narrowing in the inventory today. pyzy models the variant as a
      * single simplified-or-traditional flag with no mixed mode
-     * (docs/pyzy-options.md), so the two engines it supplies accept only the two
+     * (`pyzy_backend.cc`, where it collapses to a bool), so the two engines it
+     * supplies accept only the two
      * exclusive values while the table engine accepts all five. Reported rather
      * than hidden, so a client can present exactly the choices that will work.
      */

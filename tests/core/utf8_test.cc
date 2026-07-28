@@ -1,5 +1,5 @@
 /*
- * src/utf8.cc — the encoding boundary (docs/adapter-findings.md, Finding 4).
+ * src/utf8.cc — the encoding boundary (docs/design-history.md §2, Finding 4).
  *
  * This is the one piece of the library every backend adapter will lean on, and
  * the one where a quietly wrong answer does not announce itself: an overlong

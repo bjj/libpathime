@@ -2,7 +2,7 @@
 
 The map of the implementation tree: what each file is for, the conventions
 that hold across it, and which choices are settled versus deliberately still
-open. This is the starting point for implementation work; `docs/adapter-findings.md` holds
+open. This is the starting point for implementation work; `docs/design-history.md` §2 holds
 the numbered findings this layout answers to, and `docs/CONCEPTS.md` plus
 `include/pathime/pathime.h` hold the contract being implemented.
 
@@ -136,7 +136,7 @@ splitting them would put the two halves of one resolution rule in two files.
 
 ## Who owns which finding
 
-The findings are `docs/adapter-findings.md`'s; the layout gives each exactly one home.
+The findings are `docs/design-history.md` §2's; the layout gives each exactly one home.
 
 | Concern | Home |
 |---|---|

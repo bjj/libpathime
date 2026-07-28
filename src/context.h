@@ -1,6 +1,6 @@
 /*
  * The input context object — the per-context layer of the two-layer lifetime
- * (docs/adapter-findings.md, Finding 3): one independently editable client destination and
+ * (docs/design-history.md §2, Finding 3): one independently editable client destination and
  * the engine state belonging to it.
  *
  * This header defines `struct pathime_context` because candidates.cc and

@@ -8,14 +8,13 @@ deliberate:
 - `docs/CONCEPTS.md` and `include/pathime/pathime.h` — the model and the
   contract, kept in lockstep. The header carries no list of deviations from
   the concepts because there are none.
-- `docs/adapter-findings.md` — the six numbered constraints that shape the
-  adapter layer, cited by number from `src/` and `docs/*-options.md`.
 - `docs/design-history.md` — the settled design rounds, question by question,
   with the evidence each was answered against and what the answer cost. Its
   section numbers (§1, §3, §4a–§4c, §5, §6a–§6c) are the ones code comments
   cite. **Read it before reopening anything that looks undecided** — most
-  things that look open were closed there, on purpose, with reasons. §6 is the
-  table engine, and is where most of this file's former bulk went.
+  things that look open were closed there, on purpose, with reasons. §2 is the
+  six numbered adapter findings, cited by number from `src/`; §6 is the table
+  engine, and is where most of this file's former bulk went.
 
 Status in one paragraph: the build (Linux and Windows), the core (all 44
 public entry points), **all four** adapters — hangul, anthy, pyzy and the

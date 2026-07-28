@@ -8,7 +8,7 @@
  * ---------------------------------------------------------------------------
  *
  * Every backend keeps state the flat {preedit, preedit_settled,
- * candidates} value cannot hold (docs/adapter-findings.md, Finding 1). Laid side by side,
+ * candidates} value cannot hold (docs/design-history.md §2, Finding 1). Laid side by side,
  * though, the three describe the same three-part picture:
  *
  *              settled                active              tail
@@ -42,7 +42,7 @@
  * The candidate cursor
  * ---------------------------------------------------------------------------
  *
- * `cursor` is docs/adapter-findings.md, Finding 2 given a home. Neither anthy nor pyzy
+ * `cursor` is docs/design-history.md §2, Finding 2 given a home. Neither anthy nor pyzy
  * durably records which candidate the user is hovering before commit — anthy
  * records only at anthy_commit_segment() time — so it is ours, and it belongs
  * here rather than in pathime_context because it is per *active span*: when a

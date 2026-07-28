@@ -9,7 +9,7 @@
  *    hasCandidate(i) is lazy and mutating, so the ordering is a real
  *    constraint, not a formality.
  *
- *  - The currently-shown candidate (docs/adapter-findings.md, Finding 2). Neither anthy nor
+ *  - The currently-shown candidate (docs/design-history.md §2, Finding 2). Neither anthy nor
  *    pyzy durably records which candidate the user is hovering before commit
  *    — anthy records only at anthy_commit_segment() time — so the cursor is
  *    tracked here, per active region, and fed back to the backend when the
@@ -43,7 +43,7 @@
  * a span settles, the next becomes active, and the new one starts hovering its
  * own first candidate — so it belongs with the span structure, and this file
  * is what moves it: the core tracks it because neither anthy nor pyzy durably
- * records it before commit (docs/adapter-findings.md, Finding 2), and it reaches the backend
+ * records it before commit (docs/design-history.md §2, Finding 2), and it reaches the backend
  * only when a selection or a commit makes it real.
  */
 
@@ -120,7 +120,7 @@ void materialize_candidates(pathime_context_t *ctx)
      *    phone-keyboard target settled.
      *  - Every string is copied at the seam. Everything a backend returns is
      *    borrowed and volatile, valid only until its next mutating call
-     *    (docs/adapter-findings.md, Finding 4), so aliasing one into the model would hand a
+     *    (docs/design-history.md §2, Finding 4), so aliasing one into the model would hand a
      *    client a dangling slice the moment the next key arrives. The
      *    obligation is the adapter's, stated as rule 1 of backend.h.
      *  - Running out before the cap is normal and is not an error: the cap is

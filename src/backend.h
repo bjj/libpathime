@@ -12,7 +12,7 @@
  * What the interface is, and what it deliberately is not
  * ---------------------------------------------------------------------------
  *
- * Two layers, matching the two the API already has (docs/adapter-findings.md, Finding 3):
+ * Two layers, matching the two the API already has (docs/design-history.md §2, Finding 3):
  * an EngineBackend holds what one input method shares across its contexts and
  * makes ContextBackends; a ContextBackend is one composition in flight. The
  * process-global layer is *not* here — it is init.cc's, driven once per

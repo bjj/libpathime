@@ -258,7 +258,7 @@ void pathime_context_destroy(pathime_context_t *ctx)
     }
 
     /* The backend handle goes with the object — each of the three is one owned
-     * handle, caller-destroyed (docs/adapter-findings.md, Finding 3), and unique_ptr in
+     * handle, caller-destroyed (docs/design-history.md §2, Finding 3), and unique_ptr in
      * context.h is where that ownership is stated. */
     delete ctx;
 }
@@ -351,7 +351,7 @@ pathime_status_t pathime_context_process_key(pathime_context_t *ctx,
      * backend finishes mutating before anything is assembled, and everything
      * is assembled before any callback is dispatched.
      *
-     * The backends accept only finished input (docs/adapter-findings.md, Finding 6), so
+     * The backends accept only finished input (docs/design-history.md §2, Finding 6), so
      * everything above this call is ours — and for anthy the composing front
      * end runs inside its adapter, which is why there is no separate step for
      * it here.

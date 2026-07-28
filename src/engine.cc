@@ -1,6 +1,6 @@
 /*
  * The engine layer: pathime_engine_* — what one engine shares across all of
- * its contexts (the middle layer of docs/adapter-findings.md, Finding 3). Owns:
+ * its contexts (the middle layer of docs/design-history.md §2, Finding 3). Owns:
  *
  *  - the engine registry, keyed by pathime_engine_id_t and gated on the
  *    PATHIME_WITH_* macros from <pathime/config.h> — pathime_has_engine()

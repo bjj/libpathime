@@ -60,9 +60,9 @@ only the routing:
   settled lives there.
 - `docs/design-history.md` — the settled design rounds, question by question,
   with evidence and costs. **Read it before reopening anything that looks
-  undecided.** Its § numbers are the ones code comments cite.
-- `docs/adapter-findings.md` — the six numbered constraints on the adapter
-  layer, cited by number from `src/` and `docs/*-options.md`.
+  undecided.** Its § numbers are the ones code comments cite — §2 is the six
+  numbered adapter-layer constraints, cited by number from `src/`, and §6 is
+  the table engine.
 - `docs/CONCEPTS.md` and `include/pathime/pathime.h` — the model and the
   contract, kept in lockstep; neither carries deviations from the other.
 - `docs/source-layout.md` — which file owns what. Read before adding or
@@ -74,8 +74,6 @@ only the routing:
   before concluding a missing test is a bug.
 - `docs/*-mapping.md` — per-backend API-to-concepts mapping, source-verified
   with file:line citations, each ending in "Impedance mismatches".
-- `docs/*-options.md` — per-backend option inventories (the round they fed is
-  done; they remain the reference for what was cut and why).
 - `src/engines/table/README.md` — the table engine's own map, including the
   data/behaviour boundary inside that directory and what the ibus-table data
   contract costs.
