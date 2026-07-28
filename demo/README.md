@@ -71,14 +71,6 @@ it while the options panel has the keyboard.
 kitty, wezterm, iTerm2, Windows Terminal and tmux (`set-clipboard on`) honour
 and others silently ignore.
 
-Ordinary selection with the mouse works too, which it does not in most
-cpp-terminal programs: `Option::Raw` turns mouse reporting on with no way to
-decline, and a terminal forwarding drags to the application is not selecting
-text with them, so `main.cc` turns it back off. Nothing here wants mouse events.
-On a legacy Windows console that does not help — mouse input is a console mode
-flag set directly, and QuickEdit is off besides — which is what `Ctrl+Y` is
-really for.
-
 ## What it does not do
 
 - **The caret is always at the end of the document.** Arrow keys go to the
@@ -104,24 +96,9 @@ NumLock and Super are likewise not knowable here and are never reported.
 
 ## Running out of a build tree
 
-Neither anthy nor pyzy can find its data in an uninstalled build: anthy takes
-`DIC_FILE` from the conf file named by `CONFFILE`, and pyzy's `Database::open()`
-falls back to `main.db` relative to the working directory. `demo/CMakeLists.txt`
-generates the one and stages the other, and `main.cc` puts them within reach —
-by setting `CONFFILE` if nothing else has, and by changing into the staged
-directory — before `pathime_init()`.
-
-Both are compiled in only when the build supplied the paths, so an installed
-copy of this program does neither and each backend finds its own data. This is
-the same problem `tests/api/CMakeLists.txt` documents at length, solved the same
-way and for the same reason: the library deliberately does not hunt for data
-files itself.
-
-Two consequences to know about. The program changes its working directory at
-startup, which is harmless because nothing else in it touches the filesystem.
-And on Windows the `CONFFILE` write reaches anthy only because the demo and
-`pathime.dll` share a C runtime; with `/MD` on both, which is what this build
-produces, they do.
+There is code in `main.cc` to enable this demo to run from the build tree and
+still have the backends find their (uninstalled) data files. This shouldn't be
+necessary for a real application using an installed `libpathime`.
 
 ## Layout
 
@@ -134,9 +111,3 @@ produces, they do.
 | `src/render.cc` | Drawing. Calls no libpathime function of its own |
 | `src/text.cc` | UTF-8 and terminal-width helpers |
 
-`cpp-terminal` is a submodule under this directory, built with its examples,
-tests, docs and install rules turned off, and with its warnings silenced — it
-opts itself into `-Wall -Wextra -Wpedantic` (`/Wall` under MSVC), and a warning
-in a tree we never edit is noise rather than information. `demo/CMakeLists.txt`
-says how, and what one flag survives it under MSVC. Nothing above `demo/` knows
-any of this exists.
