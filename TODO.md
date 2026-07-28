@@ -21,9 +21,10 @@ public entry points), **all four** adapters — hangul, anthy, pyzy and the
 table engine — options and negotiation including tier 3, the terminal demo
 client, the preedit rule, and the eager candidate strip are built and tested:
 34 suites, all passing on Linux with every backend enabled
-(`docs/testing.md`). The table engine types real Chinese against tables
-compiled out of `ibus-table-chinese`, trimmed at build time to a font's glyph
-coverage. The detailed ledger is at the top of `docs/design-history.md`.
+(`docs/testing.md`), and 33 on Windows under both presets. The table engine
+types real Chinese against tables compiled out of `ibus-table-chinese`, trimmed
+at build time to one of two checked-in glyph-coverage maps or to none. The
+detailed ledger is at the top of `docs/design-history.md`.
 
 ---
 
@@ -222,19 +223,9 @@ build-time compilation, enumeration through the option machinery) are §6a.
   taking it would have added a third GPL-3 source. A licensing question about
   what libpathime distributes, not a technical one, and to be pursued
   separately from the engine work.
-- **Glyph-coverage filtering: the runtime half, and Windows.** The compile-time
-  half is built and `docs/design-history.md` §6b records why it takes the shape
-  it does. Two things remain.
-
-  **Windows has no generator.** `read_charset()` in
-  `tools/generate-coverage.py` is the only platform-specific piece and knows
-  only fontconfig. That function's docstring is the brief for the session that
-  closes it — `GetFontUnicodeRanges` is the equivalent call, the UTF-16
-  surrogate trap is named, and the instruction is to ship a *second* generated
-  header rather than overwrite the Linux one, because a single map generated on
-  whichever machine ran last is exactly the non-reproducibility the design
-  avoids. `docs/windows-port.md` carries the same note. Nothing is blocked on
-  it.
+- **Glyph-coverage filtering: the runtime half.** The compile-time half is built
+  on both platforms and `docs/design-history.md` §6b and §6d record the shape and
+  the Windows measurements. One thing remains.
 
   **The runtime half is deferred**, and not only for effort. An embedder should
   be able to *guarantee* their candidate list stays renderable on their target —
@@ -260,11 +251,25 @@ build-time compilation, enumeration through the option machinery) are §6a.
 
 ### Not verified
 
-- **Windows.** Everything above was built and tested on Linux only. The engine
-  needs SQLite from vcpkg (`vcpkg install sqlite3`, already required for pyzy)
-  and the compile tool runs at build time, so nothing structurally blocks it —
-  but `docs/windows-port.md` has not been revisited and no Windows build of the
-  table engine has been run.
+- **The Noto map has not been regenerated with the current parser.**
+  `read_charset()` no longer shells out to `fc-query`; it parses the font's
+  `cmap` directly, which is what made the generator work on Windows. The
+  `windows` map was produced by that parser, but `coverage_data_noto.h` still
+  carries the ranges the fontconfig version emitted — they were left untouched
+  on purpose, so that adding the second map changed no shipped Linux data.
+
+  The two readers should agree exactly: fontconfig's charset comes from FreeType
+  reading the same table. Confirming it is one command on a machine with Noto
+  Sans CJK installed, and the expected diff is empty:
+
+  ```bash
+  cmake -S . -B build -DLIBPATHIME_TABLE_REGENERATE_COVERAGE=ON \
+        -DLIBPATHIME_TABLE_COVERAGE=noto
+  cmake --build build --target pathime-table-coverage && git diff --stat
+  ```
+
+  If it is not empty, the difference is the answer to which reader was right, and
+  the provenance note at the top of `coverage_data_noto.h` comes out either way.
 
 ## Queued work
 

@@ -6,6 +6,40 @@
 
 find_package(PkgConfig QUIET)
 
+# libpathime_find_python3(<label>)
+#
+# find_package(Python3 COMPONENTS Interpreter) with the Windows fallback, setting
+# Python3_EXECUTABLE and Python3_Interpreter_FOUND in the caller's scope.
+#
+# FindPython3 misses plenty of real Windows installs: the PATH entry is often the
+# Store's stub launcher, and per-user registry entries written by conda & co.
+# lack the values FindPython3 validates against. py.exe is the platform's own
+# answer to "where is Python", so ask it before giving up.
+#
+# Shared because two things need it and neither is a hard dependency — pyzy's
+# optional android.db, and the coverage-map regeneration target. Nothing here is
+# needed by an ordinary build on any platform.
+function(libpathime_find_python3 label)
+  find_package(Python3 COMPONENTS Interpreter QUIET)
+
+  if(NOT Python3_Interpreter_FOUND AND WIN32)
+    find_program(LIBPATHIME_PY_LAUNCHER py)
+    if(LIBPATHIME_PY_LAUNCHER)
+      execute_process(
+        COMMAND "${LIBPATHIME_PY_LAUNCHER}" -3 -c "import sys; sys.stdout.write(sys.executable)"
+        OUTPUT_VARIABLE _py_exe RESULT_VARIABLE _py_rc ERROR_QUIET)
+      if(_py_rc EQUAL 0 AND EXISTS "${_py_exe}")
+        message(STATUS "${label}: using Python 3 via the py launcher: ${_py_exe}")
+        set(Python3_EXECUTABLE "${_py_exe}")
+        set(Python3_Interpreter_FOUND TRUE)
+      endif()
+    endif()
+  endif()
+
+  set(Python3_EXECUTABLE "${Python3_EXECUTABLE}" PARENT_SCOPE)
+  set(Python3_Interpreter_FOUND "${Python3_Interpreter_FOUND}" PARENT_SCOPE)
+endfunction()
+
 # _lpi_gate(<KEY> <label> <missing-list> <hint>)
 # Disables LIBPATHIME_WITH_<KEY> (or errors, per LIBPATHIME_REQUIRE_BACKENDS).
 function(_lpi_gate key label missing hint)
@@ -101,6 +135,13 @@ message(STATUS "  Korean   (libhangul)      : ${LIBPATHIME_WITH_HANGUL}")
 message(STATUS "  Japanese (anthy-unicode)  : ${LIBPATHIME_WITH_ANTHY}")
 message(STATUS "  Chinese  (pyzy)           : ${LIBPATHIME_WITH_PYZY}")
 message(STATUS "  Table    (libpathime)     : ${LIBPATHIME_WITH_TABLE}")
+# The coverage map decides which rows the shipped tables carry, and it is the one
+# setting here whose default differs by platform. Printed so that a difference
+# between two machines' tables is visible in the configure output rather than
+# discovered later in a diff of the compiled data.
+if(LIBPATHIME_WITH_TABLE)
+  message(STATUS "    glyph coverage map      : ${LIBPATHIME_TABLE_COVERAGE}")
+endif()
 message(STATUS "  Shared libraries          : ${BUILD_SHARED_LIBS}")
 message(STATUS "  Interactive demo          : ${LIBPATHIME_BUILD_DEMO}")
 message(STATUS "")

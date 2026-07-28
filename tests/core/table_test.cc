@@ -482,8 +482,13 @@ void test_declared_options()
  *
  * The specific code points asserted below are chosen to be structural rather
  * than incidental: ASCII and the common Han characters any CJK font has, against
- * a plane-2 code point that Noto Sans CJK does not reach. Regenerating the map
- * from a newer Noto should not move any of them.
+ * a plane-2 code point no map this library ships reaches. They hold for either
+ * map — LIBPATHIME_TABLE_COVERAGE selects which one is compiled in here, and it
+ * is the one the shipped tables were trimmed with — and regenerating either from
+ * newer fonts should not move any of them.
+ *
+ * What is deliberately *not* asserted is a range count or a total, which would
+ * turn every font refresh into a test edit while telling nobody anything.
  */
 void test_coverage()
 {
@@ -494,9 +499,12 @@ void test_coverage()
     PT_CHECK(is_covered(0x3002));  /* 。 */
 
     /*
-     * Not covered: a CJK Extension B code point outside Noto's repertoire. This
-     * is the class of character the filter exists for — a table carries it, no
-     * font can draw it, and it would otherwise sit in a candidate list as tofu.
+     * Not covered: a CJK Extension B code point outside the repertoire of either
+     * map. This is the class of character the filter exists for — a table
+     * carries it, the target cannot draw it, and it would otherwise sit in a
+     * candidate list as tofu. It is also the class an embedder whose target
+     * *does* have an Extension B font gives up by filtering at all, which is why
+     * LIBPATHIME_TABLE_COVERAGE=none exists.
      */
     PT_CHECK(!is_covered(0x2A6D6));
 

@@ -109,8 +109,9 @@ developer command prompt, and remember to re-set `VCPKG_ROOT` afterwards.
 | `LIBPATHIME_WITH_HANGUL` / `_ANTHY` / `_PYZY` | `ON` | Enable each backend, both the vendored library and its adapter. A backend whose dependencies are missing is warned about and skipped. |
 | `LIBPATHIME_WITH_TABLE` | `ON` | The table-driven backend. Needs `sqlite3`; skipped with a warning (or a hard error under `LIBPATHIME_REQUIRE_BACKENDS`) without it. |
 | `LIBPATHIME_TABLES` | five tables | Which tables to compile into `pathime-data/table/`, as `<name>\|<source>\|<freq source>` entries. Default: `cangjie5`, `quick5`, `wubi-jidian86`, `stroke5`, `zhuyin` — about 9 MB compiled. All thirteen families in the submodule are available; adding one is a line. |
-| `LIBPATHIME_TABLE_REGENERATE_COVERAGE` | `OFF` | Offer a `pathime-table-coverage` target that rewrites `src/engines/table/coverage_data.h` from a font. Needs Python 3 and fontconfig. See "Glyph coverage" below — the ordinary build never reads a font. |
-| `LIBPATHIME_TABLE_COVERAGE_FONT` | Noto Sans CJK | The font that target reads. Only consulted when the option above is `ON`. |
+| `LIBPATHIME_TABLE_COVERAGE` | `windows` on Windows, `noto` elsewhere | Which glyph-coverage map trims the compiled tables, or `none` to trim nothing. See "Glyph coverage" below; on Windows `none` is a reasonable choice. |
+| `LIBPATHIME_TABLE_REGENERATE_COVERAGE` | `OFF` | Offer a `pathime-table-coverage` target that rewrites the map named by `LIBPATHIME_TABLE_COVERAGE` from a font. Needs Python 3 and nothing else. See "Glyph coverage" below — the ordinary build never reads a font. |
+| `LIBPATHIME_TABLE_COVERAGE_FONT` | per platform | The fonts that target reads, as a list — the Windows map is the union of several. Only consulted when the option above is `ON`. |
 | `LIBPATHIME_REQUIRE_BACKENDS` | `OFF` | Turn "missing dependency ⇒ skip" into a hard error (for CI). |
 | `LIBPATHIME_BUILD_TESTS` | `OFF` | Build the test suites — see `docs/testing.md`. |
 | `LIBPATHIME_BUILD_DEMO` | `OFF` | Build the interactive terminal demo — see `demo/README.md`. Needs the `demo/cpp-terminal` submodule. |
@@ -132,8 +133,8 @@ answers false for a backend whose runtime data is missing as well.
   `libanthydic-unicode`, `libanthyinput-unicode`), `libpyzy-1.0`.
 - **Data**: `pathime-data/`, holding `anthy/anthy.dic` (built by anthy's
   four-stage codegen, ~20 MB), `pyzy/main.db` (~3.4 MB / 16 tables) plus
-  `pyzy/phrases.txt`, and `table/*.db` (~9 MB for the five default tables).
-  See below.
+  `pyzy/phrases.txt`, and `table/*.db` (5–9 MB for the five default tables,
+  depending on the glyph-coverage map; ~15 MB with none). See below.
 - **Build-time tools, not installed**: `bin/pathime-table-compile`.
 - **With `LIBPATHIME_BUILD_DEMO=ON`**: `bin/pathime-demo`, plus the
   `cpp-terminal` library it draws with. Neither is installed.
@@ -169,29 +170,62 @@ engines nothing.
 
 ### Glyph coverage
 
-Compiled tables are trimmed to the characters a deliberately inclusive CJK font
-can render. A stock Cangjie table holds roughly twice as many characters as the
-most capable font, so without the trim a slightly mistyped code fills the
-candidate list with tofu; about half of `cangjie5` and `quick5` is removed.
+Compiled tables are trimmed to the characters the target can render. A stock
+Cangjie table holds roughly twice as many characters as an ordinary CJK font, so
+without the trim a slightly mistyped code fills the candidate list with tofu.
 
-**The build never reads a font.** The coverage map is generated data checked in
-at `src/engines/table/coverage_data.h` — the same arrangement
+What the trim actually removes is **CJK Extension B and beyond**: of the 40,686
+distinct characters the Noto map drops from the five shipped tables, 40,603 are
+supplementary-plane and the remaining 83 are private-use. So the right answer
+depends on whether the target has a supplementary-plane font, and that differs
+by platform enough that one map cannot serve both. `LIBPATHIME_TABLE_COVERAGE`
+picks, measured against those tables' 305,150 rows:
+
+| value | map | rows dropped | `cangjie5` | table data |
+|-------|-----|--------------|------------|------------|
+| `noto` | Noto Sans CJK, 44,810 points | 36.6% | 52.4% | ~9 MB |
+| `windows` | Windows in-box CJK, 43,509 points | 38.5% | 55.1% | ~5 MB |
+| `none` | — | none | none | ~15 MB |
+
+`none` is a real choice on Windows rather than a footgun. A system with the
+Chinese language feature installed carries **SimSun-ExtB**, which covers 60,349
+supplementary code points on its own and makes every row of every shipped table
+renderable — measured, the whole Windows CJK font set drops exactly one character
+out of the tables' 70,948. An embedder who knows their target has it should take
+`none` and get the characters; the `windows` default assumes only the in-box
+faces, which a bare en-US install has.
+
+Neither map is a superset of the other, so neither is a default with an override.
+The default follows the platform because a default describing the wrong font
+landscape is a worse failure than the cross-platform difference — and the
+difference stays visible: the configure summary prints the map, and so does every
+line `pathime-table-compile` emits.
+
+**The build never reads a font.** Each map is generated data checked in at
+`src/engines/table/coverage_data_<map>.h` — the same arrangement
 `variants_data.h` has with Unicode data, and for the same reason: reading an
 installed font at build time would make a compiled `.db` a function of the build
-machine, so two builds of the same commit would ship different tables.
+machine, so two builds of the same commit would ship different tables. Two builds
+of the same commit with the same map still produce byte-identical tables, which
+is checked across MSVC and clang-cl.
 
 Regenerating is a deliberate act, not a build step:
 
 ```bash
 cmake -S . -B build -DLIBPATHIME_TABLE_REGENERATE_COVERAGE=ON \
+      -DLIBPATHIME_TABLE_COVERAGE=noto \
       -DLIBPATHIME_TABLE_COVERAGE_FONT=/path/to/font.ttc
 cmake --build build --target pathime-table-coverage
 ```
 
-It writes into the source tree, because the output is a checked-in file meant to
-be reviewed in a diff. `tools/generate-coverage.py --help` and its module
-docstring carry the rest, including what a Windows implementation has to do
-differently. Per-table opt-out is `pathime-table-compile --no-glyph-filter`.
+It rewrites the header for whichever map `LIBPATHIME_TABLE_COVERAGE` names, in
+the source tree, because the output is a checked-in file meant to be reviewed in
+a diff. The generator parses the font's own `cmap` table and needs only Python 3
+— no fontconfig, and nothing platform-specific. `LIBPATHIME_TABLE_COVERAGE_FONT`
+is a list, because the Windows map is the union of several in-box faces; an entry
+may be `PATH#FACE` to pick out of a TrueType collection.
+`tools/generate-coverage.py --help` and its module docstring carry the rest.
+Per-table opt-out is `pathime-table-compile --no-glyph-filter`.
 
 ## Consuming the library
 

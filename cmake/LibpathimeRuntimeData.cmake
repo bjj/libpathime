@@ -83,6 +83,14 @@ function(libpathime_compile_tables)
       list(APPEND _depends "${_root}/${_freq}")
     endif()
 
+    # LIBPATHIME_TABLE_COVERAGE=none is honoured here rather than by compiling
+    # the map out of coverage.cc, which keeps the map testable whatever a build
+    # ships. The other two values reached the tool as a compile definition when
+    # it was built; see cmake/LibpathimeOptions.cmake.
+    if(LIBPATHIME_TABLE_COVERAGE STREQUAL "none")
+      list(APPEND _args --no-glyph-filter)
+    endif()
+
     add_custom_command(
       OUTPUT "${_output}"
       COMMAND ${CMAKE_COMMAND} -E make_directory "${_dir}"

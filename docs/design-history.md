@@ -1213,9 +1213,10 @@ again:
 The fourth engine, and the only one written here rather than wrapped. `ibus-table`
 is Python, so there was nothing to link against: it supplied a proven feature set,
 `docs/ibus-table-mapping.md` was derived from it clean-room, and the implementation
-answers to that spec. What follows is the decisions taken along the way, in two
-groups — the ones about *shape*, taken while the engine was being built, and the
-ones about *behaviour*, taken in a round of questions the finished engine raised.
+answers to that spec. What follows is the decisions taken along the way, in three
+groups — the ones about *shape*, taken while the engine was being built, the ones
+about *behaviour*, taken in a round of questions the finished engine raised, and
+what porting it to Windows changed about one of them.
 
 ### 6a. Shape
 
@@ -1347,11 +1348,12 @@ characters at the front; this keeps unrenderable ones out.
 Deliberately *not* the fork's approach of shelling out to `fc-query` during
 preprocessing: that makes a compiled `.db` a function of which fonts the build
 machine happens to have, so two builds of the same commit ship different data.
-The map is generated once into `coverage_data.h` and checked in — the same bargain
-`variants_data.h` makes with Unicode data — with regeneration behind a CMake
-option defaulting OFF. The map comes from a deliberately *inclusive* font because
-it is the upper bound: the deferred runtime half can only narrow it, and narrowing
-only works if nothing has to be added back to a table that no longer carries it.
+The map is generated once into `coverage_data_noto.h` and checked in — the same
+bargain `variants_data.h` makes with Unicode data — with regeneration behind a
+CMake option defaulting OFF. The map comes from a deliberately *inclusive* font
+because it is the upper bound: the deferred runtime half can only narrow it, and
+narrowing only works if nothing has to be added back to a table that no longer
+carries it. (§6d adds a second map and revisits how inclusive Noto really is.)
 `coverage.*` is the one pair in `engines/table/` the **library does not link**;
 only the compile tool does.
 
@@ -1398,3 +1400,62 @@ ibus-table a leading `z` would become a wildcard too and cangjie5's punctuation
 codes would be unreachable there. The honest description is **"we read and write
 the format, and we use their sources to make our own sauce"**. `TODO.md` carries
 the detail and the cheap fix, should strict compatibility ever be wanted.
+
+### 6d. Glyph coverage on Windows, and what measuring it changed (2026-07-28)
+
+§6b settled glyph filtering against a single checked-in map from Noto Sans CJK,
+and left "Windows has no generator" as a task with a written brief. Doing it on
+Windows found the brief wrong twice, and both corrections came from measurement
+rather than from reading more source.
+
+**The recommended API cannot express the answer.** The brief named GDI's
+`GetFontUnicodeRanges` as the equivalent of `fc-query --format=%{charset}`, and
+warned that `GLYPHSET`/`WCRANGE` are UTF-16 code *units* so supplementary
+coverage would arrive as surrogate halves needing recombination. Measured against
+SimSun-ExtB, whose `cmap` covers 60,349 supplementary code points, it reported 97
+code units and **zero** surrogates: precisely the font's 97 BMP characters, with
+the rest absent rather than encoded awkwardly. A generator written to that brief
+would have produced a Windows map missing the one range the filter decides about
+and would have looked entirely plausible doing it.
+
+So `read_charset()` parses the font's own `cmap` instead — formats 4 and 12,
+about fifty lines of stdlib Python. That **removed** the `sys.platform` dispatch
+the brief called for rather than adding to it: one reader, correct above the BMP,
+no fontconfig and no GDI, and it reads a font file that need not be installed.
+**Cost:** the Noto map's ranges still come from the fontconfig reader and have
+not been re-derived with the new one; they were left untouched deliberately, so
+that adding a second map changed no shipped Linux data. `TODO.md` carries the
+one-command check and the expectation that the diff is empty.
+
+**The filter is "drop Extension B", and Windows can draw Extension B.** Of the
+40,686 distinct characters the Noto map removes from the five shipped tables,
+40,603 are supplementary-plane and the other 83 are private-use. A Windows system
+with the Chinese language feature installed has SimSun-ExtB and MingLiU-ExtB;
+against the whole Windows CJK font set those tables lose **one** character out of
+70,948. The premise §6b filtered on — "roughly twice as many characters as the
+most capable font" — is a fact about the Linux font landscape, not about fonts.
+
+That makes the interesting Windows setting `none`, not a narrower map, and it is
+why `LIBPATHIME_TABLE_COVERAGE` has three values rather than two. It is honoured
+by passing `--no-glyph-filter` to the compile tool rather than by compiling the
+map out of `coverage.cc`, so the map stays testable whatever a build ships.
+
+**Two maps, and the reproducibility bargain restated.** The shipped `windows` map
+is the conservative reading — the union of the in-box faces (SimSun, Microsoft
+YaHei, Microsoft JhengHei, Yu Gothic, Malgun Gothic), which a bare en-US install
+has. It drops 38.5% of rows against Noto's 36.6%; the two are close because both
+stop at the BMP, and the Extension B faces are what actually separate the
+platforms. Neither map is a superset of the other, so neither is a default with
+an override, and the default follows the platform.
+
+That is a real weakening of §6b's promise and worth naming: two builds of the
+same commit on *different* platforms no longer ship identical tables. What the
+checked-in maps were protecting against survives intact, though — the map is a
+recorded option and a line in the configure summary, not a property of which
+fonts the build machine happens to have, and two builds of the same commit with
+the same map are byte-identical. That last is checked rather than asserted: MSVC
+and clang-cl produce identical `.db` files for all five tables.
+
+**Cost:** a `windows` build's `cangjie5` carries 30,980 phrases where a `noto`
+build carries 32,695, and neither number is the 68,632 the source holds. An
+embedder who wants all of them now has a supported way to ask, which is new.

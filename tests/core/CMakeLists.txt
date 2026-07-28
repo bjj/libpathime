@@ -127,4 +127,10 @@ if(LIBPATHIME_WITH_TABLE)
     "${PROJECT_SOURCE_DIR}/src/paths.cc"
     "${PROJECT_SOURCE_DIR}/src/utf8.cc")
   target_link_libraries(core_table_test PRIVATE SQLite::SQLite3)
+
+  # The same map tools/table-compile trimmed the shipped tables with, so what is
+  # asserted is what was shipped rather than whichever map is compiled by
+  # default. test_coverage() is written to hold for either.
+  libpathime_table_coverage_definitions(_coverage_defines)
+  target_compile_definitions(core_table_test PRIVATE ${_coverage_defines})
 endif()

@@ -144,10 +144,12 @@ bool derive_single_wildcard(TableSource *source, char key);
  * their primary entry for each code to exactly the default threshold, so a
  * strict `>` transfers nothing.
  *
- * The fork's other half — commenting out entries whose characters a target font
- * cannot display — is deliberately not here. It needs fontconfig and a specific
- * font, and it is a decision about a display target rather than about the table,
- * so it belongs to whoever is packaging for that target.
+ * The fork's other half — dropping entries whose characters a target font cannot
+ * display — is deliberately not here, though it does exist: coverage.h, applied
+ * by tools/table-compile. It is kept out of this header because a decision about
+ * a display target is not a decision about the table, and keeping it out is also
+ * what stops the coverage map being linked into the library (coverage.h says
+ * why).
  */
 void apply_frequency_transfer(TableSource *target,
                               const TableSource &source,

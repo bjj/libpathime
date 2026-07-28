@@ -75,6 +75,68 @@ option(LIBPATHIME_WITH_PYZY   "Build the Chinese (pyzy) backend"            ON)
 # Missing dependencies still turn it off with a warning, in
 # LibpathimeDependencies, exactly as they do for the other three.
 option(LIBPATHIME_WITH_TABLE  "Build the table-driven (Cangjie, Wubi, Zhuyin, …) backend" ON)
+
+# Which glyph-coverage map trims the compiled tables, or `none` to trim nothing.
+#
+# The filter drops table entries whose characters the target could not render,
+# because the stock candidates for a partially typed Cangjie code are obscure and
+# a list of tofu is worse than a short one. In practice it is "drop CJK Extension
+# B and beyond": of the 40,686 distinct characters the Noto map removes from the
+# five shipped tables, 40,603 are supplementary-plane.
+#
+# So the right answer depends on the target, and the two platforms differ enough
+# that one map cannot serve both — measured against those tables:
+#
+#   noto      44,810 points, drops 36.6% of rows (cangjie5 52.4%)
+#   windows   43,509 points, drops 38.5% of rows (cangjie5 55.1%)
+#   none                     drops nothing, ~9.3 MB of tables becomes ~14.8 MB
+#
+# `none` is a real option on Windows rather than a footgun: a system with the
+# Chinese language feature installed carries SimSun-ExtB, which covers 60,349
+# supplementary code points on its own and makes every row of every shipped table
+# renderable. An embedder who knows their target has it should take `none` and
+# get the characters. BUILD.md, "Glyph coverage", is the guidance.
+#
+# Defaulted per platform rather than fixed, because a default that describes the
+# wrong font landscape is a worse failure than the cross-platform difference: two
+# builds of the same commit on the same platform still produce identical tables,
+# and which map was used is a recorded option and a line in the build summary
+# rather than a property of the machine. That is the reproducibility the
+# checked-in maps exist for, and it survives.
+if(WIN32)
+  set(_coverage_default "windows")
+else()
+  set(_coverage_default "noto")
+endif()
+set(LIBPATHIME_TABLE_COVERAGE "${_coverage_default}" CACHE STRING
+  "Glyph-coverage map trimming the compiled tables: noto, windows, or none")
+set_property(CACHE LIBPATHIME_TABLE_COVERAGE PROPERTY STRINGS noto windows none)
+
+if(NOT LIBPATHIME_TABLE_COVERAGE MATCHES "^(noto|windows|none)$")
+  message(FATAL_ERROR
+    "libpathime: LIBPATHIME_TABLE_COVERAGE must be noto, windows or none, "
+    "not '${LIBPATHIME_TABLE_COVERAGE}'.")
+endif()
+
+# libpathime_table_coverage_definitions(<out_var>)
+#
+# The compile definitions that select a map in src/engines/table/coverage.cc.
+# Everything compiling that file calls this — tools/table-compile, which trims
+# the shipped tables, and tests/core/table_test, which asserts on the map. A
+# single helper because the two disagreeing would mean testing a map the build
+# does not ship.
+#
+# `none` still selects a map: it is honoured by passing --no-glyph-filter to the
+# compile tool, not by compiling out the filter, so coverage.cc keeps a real map
+# to be tested against and the test's expectations hold whatever is configured.
+function(libpathime_table_coverage_definitions out_var)
+  if(LIBPATHIME_TABLE_COVERAGE STREQUAL "windows")
+    set(${out_var} PATHIME_TABLE_COVERAGE_WINDOWS PARENT_SCOPE)
+  else()
+    set(${out_var} "" PARENT_SCOPE)
+  endif()
+endfunction()
+
 option(LIBPATHIME_BUILD_TESTS "Build the test suites: libpathime's own, plus each submodule's where available" OFF)
 
 # The interactive terminal demo under demo/. Off by default, and for a

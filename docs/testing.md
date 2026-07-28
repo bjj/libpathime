@@ -66,6 +66,13 @@ library does not link it. Glyph filtering runs once in `tools/table-compile`, an
 if `coverage.cc` ever became reachable from the library the two lists would stop
 agreeing and one of them would fail to link.
 
+`core.table` compiles `coverage.cc` against whichever map
+`LIBPATHIME_TABLE_COVERAGE` selected, so what it asserts is the map the build
+actually shipped. Its assertions are chosen to hold for either — ASCII, common
+Han, and one Extension B code point neither map reaches — so configuring a
+different map is not a test edit. Nothing asserts a range count or a total, which
+would turn every font refresh into one.
+
 ### `tests/<backend>/` — `<backend>.vendor*`
 
 The submodule's own suite. None of the three upstream build systems is used by

@@ -292,25 +292,9 @@ endif()
 # --- optional runtime database (android.db) ---------------------------------
 option(PYZY_BUILD_DB_ANDROID "Build pyzy's bundled Android pinyin database" ON)
 if(PYZY_BUILD_DB_ANDROID)
-  find_package(Python3 COMPONENTS Interpreter QUIET)
-
-  # FindPython3 misses plenty of real Windows installs: the PATH entry is often
-  # the Store's stub launcher, and per-user registry entries written by conda &
-  # co. lack the values FindPython3 validates against. py.exe is the platform's
-  # own answer to "where is Python", so ask it before giving up.
-  if(NOT Python3_Interpreter_FOUND AND WIN32)
-    find_program(PYZY_PY_LAUNCHER py)
-    if(PYZY_PY_LAUNCHER)
-      execute_process(
-        COMMAND "${PYZY_PY_LAUNCHER}" -3 -c "import sys; sys.stdout.write(sys.executable)"
-        OUTPUT_VARIABLE _py_exe RESULT_VARIABLE _py_rc ERROR_QUIET)
-      if(_py_rc EQUAL 0 AND EXISTS "${_py_exe}")
-        message(STATUS "pyzy: using Python 3 via the py launcher: ${_py_exe}")
-        set(Python3_EXECUTABLE "${_py_exe}")
-        set(Python3_Interpreter_FOUND TRUE)
-      endif()
-    endif()
-  endif()
+  # Shared with the coverage-map regeneration target; the Windows fallback it
+  # carries is in cmake/LibpathimeDependencies.cmake.
+  libpathime_find_python3(pyzy)
 
   if(Python3_Interpreter_FOUND)
     set(_db "${CMAKE_CURRENT_BINARY_DIR}/db")

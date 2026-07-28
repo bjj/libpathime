@@ -44,13 +44,15 @@ int usage(const char *program)
                  "deliberate ordering of its top choices.\n"
                  "\n"
                  "Glyph filtering is the other half of the same purpose and is on\n"
-                 "by default: entries whose characters fall outside the generated\n"
+                 "by default: entries whose characters fall outside the compiled-in\n"
                  "coverage map are dropped, so a mistyped code cannot fill the\n"
-                 "candidate list with tofu. The map comes from a deliberately\n"
-                 "inclusive CJK font and is checked in rather than read at build\n"
-                 "time, which is what keeps a compiled .db reproducible; see\n"
-                 "tools/generate-coverage.py. --no-glyph-filter turns it off for\n"
-                 "anyone who would rather have the entries than the guarantee.\n"
+                 "candidate list with tofu. Which map that is was fixed when this\n"
+                 "tool was built (LIBPATHIME_TABLE_COVERAGE) and is named in the\n"
+                 "line printed on success; the maps are checked in rather than read\n"
+                 "from a font at build time, which is what keeps a compiled .db\n"
+                 "reproducible. See tools/generate-coverage.py. --no-glyph-filter\n"
+                 "turns filtering off for anyone whose target can render Extension\n"
+                 "B and would rather have the entries than the guarantee.\n"
                  "\n"
                  "Wildcard derivation declares `z` as the single-character\n"
                  "wildcard — Apple's Cangjie convention, for a decomposition the\n"
@@ -152,8 +154,17 @@ int main(int argc, char **argv)
 
     std::printf("%s: %zu phrases, %zu goucima", output_path.c_str(),
                 source.phrases.size(), source.goucima.size());
-    if (uncovered != 0) {
-        std::printf(", %zu unrenderable dropped", uncovered);
+    if (glyph_filter) {
+        /*
+         * The map is named, not just the count. A table trimmed by 55% and one
+         * trimmed by 0% are both correct answers depending on which map ran, and
+         * a build log that reported only the number would leave the reader
+         * unable to tell a policy change from a data problem.
+         */
+        std::printf(", %zu unrenderable dropped (%s)", uncovered,
+                    pathime::table::coverage_map_name());
+    } else {
+        std::printf(", unfiltered");
     }
     if (derived_wildcard) {
         std::printf(", '%c' wildcard", wildcard_key);

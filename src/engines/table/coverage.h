@@ -20,17 +20,31 @@
  * ---------------------------------------------------------------------------
  *
  * The coverage map is generated data checked into the tree
- * (tools/generate-coverage.py → coverage_data.h), not a font consulted at build
- * time. That is what keeps a compiled `.db` a function of the commit rather than
- * of which fonts the build machine happens to have installed. Nothing here is
- * reachable from the library: only tools/table-compile links it.
+ * (tools/generate-coverage.py → coverage_data_*.h), not a font consulted at
+ * build time. That is what keeps a compiled `.db` a function of the commit and a
+ * recorded option rather than of which fonts the build machine happens to have
+ * installed. Nothing here is reachable from the library: only
+ * tools/table-compile links it.
  *
- * The map is taken from a deliberately *inclusive* font, because it is the upper
- * bound on what a shipped table can offer. An embedder needing something
- * narrower should be able to remove more at runtime — that half is deferred, and
- * TODO.md records the four questions it has to answer first — and runtime
- * narrowing only works if nothing has to be added back to a table that no longer
- * carries it.
+ * ---------------------------------------------------------------------------
+ * Two maps, chosen at build time
+ * ---------------------------------------------------------------------------
+ *
+ * `LIBPATHIME_TABLE_COVERAGE` picks which generated header this compiles
+ * against — `coverage_data_noto.h` or `coverage_data_windows.h` — and neither is
+ * a superset of the other, so neither is a default with an override. The filter
+ * is in practice "drop CJK Extension B and beyond", and whether that is right
+ * depends on the target: a Windows system with the Chinese language feature
+ * carries SimSun-ExtB and can draw all of it, which is what the `none` setting
+ * is for. BUILD.md, "Glyph coverage", is the guidance and carries the
+ * measurements.
+ *
+ * Each map is taken from a deliberately *inclusive* reading of its target,
+ * because it is the upper bound on what a shipped table can offer. An embedder
+ * needing something narrower should be able to remove more at runtime — that
+ * half is deferred, and TODO.md records the four questions it has to answer
+ * first — and runtime narrowing only works if nothing has to be added back to a
+ * table that no longer carries it.
  */
 
 #ifndef LIBPATHIME_SRC_ENGINES_TABLE_COVERAGE_H
@@ -45,8 +59,29 @@
 namespace pathime {
 namespace table {
 
+/**
+ * One run of covered code points, inclusive at both ends.
+ *
+ * Declared here rather than in the generated headers so that the two of them can
+ * define `kCoverageRanges` and `kCoverageRangeCount` under the same names — only
+ * one is ever included, and duplicating the type in both would make including
+ * both a hard error rather than merely pointless.
+ */
+struct CoverageRange {
+    uint32_t first;
+    uint32_t last;
+};
+
 /** True if the generated coverage map contains @a scalar. */
 bool is_covered(uint32_t scalar);
+
+/**
+ * Which map this was compiled against, as the generator described it — "Noto
+ * Sans CJK", "Windows in-box CJK". tools/table-compile prints it beside the row
+ * count, so a compiled table records the policy that trimmed it rather than
+ * leaving it to be inferred from the build log.
+ */
+const char *coverage_map_name();
 
 /**
  * True if every character of @a phrase is covered. An empty phrase is covered:
@@ -66,7 +101,7 @@ bool phrase_is_covered(const std::string &phrase);
  * The transformation lives here rather than beside apply_frequency_transfer() in
  * table_source.h, even though the two are halves of one purpose and run one after
  * the other, for a linkage reason: table_source.cc is compiled into the library,
- * and this pulls in coverage_data.h. Keeping it on this side of the line means
+ * and this pulls in a coverage_data_*.h. Keeping it on this side of the line means
  * the shipped library carries no coverage table at all — only
  * tools/table-compile links coverage.cc.
  *

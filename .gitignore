@@ -15,3 +15,7 @@ CPackSourceConfig.cmake
 install_manifest.txt
 compile_commands.json
 CMakeUserPresets.json
+
+# python
+*.pyc
+__pycache__/

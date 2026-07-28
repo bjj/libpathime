@@ -1913,16 +1913,48 @@ void test_value_names()
         PT_CHECK_STATUS(pathime_engine_option_info(&any, option, &info), PATHIME_OK);
 
         /*
-         * valid_values is only populated for the two types that have values,
-         * and those are exactly the two types that get names. Everything else
-         * is "" — including, deliberately, a BOOL, whose two values are not
+         * valid_values is only populated for the two types that have a bitmask
+         * of them, and those are the two types this loop can walk. Everything
+         * else is "" — including, deliberately, a BOOL, whose two values are not
          * worth a vocabulary.
+         *
+         * With one exception, and it is why this asks valid_value_count rather
+         * than only the type: PATHIME_OPT_TABLE_FILE is a STRING whose legal
+         * values are the tables the build installed. They are enumerated through
+         * this same pair of entry points, because the alternative was a second
+         * enumeration API for one option. They cannot be checked against a fixed
+         * list here — the set depends on LIBPATHIME_TABLES, and on Linux the core
+         * tests often run where no data is staged at all, so the count is
+         * legitimately zero there and nonzero on Windows, where the test binary
+         * sits beside pathime-data/. What is checked is the contract: every index
+         * below the count has a name, and the first index past it does not.
          */
-        const bool nameable = info.type == PATHIME_OPTION_ENUM ||
-                              info.type == PATHIME_OPTION_FLAGS;
-        if (!nameable) {
-            PT_CHECK_STR(pathime_option_value_name(option, 0), "");
-            PT_CHECK_STR(pathime_option_value_name(option, 1), "");
+        if (info.type != PATHIME_OPTION_ENUM && info.type != PATHIME_OPTION_FLAGS) {
+            /* Across every engine, for the same reason the bitmask below is:
+             * names do not depend on who implements the option, so the set to
+             * walk is the widest any engine reports. */
+            size_t count = 0;
+            for (size_t e = 0; e < kEngineCount; ++e) {
+                pathime_engine probe;
+                probe.id = static_cast<pathime_engine_id_t>(e);
+                pathime_option_info_t probe_info;
+                std::memset(&probe_info, 0, sizeof probe_info);
+                probe_info.struct_size = sizeof probe_info;
+                if (pathime_engine_option_info(&probe, option, &probe_info) == PATHIME_OK &&
+                    probe_info.supported && probe_info.valid_value_count > count) {
+                    count = probe_info.valid_value_count;
+                }
+            }
+
+            for (size_t i = 0; i < count; ++i) {
+                const char *name =
+                    pathime_option_value_name(option, static_cast<int64_t>(i));
+                PT_CHECK_MSG(name[0] != '\0', "%s: enumerated value %zu has no name",
+                             pathime_option_name(option), i);
+                named_values++;
+            }
+            PT_CHECK_STR(
+                pathime_option_value_name(option, static_cast<int64_t>(count)), "");
             continue;
         }
 
