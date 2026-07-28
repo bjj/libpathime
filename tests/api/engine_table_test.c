@@ -441,6 +441,74 @@ static void test_engine_cap(pathime_engine_t *engine)
     pathime_context_destroy(ctx);
 }
 
+/*
+ * Enumeration: the installed tables reported as the legal values of
+ * PATHIME_OPT_TABLE_FILE, so a client can offer a choice without knowing where
+ * the resource directory landed. This is what lets the demo build a picker, and
+ * it is deliberately the *only* thing the API says about an installed table —
+ * the machine-readable key, no display name, no icon, no language list.
+ */
+static void test_enumeration(pathime_engine_t *engine)
+{
+    client_log_t log;
+    pathime_context_t *ctx = open_context(engine, &log, "cangjie5");
+    pathime_option_info_t info;
+    size_t i;
+    bool found_cangjie = false;
+
+    if (ctx == NULL) {
+        return;
+    }
+
+    memset(&info, 0, sizeof(info));
+    info.struct_size = sizeof(info);
+    PT_CHECK_STATUS(pathime_engine_option_info(engine, PATHIME_OPT_TABLE_FILE, &info),
+                    PATHIME_OK);
+    PT_CHECK(info.supported);
+    PT_CHECK(info.type == PATHIME_OPTION_STRING);
+
+    /* The five tables the build ships, at least. */
+    PT_CHECK(info.valid_value_count > 0);
+
+    for (i = 0; i < info.valid_value_count; i++) {
+        const char *name = pathime_option_value_name(PATHIME_OPT_TABLE_FILE, (int64_t)i);
+
+        /* Every enumerated value is a real name, never "". */
+        PT_CHECK(name[0] != '\0');
+
+        /* A bare name, not a path: that is what the setter accepts. */
+        PT_CHECK(strchr(name, '/') == NULL);
+        PT_CHECK(strchr(name, '\\') == NULL);
+        PT_CHECK(strstr(name, ".db") == NULL);
+
+        if (strcmp(name, "cangjie5") == 0) {
+            found_cangjie = true;
+        }
+
+        /* And every one of them is accepted by the option it enumerates —
+         * which is the whole promise, so it is checked rather than assumed. */
+        PT_CHECK_STATUS(
+            pathime_context_set_option_string(ctx, PATHIME_OPT_TABLE_FILE, name),
+            PATHIME_OK);
+    }
+    PT_CHECK(found_cangjie);
+
+    /* Sorted, so a client's list is stable between runs. */
+    for (i = 1; i < info.valid_value_count; i++) {
+        const char *previous =
+            pathime_option_value_name(PATHIME_OPT_TABLE_FILE, (int64_t)(i - 1));
+        const char *current = pathime_option_value_name(PATHIME_OPT_TABLE_FILE, (int64_t)i);
+        PT_CHECK(strcmp(previous, current) < 0);
+    }
+
+    /* Out of range is "", the same answer every other type gives. */
+    PT_CHECK(pathime_option_value_name(PATHIME_OPT_TABLE_FILE,
+                                       (int64_t)info.valid_value_count)[0] == '\0');
+    PT_CHECK(pathime_option_value_name(PATHIME_OPT_TABLE_FILE, -1)[0] == '\0');
+
+    pathime_context_destroy(ctx);
+}
+
 /* Reset discards without committing, which is the header's rule for it. */
 static void test_reset_discards(pathime_engine_t *engine)
 {
@@ -489,6 +557,7 @@ int main(void)
         test_table_declares_options(engine);
         test_no_table_is_inert(engine);
         test_second_table(engine);
+        test_enumeration(engine);
         test_max_candidates(engine);
         test_engine_cap(engine);
         test_reset_discards(engine);

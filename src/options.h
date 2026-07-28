@@ -169,6 +169,24 @@ pathime_status_t option_check_string(pathime_option_t option,
                                      const char *value);
 
 /**
+ * How many values a STRING option enumerates, and the name of the one at
+ * @a index ("" when out of range).
+ *
+ * The string counterpart of OptionDescriptor::valid_values, and unlike every
+ * other part of the descriptor it is not static: PATHIME_OPT_TABLE_FILE
+ * enumerates the tables found beneath the resource directory, so both answer
+ * for the current installation and both are empty before pathime_init().
+ *
+ * These reach the table backend directly rather than through EngineBackend,
+ * because pathime_option_value_name() takes no engine handle — a value's name
+ * has never depended on one, and widening the whole introspection surface for a
+ * single option would be the wrong trade. Any other string option answers 0
+ * and "", which is what "not a closed set" looks like from here.
+ */
+size_t option_string_value_count(pathime_option_t option);
+const char *option_string_value_name(pathime_option_t option, size_t index);
+
+/**
  * The resolved effective value of a BOOL, INT, ENUM or FLAGS option — what the
  * engine is actually doing, not which tier supplied it. This is the same walk
  * the public getters perform, exposed because core files outside options.cc

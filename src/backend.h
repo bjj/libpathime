@@ -427,6 +427,33 @@ void table_global_shutdown();
 
 /** A new engine for PATHIME_ENGINE_TABLE. */
 std::unique_ptr<EngineBackend> table_create_engine();
+
+/* ---------------------------------------------------------------------------
+ * The installed tables, enumerated
+ *
+ * The values PATHIME_OPT_TABLE_FILE accepts by bare name, which is how a client
+ * offers a choice of table rather than having to know one already. Read once
+ * during table_global_init() by listing the table directory, so these are cheap
+ * and answer identically for the life of the process.
+ *
+ * Reached from options.cc rather than through EngineBackend, and that is not an
+ * oversight: pathime_option_value_name() takes no engine handle, because a
+ * value's name has never depended on one. Adding a handle to it so that one
+ * option could reach one backend would change the shape of the whole
+ * introspection surface for a single case.
+ * ------------------------------------------------------------------------- */
+
+/** How many tables the resource directory holds. Zero before initialization. */
+size_t table_installed_count();
+
+/**
+ * The bare name of installed table @a index — "cangjie5", not a path and not a
+ * display name — or "" when @a index is out of range.
+ *
+ * Sorted, so a client's list is stable between runs against one installation.
+ * Valid until table_global_shutdown().
+ */
+const char *table_installed_name(size_t index);
 #endif
 
 }  // namespace pathime

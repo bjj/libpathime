@@ -36,57 +36,16 @@ candidate ordering (§8), select and commit (§9), and Chinese variant
 classification (§11.1). `tools/table-compile` compiles tables at build time,
 and five of them ship: cangjie5, quick5, wubi-jidian86, stroke5, zhuyin.
 
+Table enumeration is settled and done. The installed tables are the legal values
+of `PATHIME_OPT_TABLE_FILE`, reported through the introspection already there —
+`pathime_option_info_t::valid_value_count` says how many, and
+`pathime_option_value_name()` names each by index. No new entry points, and no
+display names, icons or language lists: what comes back is the machine-readable
+key the setter accepts, because presentation is the client's domain. The demo
+picks a table with the same Left/Right that steps an enum, which is what it was
+missing.
+
 `src/engines/table/README.md` is the map. What follows is only what is missing.
-
-### Next: table enumeration — how does a client know what tables exist?
-
-**Top priority.** It blocks the demo, and it is the one question the bare-name
-decision left open rather than answered.
-
-Today `PATHIME_OPT_TABLE_FILE` takes a bare name that resolves to
-`<resource_dir>/table/<name>.db`, or a path used verbatim. That is enough for a
-client that already knows which table it wants. It is not enough for a client
-that wants to *offer* a choice, and nothing in the API lets one ask what is
-installed — `resource_dir` itself is not reported, so a client cannot even look.
-
-The demo is the proof. Its status line says `needs a table file`, but tabbing
-into the options panel and pressing Enter on `table-file` answers "engine does
-not implement this operation" — `demo/src/options_view.cc:162`, where
-`adjust_option()` declines every `PATHIME_OPTION_STRING`. The message is doubly
-misleading: nothing is unimplemented, and the engine named is not what refused.
-But making the message honest does not make the demo usable, because the demo
-edits options by *stepping through values* and a table name has no value list to
-step through. It needs to enumerate.
-
-What has to be decided:
-
-- **Does enumeration return names, or descriptions?** A table declares `NAME`,
-  localized `NAME.zh_CN/HK/TW`, `LANGUAGES`, an author and a description. A
-  picker wants a display name; `PATHIME_OPT_TABLE_FILE` wants the bare name.
-  Returning only the latter makes every client build its own label out of a
-  filename.
-- **What is enumerated — shipped tables, or loaded ones?** Scanning
-  `<resource_dir>/table/` is a directory read at a moment the API currently has
-  no reason to touch the disk, and it says nothing about tables the client
-  supplies by path.
-- **Where does it hang?** It is not an option: it is a property of the
-  installation, not a value with tiers. Most likely new entry points beside
-  `pathime_has_engine()`, which is the existing "what can this build do"
-  question.
-- **What does it cost to open a table just to describe it?** A name and a
-  language list live in the `ime` table, so describing one means opening the
-  database. Doing that for every table in the directory on one call is real work
-  — and the alternative, a manifest written at build time, is a second data
-  format to keep in step with the tables themselves.
-- **Does it stay honest when a client names a path?** Enumeration cannot know
-  about a table outside the resource directory, so whatever it returns is "what
-  I ship", not "what you can use".
-
-The cheap answer that was declined earlier — three entry points returning count,
-name and path — is still on the table; it was declined as premature surface for
-an engine with no consumers, and the demo is now a consumer. The expensive
-answer is a described-table struct with `struct_size`, which is the shape the
-rest of the API uses for anything it expects to grow.
 
 ### Not implemented, in rough priority order
 

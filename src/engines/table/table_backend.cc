@@ -59,6 +59,19 @@ namespace {
 std::string g_table_dir;   /* <resource_dir>/table */
 std::string g_user_dir;    /* <data_dir>/table */
 
+/**
+ * The bare names of the tables in g_table_dir, sorted, listed once at
+ * initialization. These are what PATHIME_OPT_TABLE_FILE accepts and what
+ * pathime_option_value_name() hands back, so a client can offer a choice
+ * without knowing where the resource directory landed.
+ *
+ * Listed once rather than on demand because the answer is process state that
+ * cannot change while the library is up — the header promises the names stay
+ * valid until pathime_shutdown(), and re-listing would break that by
+ * reallocating them under a caller that is still holding one.
+ */
+std::vector<std::string> g_installed;
+
 bool has_separator(const std::string &value)
 {
     return value.find('/') != std::string::npos || value.find('\\') != std::string::npos;
@@ -830,6 +843,18 @@ bool table_global_init(const char *data_dir, const char *resource_dir)
     }
 
     /*
+     * `.db` and nothing else: the directory may also hold the `.cache` files of
+     * spec §5.4 and whatever a packager put beside them, and a name that did
+     * not resolve to a table would be a choice that fails when taken.
+     */
+    for (const std::string &entry : list_directory(table::g_table_dir)) {
+        const size_t dot = entry.rfind(".db");
+        if (dot != std::string::npos && dot + 3 == entry.size() && dot > 0) {
+            table::g_installed.push_back(entry.substr(0, dot));
+        }
+    }
+
+    /*
      * Reported available whenever there is a resource directory to resolve
      * names against. Deliberately not a test that the directory exists: a
      * client that names an absolute path needs no shipped tables at all, and
@@ -843,6 +868,20 @@ void table_global_shutdown()
 {
     table::g_table_dir.clear();
     table::g_user_dir.clear();
+    table::g_installed.clear();
+}
+
+size_t table_installed_count()
+{
+    return table::g_installed.size();
+}
+
+const char *table_installed_name(size_t index)
+{
+    if (index >= table::g_installed.size()) {
+        return "";
+    }
+    return table::g_installed[index].c_str();
 }
 
 std::unique_ptr<EngineBackend> table_create_engine()

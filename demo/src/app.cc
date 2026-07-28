@@ -32,7 +32,7 @@ const EngineDef kEngineDefs[] = {
     {PATHIME_ENGINE_BOPOMOFO, "bopomofo", "Chinese · Bopomofo",
      "type  su3cl3  then Space; digits are tones here, so Alt+1-9 picks"},
     {PATHIME_ENGINE_TABLE,    "table",    "Table-driven",
-     "needs a table file"},
+     "pick a table under Options \xE2\x86\x92 table-file, then type"},
 };
 
 /*

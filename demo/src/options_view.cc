@@ -102,7 +102,16 @@ std::string value_text(const OptionRow &row,
             engine_level ? pathime_engine_get_option_string(engine, row.option, &value)
                          : pathime_context_get_option_string(ctx, row.option, &value);
         if (st != PATHIME_OK) return std::string("<") + pathime_status_string(st) + ">";
-        if (value.len == 0) return "(empty)";
+        if (value.len == 0) {
+            /* Say what the arrow keys would do, rather than only that nothing
+             * is set: "(empty)" alone reads as "and there is nothing here". */
+            if (row.info.valid_value_count != 0) {
+                std::snprintf(buf, sizeof(buf), "(none)   %zu available",
+                              row.info.valid_value_count);
+                return buf;
+            }
+            return "(empty)";
+        }
         return std::string(value.bytes, value.len);
     }
 
@@ -159,7 +168,51 @@ pathime_status_t adjust_option(const OptionRow &row,
                                bool engine_level,
                                int step)
 {
-    if (row.info.type == PATHIME_OPTION_STRING) return PATHIME_ERROR_UNSUPPORTED;
+    if (row.info.type == PATHIME_OPTION_STRING) {
+        /*
+         * A string option is edited by stepping through the values the library
+         * enumerates, exactly as an enum is — the library reports how many
+         * there are and names each by index, so this loop needs no idea that
+         * the option happens to be about tables.
+         *
+         * An option with nothing to enumerate is genuinely not editable here:
+         * this panel steps through values and has no text entry, so there is
+         * no honest thing to do with a free-form string.
+         */
+        if (row.info.valid_value_count == 0) return PATHIME_ERROR_UNSUPPORTED;
+
+        pathime_str_t current{nullptr, 0};
+        const pathime_status_t got =
+            engine_level ? pathime_engine_get_option_string(engine, row.option, &current)
+                         : pathime_context_get_option_string(ctx, row.option, &current);
+        if (got != PATHIME_OK) return got;
+
+        const std::size_t count = row.info.valid_value_count;
+        const std::string now(current.bytes ? current.bytes : "", current.len);
+
+        /*
+         * Where the current value is not one of the enumerated ones — unset, or
+         * a path the client typed — the first step lands on entry 0 rather than
+         * moving relative to something that is not in the list.
+         */
+        std::size_t at = count;
+        for (std::size_t i = 0; i < count; i++)
+            if (now == pathime_option_value_name(row.option, static_cast<std::int64_t>(i)))
+                at = i;
+
+        std::size_t next;
+        if (at == count) {
+            next = (step >= 0) ? 0 : count - 1;
+        } else {
+            const int direction = step >= 0 ? 1 : -1;
+            next = (at + count + static_cast<std::size_t>(direction)) % count;
+        }
+
+        const char *chosen =
+            pathime_option_value_name(row.option, static_cast<std::int64_t>(next));
+        return engine_level ? pathime_engine_set_option_string(engine, row.option, chosen)
+                            : pathime_context_set_option_string(ctx, row.option, chosen);
+    }
 
     std::int64_t value = 0;
     const pathime_status_t st = get_number(row, engine, ctx, engine_level, &value);

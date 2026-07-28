@@ -10,9 +10,10 @@
  *
  * A resolved value reaches its adapter through ContextBackend::options_changed()
  * (see commit_change), which exists because a mid-composition change has to be
- * felt now rather than at the next keystroke, of which there may be none. What
- * remains marked TODO(impl) is tier 3 — the value a table file itself declares
- * — which has nothing behind it until the table engine is written (TODO.md).
+ * felt now rather than at the next keystroke, of which there may be none.
+ * Tier 3 — the value a table file itself declares — is the one resolution input
+ * that is not held here: it lives in a data file, so resolve_number() and
+ * resolve_string() read it through EngineBackend::declared_number/declared_text.
  *
  * Three things worth knowing before editing:
  *
@@ -38,6 +39,9 @@
 #include <new>
 #include <string>
 
+#include <pathime/config.h>
+
+#include "backend.h"
 #include "context.h"
 #include "engine.h"
 #include "init.h"
@@ -1119,6 +1123,31 @@ pathime_status_t option_check_string(pathime_option_t option,
     return PATHIME_OK;
 }
 
+size_t option_string_value_count(pathime_option_t option)
+{
+#if PATHIME_WITH_TABLE
+    if (option == PATHIME_OPT_TABLE_FILE) {
+        return table_installed_count();
+    }
+#else
+    (void)option;
+#endif
+    return 0;
+}
+
+const char *option_string_value_name(pathime_option_t option, size_t index)
+{
+#if PATHIME_WITH_TABLE
+    if (option == PATHIME_OPT_TABLE_FILE) {
+        return table_installed_name(index);
+    }
+#else
+    (void)option;
+    (void)index;
+#endif
+    return "";
+}
+
 int64_t resolve_option_number(const pathime_engine_t *engine,
                               const pathime_context_t *ctx,
                               pathime_option_t option)
@@ -1190,6 +1219,20 @@ const char *pathime_option_value_name(pathime_option_t option, int64_t value)
     const pathime::OptionDescriptor *desc = pathime::option_descriptor(option);
     if (desc == nullptr) {
         return "";
+    }
+
+    /*
+     * The one type whose values are not a static table. A string option
+     * enumerates what the installation holds, so `value` is an index rather
+     * than an enumerator or a bit, and the answer is "" until pathime_init()
+     * has looked. That is the header's promise, stated there in as many words.
+     */
+    if (desc->type == PATHIME_OPTION_STRING) {
+        if (value < 0) {
+            return "";
+        }
+        return pathime::option_string_value_name(option,
+                                                 static_cast<size_t>(value));
     }
 
     /*
@@ -1295,6 +1338,17 @@ pathime_status_t pathime_engine_option_info(const pathime_engine_t *engine,
     staged.valid_values = pathime::option_valid_values(option, engine->id);
     staged.default_string.bytes = desc->default_string;
     staged.default_string.len = std::strlen(desc->default_string);
+
+    /*
+     * Only for an engine that implements the option, unlike every other member
+     * above. Those are descriptor facts and are true whoever asks; this one is
+     * a claim about what a client may *do*, and offering the installed tables
+     * as the legal values of an option Hangul does not have would be an
+     * invitation to a call that fails.
+     */
+    staged.valid_value_count = staged.supported
+                                   ? pathime::option_string_value_count(option)
+                                   : 0;
 
     /* Staged and copied rather than written member by member so that a partial
      * write, once there is an older layout to serve, is one line and not a

@@ -1975,6 +1975,24 @@ typedef struct pathime_option_info {
      * be held indefinitely without copying.
      */
     pathime_str_t default_string;
+
+    /**
+     * STRING only: how many legal values this engine can enumerate, which
+     * pathime_option_value_name() then names by index. Zero for every other
+     * type, and zero for a string option whose values are not a closed set.
+     *
+     * This is the string counterpart of @a valid_values, and it is a count
+     * rather than a bitmask for the obvious reason: the legal values are text.
+     * PATHIME_OPT_TABLE_FILE is the only option with one today — the tables the
+     * installation ships — and it is why this member exists.
+     *
+     * Unlike everything else in this struct it is *not* static. It describes
+     * what was found beneath pathime_init_params_t::resource_dir, so it is 0
+     * before pathime_init() and may differ between two runs against different
+     * installations. A client walking the inventory before initialization gets
+     * a correct description of every option except this one member.
+     */
+    size_t valid_value_count;
 } pathime_option_info_t;
 
 /**
@@ -2023,11 +2041,25 @@ PATHIME_API const char *pathime_option_name(pathime_option_t option);
  * @param value For PATHIME_OPTION_ENUM, the enumerator itself. For
  *              PATHIME_OPTION_FLAGS, a single bit — one of the bits set in
  *              pathime_option_info_t::valid_values, not a combination of them.
+ *              For PATHIME_OPTION_STRING, a 0-based index below
+ *              pathime_option_info_t::valid_value_count.
  *
- * Those two are the only types that have values worth naming; BOOL, INT and
- * STRING yield "". So does an option id that does not exist, a value this
- * option does not define, and a FLAGS argument with more or fewer than one bit
- * set. "" is never a valid name, so one test covers all of them.
+ * BOOL and INT have no values worth naming and yield "". So does an option id
+ * that does not exist, a value this option does not define, and a FLAGS
+ * argument with more or fewer than one bit set. "" is never a valid name, so
+ * one test covers all of them.
+ *
+ * The string case is what lets a client offer a *choice* of table rather than
+ * requiring it to already know one: the names returned are exactly the values
+ * PATHIME_OPT_TABLE_FILE accepts, so a picker is a loop over them and the
+ * chosen entry is passed straight back to the setter.
+ *
+ * What comes back is a machine-readable key, the same as for every other type
+ * — "cangjie5", not "CangJie5" or 倉頡第五代. The tables carry display names
+ * and icons; this header does not surface them, because presentation is the
+ * client's domain and there is no localization surface here. A client that
+ * wants a pretty label maps the key to one of its own, exactly as it does for
+ * "traditional-first".
  *
  * Together with the descriptor this enumerates from nothing: valid_values
  * gives the legal set — bit i meaning the value i for an ENUM, and the bit
@@ -2040,7 +2072,17 @@ PATHIME_API const char *pathime_option_name(pathime_option_t option);
  *         ... pathime_option_value_name(opt, value)
  *     }
  *
- * A static table lookup: safe to call before pathime_init(). Callback-safe.
+ * and for a string option the same walk is an index:
+ *
+ *     for (size_t i = 0; i < info.valid_value_count; i++)
+ *         ... pathime_option_value_name(opt, (int64_t)i)
+ *
+ * A static table lookup for every type but PATHIME_OPTION_STRING, and so safe
+ * to call before pathime_init() — except that a string option enumerates what
+ * the installation holds, which before initialization is nothing. Callback-safe
+ * throughout; the installed set is read once during pathime_init() and does not
+ * change while the library is up, so the returned pointers stay valid until
+ * pathime_shutdown().
  */
 PATHIME_API const char *pathime_option_value_name(pathime_option_t option,
                                                   int64_t value);

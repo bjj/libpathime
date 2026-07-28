@@ -77,6 +77,11 @@ it while the options panel has the keyboard.
   out under it, per keystroke.
 - **Turn `punctuation-width` to `half` and type `,`** under any Chinese or
   Japanese engine.
+- **Switch to the table engine and step `table-file` in the options panel.**
+  The values are the tables this build installed, and the library is what
+  enumerates them — the demo knows only that a string option had legal values to
+  step through. Pick `cangjie5` and type `ab` for 明, or `stroke5` and type `n`,
+  whose input characters are punctuation rather than letters.
 
 ## Getting the text back out
 
@@ -88,15 +93,14 @@ and others silently ignore.
 
 - **The caret is always at the end of the document.** Arrow keys go to the
   engine rather than moving it. A demo text field, not an editor.
-- **String options are shown, not edited, so the table engine is unreachable
-  here.** `PATHIME_OPT_TABLE_FILE` is a string, and a context that resolves no
-  table reports every key unhandled — so the engine builds and runs, but this
-  demo cannot point it at a table. Editing that one option would make it usable,
-  and would be the first real client of the bare-name resolution rule
-  (`"cangjie5"` → `<resource_dir>/table/cangjie5.db`). It is in `TODO.md`.
-- **Flags options toggle all-or-nothing.** `pinyin-fuzzy` has twenty bits and
-  the library gives no names for them — naming values is the client's job, and
-  naming twenty of them would teach less than turning the feature off and on.
+- **String options are stepped through, not typed into.** The only one is
+  `PATHIME_OPT_TABLE_FILE`, and the library enumerates its legal values — the
+  installed tables — so Left/Right picks one exactly as it picks an enum value.
+  A string option with nothing to enumerate stays unsupported here, because this
+  panel has no text entry and a free-form string has no honest gesture.
+- **Flags options are edited one bit at a time, not as a set.** Left and Right
+  move between `pinyin-fuzzy`'s twenty bits and Space toggles the one under the
+  cursor; there is no "all" or "none" gesture.
 - **Chorded keys never reach an engine.** They are this program's shortcuts.
   Engines would decline them anyway, which is what `PATHIME_MOD_CONTROL` is for.
 
