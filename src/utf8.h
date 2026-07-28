@@ -90,6 +90,20 @@ size_t utf8_byte_offset(const char *bytes, size_t len, size_t scalar_index);
 size_t utf8_scalar_index(const char *bytes, size_t len, size_t byte_offset);
 
 /**
+ * Decode the scalar value beginning at byte @a offset, advancing @a offset past
+ * it. Returns false at the end of the text or on any sequence the validators
+ * reject, leaving @a offset untouched.
+ *
+ * The counterpart to utf8_append_scalar(), added for the table engine, which is
+ * the first backend to take *text* as data rather than as something to hand to
+ * a vendor library: VALID_INPUT_CHARS, START_CHARS and the char-prompt keys are
+ * all sets of scalars written as UTF-8, and membership in them is asked once per
+ * key press. It applies the same strictness as utf8_validate() because it is the
+ * same decoder — overlongs, surrogates and truncation are rejected here too.
+ */
+bool utf8_next_scalar(const char *bytes, size_t len, size_t *offset, uint32_t *out_scalar);
+
+/**
  * Append one scalar value to @a out as UTF-8. A surrogate half, a value above
  * U+10FFFF, or U+0000 appends nothing and returns false.
  */

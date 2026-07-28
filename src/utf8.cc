@@ -192,6 +192,23 @@ size_t utf8_scalar_index(const char *bytes, size_t len, size_t byte_offset)
     return utf8_scalar_count(bytes, byte_offset);
 }
 
+bool utf8_next_scalar(const char *bytes, size_t len, size_t *offset, uint32_t *out_scalar)
+{
+    size_t i = *offset;
+    if (bytes == nullptr || i >= len) {
+        return false;
+    }
+
+    uint32_t scalar = 0;
+    if (!decode_one(bytes, len, i, scalar)) {
+        return false;
+    }
+
+    *offset = i;
+    *out_scalar = scalar;
+    return true;
+}
+
 bool utf8_append_scalar(std::string &out, uint32_t scalar)
 {
     if (!is_scalar_value(scalar)) {

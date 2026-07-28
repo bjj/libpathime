@@ -20,15 +20,21 @@ Per-backend dependencies:
 | Korean (libhangul) | nothing beyond a C compiler |
 | Japanese (anthy-unicode) | nothing external; its dictionary is built by host tools at build time, so cross-compiling is not yet supported |
 | Chinese (pyzy) | `glib-2.0 ≥ 2.24`, `sqlite3`, a UUID provider (`libuuid` on Unix; the bundled Rpcrt4 shim on Windows), plus Python 3 for the optional `android.db` |
-| Table-driven | nothing external — it is written in this repository, and is not written yet |
+| Table-driven | `sqlite3` — the compiled table format *is* a SQLite database, so reading one ibus-table wrote needs it. Its tables come from the `engines/ibus-table-chinese` submodule. |
 
 The table-driven backend (`PATHIME_ENGINE_TABLE`: Wubi, Cangjie, Stroke5,
-Zhuyin, …) has no submodule. `ibus-table`, the reference implementation, is
+Zhuyin, …) wraps no library. `ibus-table`, the reference implementation, is
 Python and cannot be linked against, so this engine is written in `libpathime`
-itself against `docs/ibus-table-spec.md`. That code does not exist yet, so
-`LIBPATHIME_WITH_TABLE` defaults to `OFF` and turning it on is refused at
-configure time with a warning naming the implementation — not a dependency — as
-what is missing.
+itself against `docs/ibus-table-spec.md`. What it *does* need is data:
+`engines/ibus-table-chinese` is a submodule of table sources, and the build
+compiles a selected set of them with `pathime-table-compile`, a host tool built
+from the engine's own sources. Upstream's `tables/CMakeLists.txt` is not used —
+it calls `ibus-table-createdb` (the Python being replaced) plus `sed`, `iconv`
+and `awk`, none of which run on Windows.
+
+`LIBPATHIME_WITH_TABLE` still defaults to `OFF`, and turning it on now needs
+only SQLite. Without the submodule the engine still builds and still opens a
+table a client names by absolute path; it simply ships none.
 
 Linux (Debian/Ubuntu):
 
@@ -99,7 +105,8 @@ developer command prompt, and remember to re-set `VCPKG_ROOT` afterwards.
 | Option | Default | Meaning |
 |--------|---------|---------|
 | `LIBPATHIME_WITH_HANGUL` / `_ANTHY` / `_PYZY` | `ON` | Enable each backend, both the vendored library and its adapter. A backend whose dependencies are missing is warned about and skipped. |
-| `LIBPATHIME_WITH_TABLE` | `OFF` | The table-driven backend. Not implemented yet; forced back off (or a hard error under `LIBPATHIME_REQUIRE_BACKENDS`) if enabled. |
+| `LIBPATHIME_WITH_TABLE` | `OFF` | The table-driven backend. Needs `sqlite3`; skipped with a warning (or a hard error under `LIBPATHIME_REQUIRE_BACKENDS`) without it. |
+| `LIBPATHIME_TABLES` | five tables | Which tables to compile into `pathime-data/table/`, as `<name>\|<source>\|<freq source>` entries. Default: `cangjie5`, `quick5`, `wubi-jidian86`, `stroke5`, `zhuyin` — about 9 MB compiled. All thirteen families in the submodule are available; adding one is a line. |
 | `LIBPATHIME_REQUIRE_BACKENDS` | `OFF` | Turn "missing dependency ⇒ skip" into a hard error (for CI). |
 | `LIBPATHIME_BUILD_TESTS` | `OFF` | Build the test suites — see `docs/testing.md`. |
 | `LIBPATHIME_BUILD_DEMO` | `OFF` | Build the interactive terminal demo — see `demo/README.md`. Needs the `demo/cpp-terminal` submodule. |
@@ -120,8 +127,10 @@ answers false for a backend whose runtime data is missing as well.
 - **Vendored libraries**: `libhangul`, `libanthy-unicode` (+
   `libanthydic-unicode`, `libanthyinput-unicode`), `libpyzy-1.0`.
 - **Data**: `pathime-data/`, holding `anthy/anthy.dic` (built by anthy's
-  four-stage codegen, ~20 MB) and `pyzy/main.db` (~3.4 MB / 16 tables) plus
-  `pyzy/phrases.txt`. See below.
+  four-stage codegen, ~20 MB), `pyzy/main.db` (~3.4 MB / 16 tables) plus
+  `pyzy/phrases.txt`, and `table/*.db` (~9 MB for the five default tables).
+  See below.
+- **Build-time tools, not installed**: `bin/pathime-table-compile`.
 - **With `LIBPATHIME_BUILD_DEMO=ON`**: `bin/pathime-demo`, plus the
   `cpp-terminal` library it draws with. Neither is installed.
 

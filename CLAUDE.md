@@ -5,12 +5,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project Overview
 
 `libpathime` is a new IBus input method engine library. Three backends wrap
-vendored submodules (libhangul, anthy-unicode, pyzy); a fourth, the
-table-driven engine, is **ours to write** — `ibus-table` is Python, so it is
-the reference feature set, not a linkable library — and it is the next large
-piece (`TODO.md`; `docs/ibus-table-spec.md` is the specification). The build,
-the core, all three adapters, options and negotiation, and the terminal demo
-are implemented and tested on Linux and Windows.
+vendored submodules (libhangul, anthy-unicode, pyzy); the fourth, the
+table-driven engine, is **ours** — `ibus-table` is Python, so it was the
+reference feature set rather than a linkable library, and the engine is written
+in `src/engines/table/` to `docs/ibus-table-spec.md`. The build, the core, all
+four adapters, options and negotiation including tier 3, and the terminal demo
+are implemented and tested; the table engine is Linux-verified only so far, and
+what it still lacks (learning, full-width conversion, pinyin and suggestion
+modes) is in `TODO.md`.
 
 > **Build:** see `BUILD.md`. NOTE! If you are on Linux, you are in a sbx
 > environment on Windows: build in `/tmp` to avoid issues with symlinks and
@@ -36,13 +38,15 @@ refs/                    # Local reference clones — gitignored, not submodules
   ibus-hangul/           # C engine wrapping libhangul; straightforward single-library integration
   ibus-anthy/            # Python engine wrapping anthy-unicode — pinned to bjj/ibus-anthy @ 0962741
   ibus-pinyin/           # C++ engine wrapping pyzy; most complex, Pinyin and Bopomofo
-  ibus-table/            # Self-contained Python engine — the reference for our own table engine
-  ibus-table-chinese/    # Table sources (Wubi, Cangjie, …) for use as test data (bjj/ibus-table-chinese)
+  ibus-table/            # Self-contained Python engine — the reference our table engine was specified from
 
-engines/                 # The vendored backend libraries, as submodules
+engines/                 # Vendored, never edited — three libraries and one data set
   libhangul/             # Korean input library
   anthy-unicode/         # Japanese kana-kanji conversion library
   pyzy/                  # Chinese Pinyin/Bopomofo conversion library
+  ibus-table-chinese/    # Table sources (Wubi, Cangjie, …); data, not code — its own
+                         # CMake build is unused. bjj/ibus-table-chinese @ cc4a17f
+tools/                   # Build-time tools: the table compiler, the variant generator
 ```
 
 After cloning, `git submodule update --init --recursive`.
@@ -72,6 +76,9 @@ only the routing:
   with file:line citations, each ending in "Impedance mismatches".
 - `docs/*-options.md` — per-backend option inventories (the round they fed is
   done; they remain the reference for what was cut and why).
+- `src/engines/table/README.md` — the table engine's own map, including the
+  data/behaviour boundary inside that directory and what the ibus-table data
+  contract costs.
 - `BUILD.md`, `docs/windows-port.md`, `demo/README.md` — build (including
   "Shipping the data"), the Windows port, the demo.
 

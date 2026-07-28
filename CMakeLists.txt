@@ -62,12 +62,14 @@ if(LIBPATHIME_WITH_PYZY)
   add_subdirectory(cmake/ports/pyzy)
 endif()
 
-# --- Table-driven (Wubi, Cangjie, Stroke5, Zhuyin, …): no submodule to build.
+# --- Table-driven (Wubi, Cangjie, Stroke5, Zhuyin, …): no library to build.
 # ibus-table, the feature-complete reference for these methods, is Python and
-# so cannot be wrapped; the engine described by docs/ibus-table-spec.md will be
-# written here instead, as a peer of the vendored libraries. Nothing exists to
-# compile yet, so LIBPATHIME_WITH_TABLE defaults OFF and is forced off by
-# LibpathimeDependencies if requested; src/engines/table/ holds only a README.
+# so cannot be wrapped; the engine of docs/ibus-table-spec.md is written in
+# src/engines/table/ instead, as a peer of the vendored libraries rather than a
+# wrapper around one. There is nothing to add_subdirectory here: the only
+# outside thing the engine needs is SQLite, gated in LibpathimeDependencies,
+# and engines/ibus-table-chinese is data rather than code — its own CMake build
+# needs ibus-table's Python createdb and is deliberately not used.
 
 # --- Generated public header: include/pathime/config.h ---
 # Records which backends survived the dependency gating above, so clients can
@@ -97,6 +99,11 @@ install(FILES "${PROJECT_BINARY_DIR}/include/pathime/config.h"
 # directories and the PATHIME_BUILD/PATHIME_STATIC definitions, so a consumer
 # that links libpathime::pathime needs no further wiring.
 add_subdirectory(src)
+
+# --- Build-time tools. Currently one: the table compiler, which turns the
+# source tables of engines/ibus-table-chinese into the databases the engine
+# reads. After src/, because it shares that directory's sources.
+add_subdirectory(tools)
 
 # --- The interactive demo: a client of the public API, in a terminal. All of
 # its wiring — including the cpp-terminal submodule it draws with — lives under

@@ -453,17 +453,44 @@ const OptionValue *resolve_value(const pathime_engine_t *engine,
     }
 
     /*
-     * TODO(impl): tier 3 slots in exactly here — the value the effective table
-     * declares, for PATHIME_ENGINE_TABLE only. The effective table is whatever
-     * PATHIME_OPT_TABLE_FILE resolves to at this same level (the context's if it
-     * names one, otherwise the engine's), so this is a lookup in the compiled
-     * table's header fields, not another store. It sits below both client levels
-     * and above the descriptor default, so a client that set nothing gets what
-     * the table author intended. Nothing to consult until the engine of
-     * docs/ibus-table-spec.md exists (TODO.md).
+     * Tier 3 is deliberately not here. It is not a stored value — it lives in a
+     * data file only the backend can read — so it cannot be returned as an
+     * OptionValue pointing at storage that outlives the call. resolve_number()
+     * and resolve_string() consult it themselves, each between this function
+     * answering nullptr and the descriptor default being applied, which is
+     * exactly the position the header's tier list gives it.
      */
-
     return nullptr;  /* tier 4: the caller applies the descriptor default */
+}
+
+/**
+ * The table whose declaration supplies tier 3 at the level being resolved for:
+ * the context's PATHIME_OPT_TABLE_FILE if it set one, otherwise the engine's.
+ *
+ * Deliberately *not* resolve_string() on PATHIME_OPT_TABLE_FILE, which would
+ * recurse: resolving that option consults tier 3, and tier 3 is keyed by it.
+ * Tiers 1 and 2 are the only ones it can come from — the header says the option
+ * has no tier-4 default, and a table naming itself is not a thing — so reading
+ * the two stores directly is both correct and terminating.
+ *
+ * Returns "" when neither level names a table, which every declared_*()
+ * implementation must answer false for.
+ */
+const char *tier3_table(const pathime_engine_t *engine, const pathime_context_t *ctx)
+{
+    if (engine->id != PATHIME_ENGINE_TABLE || engine->backend == nullptr) {
+        return "";
+    }
+
+    if (ctx != nullptr) {
+        if (const OptionValue *v = ctx->options.find(PATHIME_OPT_TABLE_FILE)) {
+            return v->text.c_str();
+        }
+    }
+    if (const OptionValue *v = engine->options.find(PATHIME_OPT_TABLE_FILE)) {
+        return v->text.c_str();
+    }
+    return "";
 }
 
 /**
@@ -484,7 +511,18 @@ int64_t resolve_number(const pathime_engine_t *engine,
                        pathime_option_t option)
 {
     const OptionValue *v = resolve_value(engine, ctx, option);
-    int64_t value = (v != nullptr) ? v->number : desc->default_value;
+
+    int64_t value;
+    int64_t declared = 0;
+    if (v != nullptr) {
+        value = v->number;
+    } else if (option != PATHIME_OPT_TABLE_FILE &&
+               engine->backend != nullptr &&
+               engine->backend->declared_number(tier3_table(engine, ctx), option, &declared)) {
+        value = declared;  /* tier 3 */
+    } else {
+        value = desc->default_value;
+    }
 
     if (option == PATHIME_OPT_HANGUL_PREEDIT && ctx != nullptr &&
         value == PATHIME_HANGUL_PREEDIT_NONE && ctx->delete_surrounding_text == nullptr) {
@@ -506,15 +544,27 @@ pathime_str_t resolve_string(const pathime_engine_t *engine,
                              pathime_option_t option)
 {
     pathime_str_t out;
+    const char *bytes = nullptr;
 
     if (const OptionValue *v = resolve_value(engine, ctx, option)) {
         out.bytes = v->text.c_str();
         out.len = v->text.size();
-    } else {
-        out.bytes = desc->default_string;
-        out.len = std::strlen(desc->default_string);
+        return out;
     }
 
+    /*
+     * Tier 3. PATHIME_OPT_TABLE_FILE is excluded because it is the key tier 3 is
+     * looked up *by*; see tier3_table().
+     */
+    if (option != PATHIME_OPT_TABLE_FILE && engine->backend != nullptr) {
+        bytes = engine->backend->declared_text(tier3_table(engine, ctx), option);
+    }
+    if (bytes == nullptr) {
+        bytes = desc->default_string;  /* tier 4 */
+    }
+
+    out.bytes = bytes;
+    out.len = std::strlen(bytes);
     return out;
 }
 
@@ -1084,6 +1134,29 @@ int64_t resolve_option_number(const pathime_engine_t *engine,
         return desc->default_value;
     }
     return resolve_number(engine, ctx, desc, option);
+}
+
+pathime_str_t resolve_option_string(const pathime_engine_t *engine,
+                                    const pathime_context_t *ctx,
+                                    pathime_option_t option)
+{
+    pathime_str_t empty;
+    empty.bytes = "";
+    empty.len = 0;
+
+    const OptionDescriptor *desc = option_descriptor(option);
+    if (desc == nullptr || desc->type != PATHIME_OPTION_STRING) {
+        return empty;
+    }
+    if (engine == nullptr && ctx != nullptr) {
+        engine = ctx->engine;
+    }
+    if (engine == nullptr) {
+        empty.bytes = desc->default_string;
+        empty.len = std::strlen(desc->default_string);
+        return empty;
+    }
+    return resolve_string(engine, ctx, desc, option);
 }
 
 }  // namespace pathime

@@ -84,6 +84,15 @@ if(LIBPATHIME_WITH_PYZY)
     "${PROJECT_SOURCE_DIR}/src/engines/pyzy/observer.cc"
     "${PROJECT_SOURCE_DIR}/src/engines/pyzy/punctuation.cc")
 endif()
+if(LIBPATHIME_WITH_TABLE)
+  list(APPEND _lpi_options_sources
+    "${PROJECT_SOURCE_DIR}/src/engines/table/table_backend.cc"
+    "${PROJECT_SOURCE_DIR}/src/engines/table/table_db.cc"
+    "${PROJECT_SOURCE_DIR}/src/engines/table/table_properties.cc"
+    "${PROJECT_SOURCE_DIR}/src/engines/table/table_source.cc"
+    "${PROJECT_SOURCE_DIR}/src/engines/table/ranking.cc"
+    "${PROJECT_SOURCE_DIR}/src/engines/table/variants.cc")
+endif()
 libpathime_add_core_test(options SOURCES ${_lpi_options_sources})
 target_include_directories(core_options_test PRIVATE
   $<TARGET_PROPERTY:pathime,INCLUDE_DIRECTORIES>)
@@ -95,3 +104,25 @@ target_compile_definitions(core_options_test PRIVATE
 libpathime_add_core_test(composition SOURCES
   "${PROJECT_SOURCE_DIR}/src/composition.cc"
   "${PROJECT_SOURCE_DIR}/src/utf8.cc")
+
+# core.table reaches the table engine's data layer directly: the source parser,
+# the declaration, the LIKE pattern and the candidate ordering. Its source list
+# is deliberately short — four files and utf8 — and that shortness is the
+# assertion. Everything below backend.h in engines/table/ is meant to be usable
+# without the engine, and a link error here would be the first sign that
+# something had reached back across the seam.
+#
+# Registered unconditionally so the registration cannot be lost, and gated
+# inside the .cc on PATHIME_WITH_TABLE like the api engine tests. It needs
+# SQLite because table_db.cc carries build_like_pattern(), even though nothing
+# here opens a database.
+if(LIBPATHIME_WITH_TABLE)
+  libpathime_add_core_test(table SOURCES
+    "${PROJECT_SOURCE_DIR}/src/engines/table/table_source.cc"
+    "${PROJECT_SOURCE_DIR}/src/engines/table/table_properties.cc"
+    "${PROJECT_SOURCE_DIR}/src/engines/table/table_db.cc"
+    "${PROJECT_SOURCE_DIR}/src/engines/table/ranking.cc"
+    "${PROJECT_SOURCE_DIR}/src/engines/table/variants.cc"
+    "${PROJECT_SOURCE_DIR}/src/utf8.cc")
+  target_link_libraries(core_table_test PRIVATE SQLite::SQLite3)
+endif()

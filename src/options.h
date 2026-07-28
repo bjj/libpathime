@@ -189,13 +189,26 @@ pathime_status_t option_check_string(pathime_option_t option,
  * value that is not an option id. There is no error channel: every caller
  * either knows the option is real or wants the default.
  *
- * There is deliberately no string counterpart yet. PATHIME_OPT_TABLE_FILE is
- * the only string option a core file will want resolved, and the table engine
- * that would want it does not exist; adding one is additive.
  */
 int64_t resolve_option_number(const pathime_engine_t *engine,
                               const pathime_context_t *ctx,
                               pathime_option_t option);
+
+/**
+ * The same for a STRING option, as a borrowed slice with the lifetime
+ * resolve_string() describes: it points into the winning store, into a loaded
+ * table's declaration, or at the descriptor's static default, never at a
+ * temporary.
+ *
+ * Added for the table engine, which is the only backend with string options to
+ * pull — the table it inputs from and its two wildcard characters. Returns an
+ * empty slice for anything that is not a STRING option, which is the same
+ * "no distinction between unset and empty" the header gives
+ * PATHIME_OPT_TABLE_FILE.
+ */
+pathime_str_t resolve_option_string(const pathime_engine_t *engine,
+                                    const pathime_context_t *ctx,
+                                    pathime_option_t option);
 
 }  // namespace pathime
 

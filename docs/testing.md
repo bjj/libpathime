@@ -33,6 +33,15 @@ C and that every symbol a client needs is actually exported. Holds the ABI,
 lifecycle and options suites, plus one end-to-end test per engine that types
 real Korean, Japanese and Chinese through the public API.
 
+`api.engine_table` carries a job the other three do not. For hangul, anthy and
+pyzy the vendored library is the authority on what correct output looks like and
+the test records what it does; the table engine has no such authority, because
+libpathime wrote it. So that test *is* where the behaviour of
+`docs/ibus-table-spec.md` §6–§9 is pinned down, and it deliberately runs against
+the real tables the build compiles out of `ibus-table-chinese` rather than a
+fixture — the format is an interoperability contract, and a table this
+repository invented would prove much less about it.
+
 Nothing here may link a backend library. The public header is the whole
 interface these tests are entitled to, and on Windows linking anthy alongside
 libpathime is actively broken — see "Runtime data" below.
@@ -41,8 +50,14 @@ libpathime is actively broken — see "Runtime data" below.
 
 Compiles the internal sources under test directly into each executable, because
 internal helpers carry no `PATHIME_API` and a shared build does not export them.
-C++17, covering `utf8.*`, `composition.*` and the options machinery at seams the
-public API cannot reach.
+C++17, covering `utf8.*`, `composition.*`, the options machinery, and the table
+engine's data layer at seams the public API cannot reach.
+
+`core.table` is also a structural assertion, not only a functional one. Its
+source list is five files from `engines/table/` plus `utf8.cc` — no core, no
+adapter — because everything below `table_backend.cc` is meant to be usable
+without the engine. A link error there would be the first sign that something in
+the parser, the database or the ranking had reached back across the seam.
 
 ### `tests/<backend>/` — `<backend>.vendor*`
 

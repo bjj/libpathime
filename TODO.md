@@ -17,44 +17,113 @@ deliberate:
   that look open were closed there, on purpose, with reasons.
 
 Status in one paragraph: the build (Linux and Windows), the core (all 44
-public entry points), the three adapters (hangul, anthy, pyzy) with their
-composing front ends, options and negotiation, the terminal demo client, the
-preedit rule, and the eager candidate strip (`PATHIME_OPT_PREDICTION`,
-default on) are built and tested — 31 suites, all passing
-(`docs/testing.md`). The detailed ledger is at the top of
+public entry points), **all four** adapters — hangul, anthy, pyzy and the
+table engine — options and negotiation including tier 3, the terminal demo
+client, the preedit rule, and the eager candidate strip are built and tested:
+33 suites, all passing on Linux with every backend enabled
+(`docs/testing.md`). The table engine types real Chinese against tables
+compiled out of `ibus-table-chinese`. The detailed ledger is at the top of
 `docs/design-history.md`.
 
 ---
 
-## Next: the table engine
+## The table engine: what landed, and what did not
 
-The one large unstarted piece.
+The engine is real. `src/engines/table/` implements the source `.txt` parser
+(spec §3), the compiled SQLite schema (§4), the user-database schema (§5), the
+composition mapping (§6), the key-event state machine (§7), lookup and
+candidate ordering (§8), select and commit (§9), and Chinese variant
+classification (§11.1). `tools/table-compile` compiles tables at build time,
+and five of them ship: cangjie5, quick5, wubi-jidian86, stroke5, zhuyin.
 
-`ibus-table` cannot be a backend. It is Python, so there is nothing to link
-against; what it offers is a proven feature set, not a library. It is the
-reference we trust for the table-driven methods we want (Cangjie, Wubi, and the
-rest), and `refs/ibus-table-chinese` supplies real tables to test against.
+`src/engines/table/README.md` is the map. What follows is only what is missing.
 
-The decision: **libpathime implements its own table engine**, a peer of the
-vendored submodules rather than a wrapper around one. `docs/ibus-table-spec.md`
-is the specification — source `.txt` format, compiled SQLite schema, key-event
-state machine, candidate sorting — and `docs/ibus-table-options.md` is its
-option inventory. The API already treats it as a real fourth engine:
+### Not implemented, in rough priority order
 
-- `PATHIME_ENGINE_TABLE` is in the header. One id covers every table-driven
-  method, because they differ only in the table loaded. Table selection is
-  `PATHIME_OPT_TABLE_FILE`, a per-context option rather than a separate enum
-  entry — because the engine is ours, one engine can hold several compiled
-  tables and hand a different one to each context.
-- `PATHIME_WITH_TABLE` is in the generated `config.h`, currently always 0, and
-  `pathime_has_engine(PATHIME_ENGINE_TABLE)` will be false until there is code.
-- `LIBPATHIME_WITH_TABLE` defaults OFF. Turning it on is gated in
-  `cmake/LibpathimeDependencies.cmake` with a warning naming the missing piece
-  as the implementation itself, so nobody mistakes it for a missing dependency.
-- Several options already claim table membership in `src/options.cc` — among
-  them `PATHIME_OPT_PREDICTION`, whose table meaning is suggestion mode
-  (spec §11.3): post-commit continuations, not the as-you-type candidates,
-  which are structural to table input.
+- **Learning (§10).** The user database is created, attached as `user_db` and
+  merged into lookups, and `user_freq` is already the third key of the
+  candidate sort — but nothing ever writes a row. So `DYNAMIC_ADJUST` and
+  `USER_CAN_DEFINE_PHRASE` are honoured as *declarations* (they decide whether
+  the union runs, and what `PATHIME_OPT_LEARNING` resolves to at tier 3) and
+  ignored as behaviour. This is the largest gap and the one with the machinery
+  already under it: §10.1 is an UPSERT on selection, and the WAL batching of
+  §5.3 is a durability detail on top.
+- **User-derived phrases (§10.2).** Needs learning first. `RULES` is parsed,
+  goucima are compiled into the database and `TableDatabase::goucima()` reads
+  them back, so the data is all present; what is missing is applying the parsed
+  rules to consecutive single-character selections to derive a compound key.
+- **Full-width conversion (§11.4).** Only the space is converted today
+  (`PATHIME_OPT_LATIN_WIDTH`, in the Space branch of `process_key`).
+  `PATHIME_OPT_PUNCTUATION_WIDTH` does nothing for this engine. The table is
+  per-language content like `engines/pyzy/punctuation.*`, and §11.4 lists the
+  punctuation overrides in full.
+- **Pinyin mode (§11.2) and suggestion mode (§11.3).** Blocked on data, not on
+  code: the `pinyin` and `suggestion` tables are created when a table declares
+  the mode, but their source (`pinyin_table.txt.bz2`, `phrase.txt.bz2`) ships
+  with **ibus-table**, not with ibus-table-chinese, so this repository has
+  nothing to compile into them. `PATHIME_OPT_TABLE_PINYIN_FALLBACK` and the
+  table meaning of `PATHIME_OPT_PREDICTION` are unimplemented until that data
+  has a source. Decide whether to vendor it or drop both options.
+- **Two of the nine sort keys (§8.2).** Key 2 (the pinyin tone-suffix penalty)
+  follows pinyin mode. Key 8 (Big5 code of the first character, Cangjie and
+  Quick only) needs a Big5 mapping this library does not carry — the same
+  regenerate-don't-copy situation as the variant table, and
+  `tools/generate-variants.py` is the pattern to follow. Both affect only ties
+  the remaining seven keys already order plausibly.
+- **The phrase cache (§5.4).** Explicitly optional in the spec. Not started,
+  and worth measuring before writing: a lookup is one statement against one
+  unindexed table, and it has not been profiled.
+
+### Open questions the implementation raised
+
+- **Return commits the typed keys, not the preedit that was displayed.**
+  Spec §7.4 says the essential operation is "commit the literal input", so
+  Cangjie `a`+`b` commits `ab`. But the preedit showed 日月, and the header
+  promises at `pathime_composition_t::preedit` that the preedit "is the text
+  that would be committed if the composition ended right now", with only
+  commit-time normalizations departing from it. Prompt substitution is a bigger
+  departure than the Japanese trailing-`n` case that clause was written for.
+  Three readings are available: commit the keys (current, pinned by
+  `api.engine_table`), commit the prompts, or treat prompts as display-only and
+  keep the preedit raw. **This one wants a decision** — it is visible to any
+  Cangjie or Stroke5 user, and it is the only place this engine knowingly bends
+  the header.
+- **Tier 3 answers nothing until a context has typed.**
+  `EngineBackend::declared_number()` reads the *loaded* table and deliberately
+  does not load one, because resolving an option must not open a database — a
+  client calling `pathime_engine_option_get_int()` has asked a question, not
+  asked for work. The consequence is that the same call returns the descriptor
+  default before the first keystroke and the table's declaration after it.
+  Defensible, and possibly surprising. The alternative is loading eagerly when
+  `PATHIME_OPT_TABLE_FILE` is *set* rather than when it is first used, which
+  moves the cost to a place the client can predict.
+- **Two behaviours in §7.2 that the spec does not pin down.** At
+  `MAX_KEY_LENGTH` with `AUTO_COMMIT` off the key is absorbed and discarded
+  (letting it through would drop a latin letter into the middle of a
+  composition); and the `AUTO_SELECT` retry recurses one level to reprocess the
+  character that broke the match. Both are choices, both are commented at the
+  code, and neither has a table in the shipped set that exercises it hard.
+- **`ibus-table-chinese` is GPL-3, and its compiled tables now ship inside
+  `pathime-data/`.** Flagged at the decision round and still open: it is a
+  licensing question about what libpathime distributes, not a technical one.
+- **The font-trimming half of the fork's preprocessing was left out.**
+  Frequency transfer is implemented in `tools/table-compile` and used for
+  cangjie5 and quick5, which is what makes their partial-code candidates
+  useful. Trimming to a target font's glyph coverage needs fontconfig and a
+  specific Noto build, and is a decision about a display target rather than
+  about the table — so it belongs to whoever packages for that target. If it
+  should be in-tree after all, it is a flag on the same tool.
+
+### Not verified
+
+- **Windows.** Everything above was built and tested on Linux only. The engine
+  needs SQLite from vcpkg (`vcpkg install sqlite3`, already required for pyzy)
+  and the compile tool runs at build time, so nothing structurally blocks it —
+  but `docs/windows-port.md` has not been revisited and no Windows build of the
+  table engine has been run.
+- **The demo does not offer the table engine.** `demo/README.md` still says it
+  cannot be built. Wiring it up means a way to pick a table, which is the first
+  real client of the bare-name resolution rule.
 
 ## Queued work
 
@@ -66,21 +135,42 @@ option inventory. The API already treats it as a real fourth engine:
   and `docs/design-history.md`, and the header should keep only the contract.
   The two tests for whether a passage stays: does a client's behaviour depend
   on it, and would removing it let someone reopen a question the design
-  closed. Best done after the table engine lands, so the pass is made once.
+  closed. The table engine has landed, so this is now unblocked — and it should
+  pick up `PATHIME_OPT_TABLE_*`, whose doc comments were written before there
+  was an implementation to check them against.
+- **`docs/design-history.md` has no round for the table engine.** The decisions
+  taken while writing it — the single-directory layout and the data/behaviour
+  header boundary, tier 3 living behind the seam rather than in the option
+  store, bare-name table resolution, compiling at build time with a tool built
+  from the same sources — are recorded in code comments and in
+  `src/engines/table/README.md` but not in the history. They should be, in the
+  form the other rounds take.
+- **`docs/ibus-table-mapping.md` does not exist.** Every other backend has a
+  source-verified API-to-concepts mapping ending in "Impedance mismatches".
+  This engine has the spec instead, which is a different document: it describes
+  ibus-table, not the adapter. The mismatches are real (the mid-preedit caret,
+  the commit-key policy, the Return conflict above) and are currently scattered
+  across code comments.
 
 ## Open questions
 
-- **The composition model has no cursor inside a span, and two adapters have
-  already paid for it.** Both anthy and pyzy decline Left/Right/Home/End while
+- **The composition model has no cursor inside a span, and now three adapters
+  have paid for it.** anthy and pyzy decline Left/Right/Home/End while
   composing, because there is no position for them to move and nothing the
-  client could be told about the result. For pyzy that decision was forced
-  rather than chosen: routing the keys through made pyzy render its own input
-  cursor as a literal `'|'` inside `conversionText()`
-  (`PinyinContext.cc:129-142`), so typing "nihao" then Left made the preedit
-  read `ni h|a` — a display marker inside a string the API promises is plain
-  content text. Declining is right for the phone-keyboard target, which has no
-  such key. It is wrong for a desktop client wanting to repair the middle of a
-  long pinyin run without backspacing to it. Revisit only with a real consumer.
+  client could be told about the result. The table engine now declines them for
+  the same reason, and gives up more than the other two in doing so: spec §6.3
+  and §7.3 describe a caret that moves among pre-committed segments and edits in
+  the middle, which is a *documented ibus-table feature* rather than an
+  incidental capability. Flattening it away is why `Composition::tail` is
+  always empty for this engine. For pyzy the decision was forced rather than
+  chosen: routing the keys through made pyzy render its own input cursor as a
+  literal `'|'` inside `conversionText()` (`PinyinContext.cc:129-142`), so
+  typing "nihao" then Left made the preedit read `ni h|a` — a display marker
+  inside a string the API promises is plain content text. Declining is right
+  for the phone-keyboard target, which has no such key. It is wrong for a
+  desktop client wanting to repair the middle of a long run without backspacing
+  to it. Revisit with a real consumer — and note that the table engine is now
+  the strongest argument for one.
 - **Thread-safety is a documented requirement, not an enforced one.** Nothing
   detects overlapping calls. If that proves to be a common client bug, a debug
   build could catch it cheaply with a non-recursive in-call flag per context.

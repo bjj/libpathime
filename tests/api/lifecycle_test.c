@@ -286,11 +286,11 @@ static void test_has_engine(void)
                  pathime_has_engine(kEngineIds[i]));
     }
 
-    /* PATHIME_ENGINE_TABLE is the one id whose falsity is structural rather
-     * than a matter of timing: nothing in the tree implements it, so
-     * PATHIME_WITH_TABLE is 0 in every build. */
-    PT_CHECK(!PATHIME_WITH_TABLE);
-    PT_CHECK(!pathime_has_engine(PATHIME_ENGINE_TABLE));
+    /* PATHIME_ENGINE_TABLE used to be asserted structurally false here, because
+     * nothing in the tree implemented it. It is a real engine now, so it is
+     * covered by the loop above like every other id and needs no special case:
+     * whether it is available depends on the build and on whether its table
+     * directory resolved, which is exactly what pathime_has_engine() is for. */
 
     /* Not an engine id at all, now that there is initialized state to consult.
      * There is no error channel here, so the only correct answer is false. */

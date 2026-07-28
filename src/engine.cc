@@ -83,12 +83,11 @@ bool engine_available(pathime_engine_id_t id)
 
 #if PATHIME_WITH_TABLE
     case PATHIME_ENGINE_TABLE:
-        /* TODO(impl): the table engine is ours to write, to
-         * docs/ibus-table-spec.md, and needs no global prerequisite — so this
-         * becomes an unconditional true once it exists (a context without a
-         * resolved PATHIME_OPT_TABLE_FILE simply produces nothing).
-         * PATHIME_WITH_TABLE is 0 in every build for now; see TODO.md. */
-        return false;
+        /* Its global hook does have something to report after all: it resolves
+         * the directory shipped tables are named against, and answers false
+         * without one. A context with no PATHIME_OPT_TABLE_FILE still produces
+         * nothing, which is a per-context state and not this question. */
+        return backend_ready(id);
 #endif
 
     default:
@@ -120,6 +119,10 @@ std::unique_ptr<EngineBackend> create_engine_backend(pathime_engine_id_t id)
         /* One backend, two ids: pyzy fixes its InputType when the context is
          * created, so the phonetic scheme has to travel with the id. */
         return pyzy_create_engine(id);
+#endif
+#if PATHIME_WITH_TABLE
+    case PATHIME_ENGINE_TABLE:
+        return table_create_engine();
 #endif
     default:
         return nullptr;

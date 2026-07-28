@@ -144,9 +144,18 @@ class ContextOptions : public OptionReader {
 public:
     explicit ContextOptions(const pathime_context_t *ctx) : ctx_(ctx) {}
     int64_t number(pathime_option_t option) const override;
+    const char *text(pathime_option_t option) const override;
 
 private:
     const pathime_context_t *ctx_;
+
+    /**
+     * Storage for the last text() answer, whose lifetime the seam fixes at "the
+     * next call on this reader". Mutable because pulling an option is a read as
+     * far as every caller is concerned, and making the readers non-const would
+     * push that lie through every adapter signature.
+     */
+    mutable std::string text_;
 };
 
 /**

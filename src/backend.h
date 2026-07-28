@@ -65,6 +65,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
 
 #include <pathime/pathime.h>
 
@@ -113,6 +114,19 @@ public:
 
     /** The resolved value of a BOOL, INT, ENUM or FLAGS option. */
     virtual int64_t number(pathime_option_t option) const = 0;
+
+    /**
+     * The resolved value of a STRING option, NUL-terminated and never NULL.
+     *
+     * Empty is a real value rather than an absence: PATHIME_OPT_TABLE_FILE
+     * reads as "" when no table is resolved, which is how "no table" is spelled
+     * in the header, and the two wildcard options are documented as one scalar
+     * *or empty*. So no caller has to distinguish unset from empty, and none
+     * may.
+     *
+     * The returned pointer is valid until the next call on this reader.
+     */
+    virtual const char *text(pathime_option_t option) const = 0;
 
     /** Convenience for BOOL options. */
     bool flag(pathime_option_t option) const { return number(option) != 0; }
@@ -295,6 +309,57 @@ public:
 
     /** A fresh composition context, or nullptr if the backend cannot make one. */
     virtual std::unique_ptr<ContextBackend> create_context(const OptionReader &options) = 0;
+
+    /**
+     * Tier 3: the value @a option is declared with by the table @a table_file
+     * names, or false if that table declares nothing for it.
+     *
+     * This is the one tier that lives behind the seam rather than in the option
+     * store, because the value belongs to a data file only the backend can
+     * read. options.cc consults it between the engine store and the descriptor
+     * default, exactly where the header's Options section puts it.
+     *
+     * @a table_file is the resolved PATHIME_OPT_TABLE_FILE at whichever level
+     * is being resolved for, so an engine-level resolution sees the engine's
+     * table and a context-level one sees the context's. Empty means no table,
+     * and every implementation must answer false for it rather than reaching
+     * for a default table.
+     *
+     * Default: false — no other engine has a tier 3, and saying so once here is
+     * cheaper than three adapters each declining.
+     *
+     * Two methods rather than one because the option kinds are two: a table
+     * declares AUTO_COMMIT and AUTO_SELECT as booleans and its wildcard
+     * characters as text, and collapsing those into one signature would mean
+     * inventing a variant for a seam with one implementor.
+     */
+    virtual bool declared_number(const char *table_file,
+                                 pathime_option_t option,
+                                 int64_t *out) const
+    {
+        (void)table_file;
+        (void)option;
+        (void)out;
+        return false;
+    }
+
+    /**
+     * The string counterpart of declared_number(): the declared value, or
+     * nullptr if the table declares none.
+     *
+     * Returns a borrowed pointer rather than filling a std::string because the
+     * caller hands it straight to a client as a pathime_str_t, and a slice of a
+     * temporary would dangle. So an implementation must return storage that
+     * lives as long as the loaded table does — which the engine's table cache
+     * already guarantees, since a table stays loaded for the engine's lifetime.
+     */
+    virtual const char *declared_text(const char *table_file,
+                                      pathime_option_t option) const
+    {
+        (void)table_file;
+        (void)option;
+        return nullptr;
+    }
 };
 
 /* ---------------------------------------------------------------------------
@@ -345,6 +410,23 @@ void pyzy_global_shutdown();
  * @a id must be PATHIME_ENGINE_PINYIN or PATHIME_ENGINE_BOPOMOFO.
  */
 std::unique_ptr<EngineBackend> pyzy_create_engine(pathime_engine_id_t id);
+#endif
+
+#if PATHIME_WITH_TABLE
+/**
+ * The table engine's global init locates the directory shipped tables live in
+ * — `table/` under the resource directory — and the directory user databases
+ * are written to under the data directory. It answers false when the resource
+ * directory holds no `table/`, which reaches the client as
+ * pathime_has_engine(PATHIME_ENGINE_TABLE) answering false: an engine that can
+ * resolve no table by name is not usable, even though a client naming an
+ * absolute path would have worked.
+ */
+bool table_global_init(const char *data_dir, const char *resource_dir);
+void table_global_shutdown();
+
+/** A new engine for PATHIME_ENGINE_TABLE. */
+std::unique_ptr<EngineBackend> table_create_engine();
 #endif
 
 }  // namespace pathime

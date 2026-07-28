@@ -577,6 +577,20 @@ int64_t ContextOptions::number(pathime_option_t option) const
     return resolve_option_number(ctx_->engine, ctx_, option);
 }
 
+const char *ContextOptions::text(pathime_option_t option) const
+{
+    /*
+     * Copied into the reader rather than handed out as the resolved slice's
+     * pointer, because the seam promises a NUL-terminated string and a
+     * pathime_str_t is not one: the store's std::string is, but the descriptor
+     * default and a table's declaration need not be sliced at their end. One
+     * copy per pull, on a path taken a handful of times per key at most.
+     */
+    const pathime_str_t s = resolve_option_string(ctx_->engine, ctx_, option);
+    text_.assign(s.bytes, s.len);
+    return text_.c_str();
+}
+
 namespace {
 
 /**

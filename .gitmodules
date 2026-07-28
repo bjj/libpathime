@@ -10,3 +10,6 @@
 [submodule "demo/cpp-terminal"]
 	path = demo/cpp-terminal
 	url = https://github.com/jupyter-xeus/cpp-terminal
+[submodule "engines/ibus-table-chinese"]
+	path = engines/ibus-table-chinese
+	url = https://github.com/bjj/ibus-table-chinese.git

@@ -72,6 +72,19 @@ libpathime_add_api_test(options options_test.c)
 libpathime_add_api_test(engine_hangul engine_hangul_test.c)
 libpathime_add_api_test(engine_anthy engine_anthy_test.c)
 libpathime_add_api_test(engine_pyzy engine_pyzy_test.c)
+libpathime_add_api_test(engine_table engine_table_test.c)
+
+# --- api.engine_table --------------------------------------------------------
+# Depends on the compiled tables being staged beside the library, which
+# libpathime_stage_runtime_data() has already arranged; the test resolves them
+# through the default resource directory exactly as a client does, so there is
+# no path to pass in.
+#
+# Unlike the anthy and pyzy tests this one needs no clean-state fixture, because
+# it does not commit into a user database: PATHIME_OPT_LEARNING resolves to the
+# tier-3 value the shipped tables declare, and none of them declares
+# DYNAMIC_ADJUST or USER_CAN_DEFINE_PHRASE in a way this test's selections
+# reach. It will need one when learning lands (TODO.md).
 
 # --- api.engine_anthy --------------------------------------------------------
 if(LIBPATHIME_WITH_ANTHY)

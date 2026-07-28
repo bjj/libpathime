@@ -64,12 +64,35 @@ endif()
 
 # --- libhangul: no external dependencies once external keyboards are disabled. ---
 
-# --- Table-driven: our own engine, not a submodule. There are no sources to
-#     compile yet, so an explicit -DLIBPATHIME_WITH_TABLE=ON cannot be honoured;
-#     say so rather than configuring a target that would build nothing. ---
+# --- Table-driven: our own engine, not a submodule, so the only thing to find
+#     is SQLite. That is a genuine dependency rather than an incidental one:
+#     the compiled table format of docs/ibus-table-spec.md §4 *is* a SQLite
+#     database, and reading one ibus-table produced is the whole point of
+#     sharing the format. Probed independently of pyzy, which also uses SQLite
+#     — either backend may be built without the other. ---
 if(LIBPATHIME_WITH_TABLE)
-  _lpi_gate(TABLE "table-driven" "the engine implementation itself"
-    "The table engine is specified in docs/ibus-table-spec.md but not written yet; src/ has no table sources to build.")
+  set(_table_missing "")
+  find_package(SQLite3 QUIET)
+  if(NOT SQLite3_FOUND)
+    list(APPEND _table_missing "SQLite3")
+  endif()
+
+  # The tables themselves. Their source .txt lives in a submodule, and without
+  # it the engine still builds and still opens a table a client names by path —
+  # so this gates the shipped data, not the backend.
+  if(NOT EXISTS "${CMAKE_CURRENT_LIST_DIR}/../engines/ibus-table-chinese/tables")
+    message(STATUS
+      "libpathime: engines/ibus-table-chinese is not checked out — the table "
+      "engine will build but ship no tables. Run: git submodule update --init")
+    set(LIBPATHIME_TABLE_DATA OFF CACHE INTERNAL "")
+  else()
+    set(LIBPATHIME_TABLE_DATA ON CACHE INTERNAL "")
+  endif()
+
+  if(_table_missing)
+    _lpi_gate(TABLE "table-driven" "${_table_missing}"
+      "Debian/Ubuntu: sudo apt-get install libsqlite3-dev -- Windows: vcpkg install sqlite3.")
+  endif()
 endif()
 
 message(STATUS "")

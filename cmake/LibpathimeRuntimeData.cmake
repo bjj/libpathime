@@ -13,6 +13,90 @@
 
 set(LIBPATHIME_RUNTIME_DATA_DIRNAME "pathime-data")
 
+# The tables compiled into the shipped data, as
+#   <name>|<source .txt, relative to engines/ibus-table-chinese>|<freq source or "">
+#
+# The set is docs/ibus-table-spec.md §14's test matrix plus quick5, and between
+# them they exercise every shape the engine has code for: RULES and
+# USER_CAN_DEFINE_PHRASE (wubi-jidian86), AUTO_WILDCARD and char prompts
+# (cangjie5, quick5), AUTO_COMMIT without AUTO_SELECT and non-alphabetic
+# VALID_INPUT_CHARS (stroke5), a phonetic key set (zhuyin), and a table
+# declaring LANGUAGE_FILTER for traditional Chinese (quick5).
+#
+# Adding a table is one line here. The whole of engines/ibus-table-chinese is
+# available — 29 MB of source across thirteen families — but shipping all of it
+# would multiply the package for methods no client has asked for, so the default
+# is this set and the rest is a one-line opt-in.
+#
+# The third field is the frequency-transfer source of tools/table-compile. It is
+# set for exactly the two families the fork these tables come from preprocesses
+# (bjj/ibus-table-chinese d0f9849, cc4a17f): without it, a partially typed
+# Cangjie or Quick code offers the table's structural order rather than common
+# characters first.
+set(LIBPATHIME_TABLES
+  "cangjie5|tables/cangjie/cangjie5.txt|tables/cantonese/cantonese.txt"
+  "quick5|tables/quick/quick5.txt|tables/cantonese/cantonese.txt"
+  "wubi-jidian86|tables/wubi-jidian/wubi-jidian86.txt|"
+  "stroke5|tables/stroke5/stroke5.txt|"
+  "zhuyin|tables/zhuyin.txt|"
+  CACHE STRING "Tables to compile into pathime-data/table/")
+
+# libpathime_compile_tables()
+#
+# Declare the commands that compile each entry of LIBPATHIME_TABLES, and publish
+# the resulting .db paths as LIBPATHIME_TABLE_OUTPUTS in the caller's scope.
+#
+# Must be called from the directory whose target will consume the outputs —
+# add_custom_command outputs are directory-scoped — which is src/, where
+# libpathime_stage_runtime_data() creates the target that depends on them.
+function(libpathime_compile_tables)
+  set(_outputs "")
+  if(NOT LIBPATHIME_WITH_TABLE OR NOT LIBPATHIME_TABLE_DATA)
+    set(LIBPATHIME_TABLE_OUTPUTS "" PARENT_SCOPE)
+    return()
+  endif()
+
+  set(_root "${PROJECT_SOURCE_DIR}/engines/ibus-table-chinese")
+  set(_dir "${PROJECT_BINARY_DIR}/tables")
+
+  foreach(_entry ${LIBPATHIME_TABLES})
+    string(REPLACE "|" ";" _fields "${_entry}")
+    list(GET _fields 0 _name)
+    list(GET _fields 1 _source)
+    list(LENGTH _fields _field_count)
+    set(_freq "")
+    if(_field_count GREATER 2)
+      list(GET _fields 2 _freq)
+    endif()
+
+    set(_source_path "${_root}/${_source}")
+    if(NOT EXISTS "${_source_path}")
+      message(WARNING "libpathime: table source missing, skipping: ${_source_path}")
+      continue()
+    endif()
+
+    set(_output "${_dir}/${_name}.db")
+    set(_args "")
+    set(_depends "${_source_path}" pathime-table-compile)
+    if(_freq)
+      list(APPEND _args --freq-from "${_root}/${_freq}")
+      list(APPEND _depends "${_root}/${_freq}")
+    endif()
+
+    add_custom_command(
+      OUTPUT "${_output}"
+      COMMAND ${CMAKE_COMMAND} -E make_directory "${_dir}"
+      COMMAND $<TARGET_FILE:pathime-table-compile>
+              ${_args} "${_source_path}" "${_output}"
+      DEPENDS ${_depends}
+      COMMENT "libpathime: compiling table ${_name}"
+      VERBATIM)
+    list(APPEND _outputs "${_output}")
+  endforeach()
+
+  set(LIBPATHIME_TABLE_OUTPUTS "${_outputs}" PARENT_SCOPE)
+endfunction()
+
 # libpathime_runtime_data_files(<sources_var> <destinations_var>)
 #
 # Two parallel lists: the file each backend's build produced, and its path
@@ -37,6 +121,15 @@ function(libpathime_runtime_data_files sources_var destinations_var)
     list(APPEND _sources "${PYZY_PHRASES_FILE}")
     list(APPEND _destinations "pyzy/phrases.txt")
   endif()
+
+  # The compiled tables, named in the resource directory the way a client names
+  # them in PATHIME_OPT_TABLE_FILE: `table/<name>.db`, so setting the option to
+  # "cangjie5" reaches this file.
+  foreach(_table ${LIBPATHIME_TABLE_OUTPUTS})
+    get_filename_component(_name "${_table}" NAME)
+    list(APPEND _sources "${_table}")
+    list(APPEND _destinations "table/${_name}")
+  endforeach()
 
   set(${sources_var} "${_sources}" PARENT_SCOPE)
   set(${destinations_var} "${_destinations}" PARENT_SCOPE)

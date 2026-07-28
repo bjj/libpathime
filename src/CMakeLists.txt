@@ -120,14 +120,38 @@ if(LIBPATHIME_WITH_PYZY)
   target_include_directories(pathime PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/include")
 endif()
 
-# engines/table/ holds only a README until the engine described by
-# docs/ibus-table-spec.md is written; LIBPATHIME_WITH_TABLE is still forced
-# off in LibpathimeDependencies.
+# The table-driven engine. Unlike the three above it wraps nothing — the
+# sources here are the engine — so the block wires a library rather than a
+# submodule, and the include path it needs is its own, already set above.
+#
+# The split inside engines/table/ is the one docs/source-layout.md records:
+# table_backend.cc is the only file that includes backend.h, and the rest
+# (source parsing, the database, ranking, variant classification) knows nothing
+# about compositions or options. That is what lets tools/table-compile build
+# the same files without any of the engine.
+if(LIBPATHIME_WITH_TABLE)
+  target_sources(pathime PRIVATE
+    engines/table/table_backend.cc
+    engines/table/table_db.cc
+    engines/table/table_properties.cc
+    engines/table/table_source.cc
+    engines/table/ranking.cc
+    engines/table/variants.cc)
+  target_link_libraries(pathime PRIVATE SQLite::SQLite3)
+endif()
 
 install(TARGETS pathime
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
+
+# The table databases, compiled from engines/ibus-table-chinese by the tool in
+# tools/. Declared here rather than there because an add_custom_command output
+# must be consumed by a target in the same directory, and the target that
+# consumes these is the staging one below. The tool itself is added after this
+# directory; a generator expression and a target-name dependency both resolve
+# at generate time, so the ordering does not matter.
+libpathime_compile_tables()
 
 # The read-only data the engines open, into the pathime-data/ beside the
 # installed library that pathime_init_params_t::resource_dir finds by default.

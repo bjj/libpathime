@@ -45,13 +45,20 @@ src/
     anthy/              anthy_backend.h/.cc, romaji.h/.cc — the composing front end
     pyzy/               pyzy_backend.h/.cc, observer.h/.cc — the dirty-flag Observer,
                         punctuation.h/.cc — width and Chinese punctuation
-    table/              README.md only, until the engine of docs/ibus-table-spec.md
-                        is written
+    table/              table_backend.h/.cc — the only file here that includes
+                        backend.h; table_source.*, table_db.*,
+                        table_properties.*, ranking.*, variants.* — the data
+                        layer below it, which names no engine type at all;
+                        variants_data.h is generated (tools/generate-variants.py)
+tools/
+  table-compile/        pathime-table-compile: source .txt to compiled .db, built
+                        from the engine's own data-layer sources
+  generate-variants.py  regenerates engines/table/variants_data.h from Unicode
 tests/
   api/                  links the built library, exported symbols only, C11:
                         abi, lifecycle, options, and one test per engine
   core/                 compiles internal sources directly, C++17:
-                        utf8, composition, options
+                        utf8, composition, options, table
 ```
 
 ## Two structural decisions, and why
@@ -67,7 +74,21 @@ type; engine code (`src/engines/*`) never touches the public API surface;
 everything an adapter provides crosses through `backend.h`. There is
 deliberately no `engines/common/`: if something is shared between engines, it
 is a core obligation and lives in `src/` — the eager candidate pump
-(`candidates.cc`) is the standing example.
+(`candidates.cc`) is the standing example. That rule says shared code moves
+*up*, not that adapters duplicate; `engines/table/variants.*` stays put because
+nothing shares it — pyzy collapses the same option onto a single bool and lets
+its own data convert, so there is no second implementation to unify with.
+
+**The table engine draws a second boundary inside its own directory.**
+`table_backend.cc` is the only file under `engines/table/` that includes
+`backend.h`; everything else there answers questions about table data and
+names no `Composition`, `KeyEvent`, `Output` or `OptionReader`. That is what
+lets `tools/table-compile` build the parser and the database writer without any
+of the engine, and what lets `tests/core/table_test.cc` reach the edge cases
+directly. It is a header boundary, deliberately not a library one: a standalone
+table library would have needed its own key-event and composition types,
+translated by an adapter that did nothing else — a second IME API invented so
+the first could wrap it.
 
 **The two handle types are defined in headers, not in their `.cc` files.**
 `struct pathime_engine` is in `engine.h` and `struct pathime_context` is in
@@ -90,6 +111,14 @@ because they are not obvious from the names:
 | `pathime_context_create/destroy/engine/user_data/requirements/is_focused`, `_process_key`, `_composition`, `_set_surrounding_text`, `_set_focused`, `_reset` | `context.cc` |
 | `pathime_context_candidate`, `_set_candidate_cursor`, `_select_candidate` | `candidates.cc` |
 | all 20 `pathime_*option*` functions, both levels | `options.cc` |
+
+Tier 3 — the value a table declares — is the one resolution input that does not
+live in `options.cc`, because it lives in a data file only a backend can read.
+`resolve_number()` and `resolve_string()` reach it through
+`EngineBackend::declared_number/declared_text`, between the engine store and the
+descriptor default. It is deliberately not returned as an `OptionValue *` like
+the two stores: those point at storage the caller owns, and a table's
+declaration does not.
 
 The two seams: **candidate access lives with the candidate subsystem**, not with
 the rest of `pathime_context_*`, because both functions are thin faces over the
@@ -232,9 +261,12 @@ the fact and the check the library applies after it cannot disagree.
 - **The romaji/kana front end lives with anthy, not in core** — the
   per-engine answer to `docs/design-history.md` §3, question 2. Only Japanese needs a
   composing state machine before its backend sees input; hangul and pyzy
-  dispatch is simple enough to live in their adapters. If the table engine
-  turns out to want a shared front end, hoisting `romaji.*` into `src/` is
-  cheap.
+  dispatch is simple enough to live in their adapters. Answered for the table
+  engine now that it exists: it wants nothing from `romaji.*`. Its key run is
+  the raw scalars the user typed, matched against a set the table declares, so
+  there is no state machine in front of it at all — the nearest thing is
+  char-prompt substitution, which is display-only and applies *after* the run is
+  built.
 
 - **The width and punctuation tables are per-language, and so live per
   adapter** — `engines/pyzy/punctuation.*` for Chinese, and the same job is

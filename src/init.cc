@@ -63,6 +63,7 @@ std::string g_resource_dir;
 bool g_hangul_ready = false;
 bool g_anthy_ready = false;
 bool g_pyzy_ready = false;
+bool g_table_ready = false;
 
 /*
  * An environment variable's value as UTF-8, or "" when unset *or* empty.
@@ -188,6 +189,8 @@ bool backend_ready(pathime_engine_id_t id)
     case PATHIME_ENGINE_BOPOMOFO:
         /* One backend, two ids — they rise and fall together. */
         return g_pyzy_ready;
+    case PATHIME_ENGINE_TABLE:
+        return g_table_ready;
     default:
         return false;
     }
@@ -336,6 +339,10 @@ pathime_status_t pathime_init(const pathime_init_params_t *params)
     g_pyzy_ready = pathime::pyzy_global_init(resolved.c_str(),
                                              resolved_resources.c_str());
 #endif
+#if PATHIME_WITH_TABLE
+    g_table_ready = pathime::table_global_init(resolved.c_str(),
+                                               resolved_resources.c_str());
+#endif
 
     /* swap, not assign: it cannot throw, so the globals move to their new
      * values together and there is no state in which one has been updated and
@@ -366,6 +373,11 @@ void pathime_shutdown(void)
      * By contract every engine and context is already destroyed, so nothing
      * here has to tear down per-context state.
      */
+#if PATHIME_WITH_TABLE
+    if (g_table_ready) {
+        pathime::table_global_shutdown();
+    }
+#endif
 #if PATHIME_WITH_PYZY
     if (g_pyzy_ready) {
         pathime::pyzy_global_shutdown();
@@ -385,6 +397,7 @@ void pathime_shutdown(void)
     g_hangul_ready = false;
     g_anthy_ready = false;
     g_pyzy_ready = false;
+    g_table_ready = false;
 
     g_data_dir.clear();
     g_resource_dir.clear();

@@ -88,8 +88,12 @@ and others silently ignore.
 
 - **The caret is always at the end of the document.** Arrow keys go to the
   engine rather than moving it. A demo text field, not an editor.
-- **String options are shown, not edited.** The only one is
-  `PATHIME_OPT_TABLE_FILE`, and the table engine cannot be built yet.
+- **String options are shown, not edited, so the table engine is unreachable
+  here.** `PATHIME_OPT_TABLE_FILE` is a string, and a context that resolves no
+  table reports every key unhandled — so the engine builds and runs, but this
+  demo cannot point it at a table. Editing that one option would make it usable,
+  and would be the first real client of the bare-name resolution rule
+  (`"cangjie5"` → `<resource_dir>/table/cangjie5.db`). It is in `TODO.md`.
 - **Flags options toggle all-or-nothing.** `pinyin-fuzzy` has twenty bits and
   the library gives no names for them — naming values is the client's job, and
   naming twenty of them would teach less than turning the feature off and on.
