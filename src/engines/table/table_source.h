@@ -83,8 +83,8 @@ bool parse_table_source_file(const std::string &path, TableSource *out, std::str
 void derive_goucima(TableSource *source);
 
 /**
- * Raise @a target's frequencies from a second table's, for the entries @a source
- * ranks above @a threshold.
+ * Rewrite @a target's frequencies from a second table's, for every entry
+ * @a target itself ranks at or above @a threshold.
  *
  * This is the portable half of the preprocessing carried in the fork this
  * library's tables come from (bjj/ibus-table-chinese, commits d0f9849 and
@@ -94,8 +94,16 @@ void derive_goucima(TableSource *source);
  * and Quick offer their exact matches and then whatever the table's own order
  * happens to be.
  *
- * Entries at or below @a threshold keep the frequency they were given, which is
- * what preserves each table's deliberate manual ordering of its top choices.
+ * An entry at or above the threshold takes the frequency the second table gives
+ * its phrase, *plus* the threshold; one the second table does not mention
+ * contributes zero and so lands on the threshold exactly. Entries below the
+ * threshold are left alone, which is what preserves each table's deliberate
+ * manual ordering — and the addition is what keeps every rewritten entry above
+ * every preserved one.
+ *
+ * The comparison is `>=`, which matters more than it looks: the tables set
+ * their primary entry for each code to exactly the default threshold, so a
+ * strict `>` transfers nothing.
  *
  * The fork's other half — commenting out entries whose characters a target font
  * cannot display — is deliberately not here. It needs fontconfig and a specific

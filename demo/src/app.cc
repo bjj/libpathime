@@ -31,8 +31,14 @@ const EngineDef kEngineDefs[] = {
      "type  nihao  then Space, or 1-9 to pick"},
     {PATHIME_ENGINE_BOPOMOFO, "bopomofo", "Chinese · Bopomofo",
      "type  su3cl3  then Space; digits are tones here, so Alt+1-9 picks"},
+    /*
+     * Two tables rather than one, because the engine's whole point is that it
+     * is the same code driving unrelated methods — and because the codes look
+     * nothing alike, which is the part a hint can show and prose cannot.
+     * Both spell 我; cangjie5 keys by radical shape, wubi by stroke groups.
+     */
     {PATHIME_ENGINE_TABLE,    "table",    "Table-driven",
-     "pick a table under Options \xE2\x86\x92 table-file, then type"},
+     "set table-file: cangjie5, type  hqi  \xE2\x80\x94 or wubi-jidian86, type  trn"},
 };
 
 /*

@@ -407,6 +407,29 @@ static void test_second_table(pathime_engine_t *engine)
     PT_CHECK(log.last_candidates > 0);
 
     pathime_context_destroy(ctx);
+
+    /*
+     * And a third, wubi-jidian86 — the one shipped table with RULES and
+     * USER_CAN_DEFINE_PHRASE, and with native frequencies in the billions
+     * rather than the hundreds. `trn` is 我, which is also what the demo's hint
+     * tells a user to type, so this keeps that hint honest.
+     */
+    ctx = open_context(engine, &log, "wubi-jidian86");
+    if (ctx == NULL) {
+        return;
+    }
+
+    PT_CHECK(press(ctx, 't'));
+    PT_CHECK(press(ctx, 'r'));
+    PT_CHECK(press(ctx, 'n'));
+
+    {
+        char candidate[64];
+        candidate_at(ctx, 0, candidate, sizeof(candidate));
+        PT_CHECK(strcmp(candidate, "\xE6\x88\x91") == 0);  /* 我 */
+    }
+
+    pathime_context_destroy(ctx);
 }
 
 /*
@@ -678,6 +701,51 @@ static void test_table_without_dynamic_adjust(pathime_engine_t *engine)
     pathime_context_destroy(ctx);
 }
 
+/*
+ * Frequency-augmented ordering, and the regression that motivated it.
+ *
+ * A table method is deterministic — a full Cangjie code identifies one
+ * character — so the candidate list matters most for a *partial* code, where it
+ * is a guess about what is being typed. The stock table's order there is
+ * structural and the results are obscure, which is why the tables this library
+ * ships are compiled with usage frequencies transferred in from Cantonese
+ * (tools/table-compile --freq-from, spec-external and described at
+ * apply_frequency_transfer).
+ *
+ * `h` is 竹, the first stroke of 我 (`hqi`). With the transfer applied, the
+ * common characters reachable from `h` lead: 的, then 我. Without it, every
+ * primary entry sits at exactly the source threshold and the list falls back to
+ * table order — which is what a `>` instead of a `>=` in the transfer produced,
+ * silently, until this test existed.
+ */
+static void test_frequency_augmented_order(pathime_engine_t *engine)
+{
+    client_log_t log;
+    pathime_context_t *ctx = open_context(engine, &log, "cangjie5");
+    char candidate[64];
+
+    /* 竹 U+7AF9 (the exact match), 的 U+7684, 我 U+6211. */
+    const char *const zhu = "\xE7\xAB\xB9";
+    const char *const de = "\xE7\x9A\x84";
+    const char *const wo = "\xE6\x88\x91";
+
+    if (ctx == NULL) {
+        return;
+    }
+
+    PT_CHECK(press(ctx, 'h'));
+
+    /* The exact match still leads: §8.2's first key outranks any frequency. */
+    candidate_at(ctx, 0, candidate, sizeof(candidate));
+    PT_CHECK(strcmp(candidate, zhu) == 0);
+
+    /* And then the common characters, by usage rather than by table order. */
+    PT_CHECK(index_of(ctx, log.last_candidates, de) < 4);
+    PT_CHECK(index_of(ctx, log.last_candidates, wo) < 5);
+
+    pathime_context_destroy(ctx);
+}
+
 /* Reset discards without committing, which is the header's rule for it. */
 static void test_reset_discards(pathime_engine_t *engine)
 {
@@ -745,6 +813,7 @@ int main(void)
         test_max_candidates(engine);
         test_engine_cap(engine);
         test_reset_discards(engine);
+        test_frequency_augmented_order(engine);
         test_learning(engine);
         test_learning_can_be_declined(engine);
         test_table_without_dynamic_adjust(engine);

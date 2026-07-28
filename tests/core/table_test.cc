@@ -390,22 +390,56 @@ void test_frequency_transfer()
     TableSource target = parse(
         "BEGIN_DEFINITION\nNAME = T\nEND_DEFINITION\n"
         "BEGIN_TABLE\n"
-        "a\tX\t2000\n"
-        "b\tY\t500\n"
+        "a\tX\t1000\n"   /* exactly at the threshold: rewritten */
+        "b\tY\t2000\n"   /* above it: rewritten */
+        "c\tZ\t999\n"    /* below it: left alone */
+        "d\tW\t1000\n"   /* at it, but absent from the frequency table */
         "END_TABLE\n");
     const TableSource frequencies = parse(
         "BEGIN_DEFINITION\nNAME = F\nEND_DEFINITION\n"
         "BEGIN_TABLE\n"
         "q\tX\t9000\n"
-        "r\tY\t9000\n"
+        "r\tY\t8000\n"
+        "s\tZ\t7000\n"
         "END_TABLE\n");
 
     apply_frequency_transfer(&target, frequencies, 1000);
 
-    /* Above the threshold, the usage-ranked frequency is adopted. */
-    PT_CHECK(target.phrases[0].freq == 9000);
-    /* At or below it, the table's own deliberate ordering is preserved. */
-    PT_CHECK(target.phrases[1].freq == 500);
+    /*
+     * Usage frequency *plus* the threshold, which is what keeps every rewritten
+     * row above every preserved one.
+     */
+    PT_CHECK(target.phrases[0].freq == 10000);
+    PT_CHECK(target.phrases[1].freq == 9000);
+
+    /* Below the threshold the table's own manual ordering stands, even though
+     * this phrase does appear in the frequency table. */
+    PT_CHECK(target.phrases[2].freq == 999);
+
+    /* At the threshold but unknown to the frequency table: 0 + threshold, so it
+     * keeps its place rather than being demoted below the manual entries. */
+    PT_CHECK(target.phrases[3].freq == 1000);
+
+    /*
+     * The boundary is `>=`, not `>`. This is the case that made the real tables
+     * silently unchanged: every primary entry in cangjie5 is exactly 1000, so a
+     * strict comparison transfers nothing at all.
+     */
+    TableSource boundary = parse(
+        "BEGIN_DEFINITION\nNAME = B\nEND_DEFINITION\n"
+        "BEGIN_TABLE\na\tX\t1000\nEND_TABLE\n");
+    apply_frequency_transfer(&boundary, frequencies, 1000);
+    PT_CHECK(boundary.phrases[0].freq == 10000);
+
+    /* Last occurrence wins in the frequency source, as the reference does. */
+    TableSource repeated = parse(
+        "BEGIN_DEFINITION\nNAME = R\nEND_DEFINITION\n"
+        "BEGIN_TABLE\na\tX\t1000\nEND_TABLE\n");
+    const TableSource duplicates = parse(
+        "BEGIN_DEFINITION\nNAME = D\nEND_DEFINITION\n"
+        "BEGIN_TABLE\nq\tX\t9000\nr\tX\t5\nEND_TABLE\n");
+    apply_frequency_transfer(&repeated, duplicates, 1000);
+    PT_CHECK(repeated.phrases[0].freq == 1005);
 }
 
 void test_declared_options()

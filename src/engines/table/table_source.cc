@@ -296,23 +296,39 @@ void apply_frequency_transfer(TableSource *target,
                               const TableSource &source,
                               int64_t threshold)
 {
-    /* The best frequency each phrase reaches in the source table. */
-    std::map<std::string, int64_t> best;
+    /*
+     * Last occurrence wins, which is the reference's behaviour rather than a
+     * choice: it fills a dict keyed by phrase as it scans, so a phrase reachable
+     * by several codes ends up with the frequency of its last row. Taking the
+     * maximum instead would be defensible and would not match.
+     */
+    std::map<std::string, int64_t> ranked;
     for (const PhraseRow &row : source.phrases) {
-        const auto it = best.find(row.phrase);
-        if (it == best.end() || row.freq > it->second) {
-            best[row.phrase] = row.freq;
-        }
+        ranked[row.phrase] = row.freq;
     }
 
     for (PhraseRow &row : target->phrases) {
-        if (row.freq <= threshold) {
-            continue;  /* below the cutoff the table's own ordering stands */
+        /*
+         * Strictly below the threshold, the table's own ordering stands
+         * untouched — that is what "retains all manual sorting" means, and the
+         * tables use runs like 999, 998, 997 to express a deliberate order
+         * among near-equals.
+         *
+         * At or above it, the frequency is *replaced* rather than raised:
+         * usage frequency plus the threshold. The addition is what keeps every
+         * rewritten row above every manually ordered one, and a phrase the
+         * frequency table has never heard of contributes 0, so it lands exactly
+         * on the threshold and is left where it was relative to its peers.
+         *
+         * `>=` and not `>`: the tables set their top choice to exactly the
+         * default threshold — every primary entry in cangjie5 is 1000 — so a
+         * strict comparison transfers nothing at all.
+         */
+        if (row.freq < threshold) {
+            continue;
         }
-        const auto it = best.find(row.phrase);
-        if (it != best.end() && it->second > threshold) {
-            row.freq = it->second;
-        }
+        const auto it = ranked.find(row.phrase);
+        row.freq = (it == ranked.end() ? 0 : it->second) + threshold;
     }
 }
 
