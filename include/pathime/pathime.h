@@ -944,7 +944,11 @@ PATHIME_API uint32_t pathime_context_requirements(const pathime_context_t *ctx);
  * client should not rebind them into each other:
  *
  * - PATHIME_KEY_SPACE asks for conversion. It is what advances a composition
- *   from what was typed toward what the engine thinks was meant.
+ *   from what was typed toward what the engine thinks was meant. With nothing
+ *   composing there is nothing to convert, and it inserts a space instead, at
+ *   the width PATHIME_OPT_LATIN_WIDTH selects. Hangul is the exception: it
+ *   implements no width option, so it declines the key and the client inserts
+ *   its own space, which is the same character in the same place.
  * - PATHIME_KEY_RETURN ends the composition *without* applying any conversion
  *   the user has not explicitly chosen. Whatever the user did settle — a
  *   candidate selected, a segment converted — is kept; the rest commits as

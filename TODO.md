@@ -939,16 +939,50 @@ moving the cursor is browsing and settles nothing. Both keep the invariant a
 client depends on. Stated in the header at `candidate_cursor` and in
 `docs/CONCEPTS.md`'s *Candidate cursor*.
 
-**Still open, and deliberately not decided here:** `PATHIME_OPT_PREDICTION`, the
-question that started the round. It is declared `kAnthy | kTable` in
-`src/options.cc` and read nowhere, so a client can set it, get `PATHIME_OK`, and
-have nothing happen — the only option in the header a shipping engine claims and
-never consults. `docs/japanese-input-model.md` §4 and §5 are the input to that
-decision: anthy's prediction API is real and unobstructed, but it is *history
-completion* — empty on a fresh profile, empty whenever `PATHIME_OPT_LEARNING` is
-off — and the always-on candidate strip a phone keyboard wants is ordinary
-conversion run eagerly (§5), not prediction at all. Decide it as: implement,
-report unsupported on anthy, or fold into an eager-conversion mode.
+**`PATHIME_OPT_PREDICTION` — direction decided (2026-07-28), not yet built.**
+It is declared `kAnthy | kTable` in `src/options.cc` and read nowhere, so a
+client can set it, get `PATHIME_OK`, and have nothing happen. It is the only
+option in the header a shipping engine claims and never consults.
+
+The decision: **an eager conversion strip**, not anthy's prediction API.
+`docs/japanese-input-model.md` §4 and §5 are why. anthy's prediction is
+*history completion* — `anthy_traverse_record_for_prediction`, empty on a fresh
+profile and empty whenever `PATHIME_OPT_LEARNING` is off — whereas ordinary
+conversion run eagerly over each growing prefix gives real candidates from the
+first keystroke at 130 µs–1.7 ms per key, with no history at all.
+
+Keeping the name is deliberate: 予測入力 is what Japanese IMEs call exactly this
+strip, and MS-IME and Google Japanese Input merge history completions into it
+rather than separating them. So the option's documentation changes and its name
+does not, and anthy's real predictions can be merged in later without another
+rename.
+
+**What made this buildable is §4c.** It was blocked before, because
+`candidate_cursor` was documented as "the entry whose text the preedit is
+showing", so publishing candidates without previewing broke the invariant. That
+invariant is gone: the cursor now previews only where the user asked for
+conversion, and pyzy demonstrates candidates-with-no-preview in shipping code.
+The strip is the same shape — candidates from the first keystroke, preedit left
+as kana, cursor browsing without rewriting anything.
+
+**The one structural obstacle, so the next session does not rediscover it:**
+`AnthyContextBackend::converting_` conflates two facts — "anthy has run and
+segments exist" and "the preedit shows the conversion". The strip needs the
+first without the second. `materialize_candidates()` returns early on
+`!converting_`, and `show_kana()` versus `show_segments()` is chosen by the same
+flag. Splitting it is the bulk of the work; the rest follows:
+
+- after each key, `anthy_set_string()` on the current reading, list segment 0;
+- Space still converts, meaning it switches the preedit to the segments rather
+  than advancing a cursor that was never previewing;
+- selecting settles segment 0 exactly as it does today;
+- the cursor browses without calling `show_candidate()`;
+- any new key re-runs the conversion and drops the list.
+
+Two costs measured and accepted: `anthy_set_string()` per keystroke, and the
+active span churning on long input because anthy re-splits (§5's
+きょうは → 今日は, きょうはい → 今日). Fine for phrase-at-a-time phone typing,
+ugly for a whole sentence.
 
 ## 5. Loose ends
 
@@ -957,16 +991,32 @@ report unsupported on anthy, or fold into an eager-conversion mode.
   gratuitously unlike the Japanese one. Neither is a design question; the
   evidence is in `docs/japanese-input-model.md` §6.
 
-  1. **Space with nothing composing is handled by pyzy and unhandled by anthy.**
-     Traced through the public header: on Pinyin it commits `" "` and reports
-     the key handled; on Anthy it reports unhandled and commits nothing. One of
-     the two is wrong whichever way the rule goes, and a client binding Space
-     cannot behave consistently across engines. ibus-anthy's answer is a third
-     one again — `insert_space` at `_chk_mode('0')` commits a **full-width**
-     space by default for Japanese (`half-width-space` defaults false), which
-     is neither of ours. Decide the rule once and apply it to both adapters;
-     note that `PATHIME_OPT_LATIN_WIDTH` defaulting to half would give
-     half-width, so matching ibus-anthy's default needs a stated reason.
+  1. ~~**Space with nothing composing is handled by pyzy and unhandled by
+     anthy.**~~ **Fixed (2026-07-28.)** Anthy now inserts a space at
+     `PATHIME_OPT_LATIN_WIDTH`, which is what pyzy already did and what the
+     header has always said that option governs ("Latin letters, digits and
+     space"). The old adapter comment declined the key so the client could
+     insert its own "rather than absorbed into a full-width 　 nobody asked
+     for" — wrong twice, since the width was never forced (the option defaults
+     to half and is per-context) and the disagreement meant no client could
+     bind Space consistently.
+
+     Two things deliberately not matched. ibus-anthy defaults to a **wide**
+     space (`half-width-space` defaults false); we default half for every
+     engine, because one default across engines beats matching each reference
+     separately. And **hangul still declines**: it implements no width option
+     (`kConverting` excludes it) so it has nothing to add that the client's own
+     space does not, and ibus-hangul leaves plain Space alone too — only
+     Shift+Space is bound there, as a mode hotkey this API excludes
+     (`refs/ibus-hangul/src/engine.c:423`). The visible result is a space
+     either way; only the `handled` flag differs.
+
+     Worth knowing, since it was checked while deciding: `PATHIME_OPT_LATIN_WIDTH`
+     is load-bearing beyond space. Measured, it governs digits on both engines
+     and uppercase letters on pyzy — `"A1 "` at full width gives `"Ａ１　"` on
+     Pinyin. So a client setting it to FULL for the space also gets `２０２４`
+     for `2024`. That coupling is pre-existing and documented, not introduced
+     here, but it is the reason ibus-anthy keeps a separate `half-width-space`.
 
   2. ~~**The `|` in pyzy's auxiliary text is dead weight.**~~ **Fixed
      (2026-07-28)**, as part of §4c. `strip_input_cursor()` in

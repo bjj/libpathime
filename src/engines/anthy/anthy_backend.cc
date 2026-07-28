@@ -561,12 +561,44 @@ bool AnthyContextBackend::key_while_typing(const KeyEvent &key,
         listed_segment_ = -1;
         return true;
 
-    case PATHIME_KEY_SPACE:
     case PATHIME_KEY_HENKAN:
-        /* Space is the convert key only when there is something to convert.
-         * With an empty buffer it is declined so the client inserts its own
-         * space, rather than absorbed into a full-width 　 nobody asked for. */
+        /* A convert key and nothing else, so with nothing to convert it is
+         * declined. Space is the one that also inserts; see below. */
         if (composer_.empty()) return false;
+        return begin_conversion(model, settings);
+
+    case PATHIME_KEY_SPACE:
+        /*
+         * Space is the convert key only when there is something to convert.
+         * With an empty buffer it inserts a space, at the width
+         * PATHIME_OPT_LATIN_WIDTH selects — the same rule pyzy's emit path
+         * applies to space, digits and uppercase (punctuation.cc:117-122), and
+         * what the header has always said that option governs: "Latin letters,
+         * digits and space".
+         *
+         * This used to decline instead, on the reasoning that the client
+         * should insert its own rather than have a full-width 　 forced on it.
+         * That was wrong twice over: it left the two engines disagreeing about
+         * the same key, so no client could bind Space consistently; and the
+         * width was never forced, because the option defaults to half and is
+         * settable per context. ibus-anthy inserts here too — `insert_space`
+         * at `_chk_mode('0')`, wide by default since `half-width-space`
+         * defaults false, which is the one thing we do differently and do
+         * deliberately: one default for every engine beats matching each
+         * reference separately.
+         *
+         * Hangul is the exception and stays declining. It implements no width
+         * option (`kConverting` excludes it), so it has nothing to add that the
+         * client's own space does not already do, and ibus-hangul likewise
+         * leaves plain Space alone — only Shift+Space is bound there, as a
+         * mode hotkey this API excludes (refs/ibus-hangul/src/engine.c:423).
+         */
+        if (composer_.empty()) {
+            out->commit += settings.latin_width == PATHIME_WIDTH_FULL
+                               ? "\xE3\x80\x80"  /* 　 U+3000 ideographic space */
+                               : " ";
+            return true;
+        }
         return begin_conversion(model, settings);
 
     default:

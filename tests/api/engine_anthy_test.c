@@ -381,11 +381,33 @@ static void test_conversion_candidates(pathime_engine_t *engine)
     const pathime_composition_t *c = NULL;
     size_t i;
 
-    /* Space with an empty buffer is declined rather than absorbed, so the
-     * client inserts its own space instead of a full-width one nobody asked
-     * for. */
-    PT_CHECK(!press(ctx, ' '));
+    /*
+     * Space with an empty buffer inserts a space rather than converting, at
+     * the width PATHIME_OPT_LATIN_WIDTH selects — the same rule pyzy applies,
+     * and what the header says that option governs. It used to be declined
+     * here so the client could insert its own, which left the two engines
+     * disagreeing about the same key.
+     */
+    log_reset(&log);
+    PT_CHECK(press(ctx, ' '));
+    PT_CHECK(log.commit_count == 1);
+    check_str("space with nothing composing", log.commits, " ");
 
+    PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_LATIN_WIDTH,
+                                                   PATHIME_WIDTH_FULL),
+                    PATHIME_OK);
+    log_reset(&log);
+    PT_CHECK(press(ctx, ' '));
+    check_str("space at full latin width", log.commits,
+              "\xE3\x80\x80");  /* 　 U+3000 */
+    PT_CHECK_STATUS(pathime_context_reset_option(ctx, PATHIME_OPT_LATIN_WIDTH),
+                    PATHIME_OK);
+
+    /* HENKAN is a convert key only, so with nothing to convert it still
+     * declines — it is not a second way to type a space. */
+    PT_CHECK(!press(ctx, PATHIME_KEY_HENKAN));
+
+    log_reset(&log);
     type(ctx, "kanji");
     check_str("kanji reading", preedit_of(ctx), KANJI_KANA);
     PT_CHECK_SIZE(pathime_context_composition(ctx)->candidate_count, 0);
