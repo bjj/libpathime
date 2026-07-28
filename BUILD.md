@@ -104,7 +104,7 @@ developer command prompt, and remember to re-set `VCPKG_ROOT` afterwards.
 | `LIBPATHIME_BUILD_TESTS` | `OFF` | Build the test suites — see `docs/testing.md`. |
 | `LIBPATHIME_BUILD_DEMO` | `OFF` | Build the interactive terminal demo — see `demo/README.md`. Needs the `demo/cpp-terminal` submodule. |
 | `PYZY_BUILD_DB_ANDROID` | `ON` | Build pyzy's bundled Android pinyin database (needs Python 3). |
-| `BUILD_SHARED_LIBS` | `ON` | Shared vs. static libraries. On Windows the anthy family is static either way; see `docs/anthy-mapping.md`. |
+| `BUILD_SHARED_LIBS` | `ON` | Shared vs. static libraries. Two exceptions ignore it: on Windows the anthy family is static either way (`docs/anthy-mapping.md`), and cpp-terminal — which only the demo links — is always static, because its published globals carry no `dllimport` and a DLL build of it therefore cannot be linked against on Windows at all. |
 
 Which backends survived the gating is recorded in the generated
 `include/pathime/config.h` as `PATHIME_WITH_*`, so a client can compile out

@@ -37,7 +37,43 @@ set(CPPTERMINAL_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(CPPTERMINAL_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
 set(CPPTERMINAL_ENABLE_DOCS    OFF CACHE BOOL "" FORCE)
 set(CPPTERMINAL_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+
+# cpp-terminal is built *static*, and that is not a preference — a shared build
+# of it cannot be linked against on Windows at all.
+#
+# Its two published globals are plain `extern` references with no dllimport or
+# dllexport anywhere: `extern TOstream& cout;` (cpp-terminal/iostream.hpp:19)
+# and `extern Term::Terminal& terminal;` (cpp-terminal/terminal.hpp:21). Data
+# symbols are the one case CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS does not rescue —
+# it can put them in the export table, but a consumer still has to *see*
+# __declspec(dllimport) to read them through an import library, and there is
+# none to see. So a DLL build links every function and neither of those two,
+# and pathime-demo fails with LNK2019 on both.
+#
+# Upstream knows: its own CMakeLists guards exactly this, defaulting
+# BUILD_SHARED_LIBS off under WIN32 with a `##FIXME` beside it
+# (cpp-terminal/CMakeLists.txt:35-39). The guard cannot fire here, because it
+# is an option() and BUILD_SHARED_LIBS is already a cache entry by then
+# (cmake/LibpathimeOptions.cmake:57) — option() leaves an existing cache entry
+# alone. That is the same mechanism the block above depends on, working against
+# us this time, which is why turning the option ON is what breaks the build.
+#
+# Forced off across the add_subdirectory and put back immediately after. The
+# restore is the load-bearing half: add_subdirectory() runs to completion here,
+# so only cpp-terminal's own targets are created while the value is off, but
+# leaving it off would silently make libpathime itself static on the next
+# configure. Static everywhere rather than only under WIN32, because
+# cpp-terminal is the demo's private dependency and the demo is never
+# installed — one rule, and the executable runs without a library beside it.
+get_property(_ct_bsl_help CACHE BUILD_SHARED_LIBS PROPERTY HELPSTRING)
+set(_ct_bsl_saved "${BUILD_SHARED_LIBS}")
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "${_ct_bsl_help}" FORCE)
+
 add_subdirectory(cpp-terminal)
+
+set(BUILD_SHARED_LIBS "${_ct_bsl_saved}" CACHE BOOL "${_ct_bsl_help}" FORCE)
+unset(_ct_bsl_saved)
+unset(_ct_bsl_help)
 
 # --- Silence the vendored build ---------------------------------------------
 #
@@ -100,8 +136,14 @@ target_include_directories(pathime-demo PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src
 
 # MSVC needs telling that these sources are UTF-8; they carry the demo's own
 # labels and the box-drawing characters it renders with.
+#
+# The flag is `/utf-8`, with the hyphen. `/utf8` is not an abbreviation of it —
+# cl rejects it outright with "D9002: ignoring unknown option", which is a
+# *warning*, so the build went on succeeding while the sources were being read
+# in the host ANSI codepage and every non-ASCII literal in demo/src/ came out
+# mojibake.
 if(MSVC)
-  target_compile_options(pathime-demo PRIVATE /utf8)
+  target_compile_options(pathime-demo PRIVATE /utf-8)
 endif()
 
 # --- Where the demo keeps what the engines learn -----------------------------
