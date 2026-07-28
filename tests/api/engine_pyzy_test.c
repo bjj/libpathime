@@ -493,6 +493,109 @@ static void test_eager_materialization(pathime_engine_t *engine)
 }
 
 /*
+ * The candidate cursor, which on pyzy drives a call this library could not
+ * previously reach.
+ *
+ * pyzy has always tracked a focused candidate and rewritten its preedit to
+ * match — PhoneticContext::focusCandidate() sets the index and calls
+ * updatePreeditText() — but nothing in the API could move it, so the active
+ * span always showed candidate 0 however the client's highlight moved. This is
+ * the test that it now follows.
+ *
+ * Note what is *not* checked here: the auxiliary text. pyzy's own rendering of
+ * the pinyin it decoded does not depend on which candidate is hovered, so it
+ * stays put across the moves below, and that it stays put is itself checked.
+ */
+static void test_candidate_cursor(pathime_engine_t *engine)
+{
+    client_log_t log;
+    pathime_client_t client;
+    pathime_context_t *ctx = open_context(engine, &client, &log);
+    const pathime_composition_t *c = NULL;
+    char first[32];
+    char second[32];
+
+    /* No composition, so no list and nothing to hover. */
+    PT_CHECK_SIZE(pathime_context_composition(ctx)->candidate_cursor, 0);
+    PT_CHECK_STATUS(pathime_context_set_candidate_cursor(ctx, 0),
+                    PATHIME_ERROR_INVALID_ARGUMENT);
+
+    type(ctx, "nihao");
+    c = pathime_context_composition(ctx);
+    PT_CHECK(c->candidate_count > 1);
+
+    snprintf(first, sizeof(first), "%s", candidate_of(ctx, 0));
+    snprintf(second, sizeof(second), "%s", candidate_of(ctx, 1));
+    PT_CHECK(strcmp(first, second) != 0);
+
+    /* The preedit previews the hovered candidate, and starts at the head. */
+    PT_CHECK_SIZE(pathime_context_composition(ctx)->candidate_cursor, 0);
+    check_str("preedit at cursor 0", preedit_of(ctx), first);
+
+    /* Move it: focusCandidate() runs, the preedit follows, one callback. */
+    log_reset(&log);
+    PT_CHECK_STATUS(pathime_context_set_candidate_cursor(ctx, 1), PATHIME_OK);
+    PT_CHECK_SIZE(pathime_context_composition(ctx)->candidate_cursor, 1);
+    check_str("preedit follows cursor", preedit_of(ctx), second);
+    PT_CHECK(log.changed_count == 1);
+    /* Hovering settles and commits nothing. */
+    PT_CHECK(log.commit_count == 0);
+    PT_CHECK_SIZE(pathime_context_composition(ctx)->preedit_settled, 0);
+
+    /* The list itself is unchanged — hovering within a list does not replace
+     * it, so positions the client already handed out still mean what they
+     * did. */
+    c = pathime_context_composition(ctx);
+    check_str("candidate 0 unmoved", candidate_of(ctx, 0), first);
+    check_str("candidate 1 unmoved", candidate_of(ctx, 1), second);
+    check_str("auxiliary unmoved", c->auxiliary.bytes, AUX_NI_HAO);
+
+    /* Reversible, unlike selection. */
+    PT_CHECK_STATUS(pathime_context_set_candidate_cursor(ctx, 0), PATHIME_OK);
+    check_str("cursor moves back", preedit_of(ctx), first);
+
+    /* Out of range leaves everything alone. */
+    PT_CHECK_STATUS(pathime_context_set_candidate_cursor(ctx, c->candidate_count),
+                    PATHIME_ERROR_INVALID_ARGUMENT);
+    PT_CHECK_SIZE(pathime_context_composition(ctx)->candidate_cursor, 0);
+    check_str("failed move changes nothing", preedit_of(ctx), first);
+
+    /*
+     * The cursor is always a position in the current list, so lowering the cap
+     * out from under a cursor near the end must still leave one a client can
+     * draw with.
+     *
+     * Worth knowing what this does and does not pin down: on pyzy the answer
+     * comes from the observer resetting the hover when its candidate list is
+     * regenerated, not from the clamp in materialize_candidates() — both were
+     * removed and this still passed. It is a check that the invariant holds
+     * here, not that the clamp is what holds it. api.engine_anthy carries the
+     * version that tests the clamp, because anthy takes the default no-op
+     * options_changed() and nothing else volunteers.
+     */
+    PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_MAX_CANDIDATES, 8),
+                    PATHIME_OK);
+    PT_CHECK_STATUS(pathime_context_set_candidate_cursor(ctx, 6), PATHIME_OK);
+    PT_CHECK_SIZE(pathime_context_composition(ctx)->candidate_cursor, 6);
+
+    PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_MAX_CANDIDATES, 3),
+                    PATHIME_OK);
+    c = pathime_context_composition(ctx);
+    PT_CHECK_SIZE(c->candidate_count, 3);
+    PT_CHECK(c->candidate_cursor < c->candidate_count);
+    PT_CHECK_STATUS(pathime_context_reset_option(ctx, PATHIME_OPT_MAX_CANDIDATES),
+                    PATHIME_OK);
+
+    /* Selecting settles the span, so the list and the cursor both start over
+     * for whatever is left. */
+    PT_CHECK_STATUS(pathime_context_set_candidate_cursor(ctx, 1), PATHIME_OK);
+    PT_CHECK_STATUS(pathime_context_select_candidate(ctx, 1), PATHIME_OK);
+    PT_CHECK_SIZE(pathime_context_composition(ctx)->candidate_cursor, 0);
+
+    pathime_context_destroy(ctx);
+}
+
+/*
  * Callback safety in practice.
  *
  * The header lists pathime_context_candidate() as one of the functions a client
@@ -1184,6 +1287,7 @@ int main(void)
         test_pinyin_composition(pinyin);
         test_settled_boundary_and_auto_commit(pinyin);
         test_eager_materialization(pinyin);
+        test_candidate_cursor(pinyin);
         test_callback_safety(pinyin);
         test_bopomofo(pinyin, bopomofo);
         test_options(pinyin, bopomofo);

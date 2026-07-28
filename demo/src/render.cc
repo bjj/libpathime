@@ -150,20 +150,36 @@ void candidate_lines(const App &app, std::size_t columns,
 
     const std::size_t per_page = app.page_size();
     const std::size_t pages = (count + per_page - 1) / per_page;
-    char buf[128];
+    /*
+     * The entry the composition currently reflects. Highlighting it is not
+     * decoration: on an engine that previews its candidates the hovered one
+     * *is* what the preedit above is showing, so the highlight and the text
+     * field are two views of the same fact, and watching them move together is
+     * most of what this panel is for.
+     *
+     * It comes out of the composition rather than out of anything this program
+     * remembers asking for, which is what the header asks of a client — the
+     * engine moves this cursor too.
+     */
+    const std::size_t cursor = comp->candidate_cursor;
+    char buf[160];
     std::snprintf(buf, sizeof(buf),
-                  "   candidates   %zu   page %zu of %zu", count,
-                  app.page() + 1, pages);
-    out->push_back(std::string(buf) + dim("   PgUp/PgDn"));
+                  "   candidates   %zu   page %zu of %zu   at %zu", count,
+                  app.page() + 1, pages, cursor);
+    out->push_back(std::string(buf) + dim("   Up/Dn, PgUp/PgDn"));
 
     std::string line = "   ";
     for (std::size_t i = 0; i < per_page; i++) {
         const std::size_t index = app.page() * per_page + i;
         if (index >= count) break;
-        const std::string entry = fg(Color::Name::BrightBlack,
-                                     std::to_string(i + 1) + ".") + " " +
-                                  app.candidate(index) + "  ";
-        if (display_width(line) + display_width(app.candidate(index)) + 6 > columns) {
+
+        const std::string text = app.candidate(index);
+        const bool hovered = index == cursor;
+        const std::string entry =
+            fg(Color::Name::BrightBlack, std::to_string(i + 1) + ".") + " " +
+            (hovered ? styled(Style::Reversed, text) : text) + "  ";
+
+        if (display_width(line) + display_width(text) + 6 > columns) {
             out->push_back(line);
             line = "   ";
         }
@@ -274,6 +290,8 @@ std::vector<std::string> help_page()
     lines.push_back("   1 - 9           pick a candidate from the page on screen");
     lines.push_back("   Alt + 1 - 9     the same — and the only form Bopomofo leaves");
     lines.push_back("                   free, since there the digits are the tone keys");
+    lines.push_back("   Up / Down       move the highlight without choosing; the preedit");
+    lines.push_back("                   follows it on an engine that previews candidates");
     lines.push_back("   PgUp / PgDn     page the list; past the end raises max-candidates");
     lines.push_back("   Space           convert: what advances a composition");
     lines.push_back("   Return          end it without applying a conversion the user");

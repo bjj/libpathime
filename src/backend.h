@@ -209,6 +209,34 @@ public:
                                               Output *out) = 0;
 
     /**
+     * Move the hover to candidate @a index of the active span, settling
+     * nothing. The client navigating its candidate list ends here.
+     *
+     * The distinction from select_candidate() is what the two exist to draw:
+     * this changes what is *shown* and can be undone by moving back, so an
+     * implementation updates model->cursor and — for a backend that previews
+     * its candidates — rewrites model->active to match. It never commits, so
+     * there is no Output.
+     *
+     * The index is already known to be in range, so an implementation need not
+     * bounds-check it. Returning PATHIME_ERROR_UNSUPPORTED is legitimate for a
+     * backend with no candidates to hover, which is Hangul's case, and that is
+     * the default below: an adapter that does nothing here would otherwise
+     * report success and leave the cursor and the preedit disagreeing.
+     *
+     * The caller re-materializes candidates and re-projects afterward.
+     */
+    virtual pathime_status_t set_cursor(size_t index,
+                                        const OptionReader &options,
+                                        Composition *model)
+    {
+        (void)index;
+        (void)options;
+        (void)model;
+        return PATHIME_ERROR_UNSUPPORTED;
+    }
+
+    /**
      * A resolved option value changed for this context. Re-derive whatever
      * depends on it, in place.
      *

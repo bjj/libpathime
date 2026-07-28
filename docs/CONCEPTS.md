@@ -9,7 +9,7 @@ The model is intentionally narrower than desktop input method frameworks such as
 * The engine produces data and requests operations; it does not own a panel or other user-interface component
 * The client decides how composition information is displayed
 * All text exchanged through the core interface is plain Unicode text
-* Candidate navigation and pagination are client-side concerns
+* Candidate pagination is a client-side concern, and the client decides which keys navigate a candidate list; where the highlight lands is told to the engine, because the engine may preview it
 * Text selections, display carets, text-field rectangles, and other presentation details are outside the model
 * Rich text and attributed text are not supported
 * Engine options and configuration are exchanged through negotiation rather than represented as a secondary user interface
@@ -22,6 +22,7 @@ The client sends the engine:
 * negotiation information
 * key events
 * surrounding text
+* candidate cursor movements
 * candidate selections
 
 The engine returns:
@@ -57,7 +58,7 @@ The client owns:
 * the current insertion position
 * keyboard event delivery
 * presentation of composition data
-* candidate navigation and pagination
+* candidate pagination, and the key bindings that navigate a candidate list
 * application of text-editing requests
 
 The client may represent an entire application window, an individual text field, or another independently editable destination.
@@ -166,7 +167,7 @@ Composition data contains exactly three conceptual fields:
 
 1. preedit text
 2. auxiliary text
-3. a candidate list
+3. a candidate list, together with the *candidate cursor* into it
 
 Composition data is plain data, not a user-interface component. The client chooses whether and how to display it.
 
@@ -180,6 +181,8 @@ A client may display the fields:
 * in any other client-appropriate form
 
 The current composition data supersedes the previous composition data for that input context. Empty text or an empty candidate list indicates that the corresponding information is not currently present.
+
+Because the whole of it is replaced at once, a client redraws from what it was last given rather than from anything it remembers requesting. That matters most for the candidate cursor, which the engine moves as well as the client — see *Candidate cursor*.
 
 **IBus and Fcitx note:** IBus sends preedit text, auxiliary text, and its lookup table through separate update operations. Fcitx groups related values in an input-panel object containing preedit, upper and lower auxiliary text, and a candidate list. This model instead combines the three concepts into one neutral composition-data value and does not model the panel itself. ([Intelligent Input Bus][2])
 
@@ -267,8 +270,30 @@ The client may paginate, scroll, group, or otherwise present the list without in
 
 The order of a candidate list remains meaningful until the engine supplies new composition data. New composition data replaces the previous candidate list and invalidates positions referring to the previous list.
 
-**IBus and Fcitx note:** IBus calls its candidate list a *lookup table*. An IBus lookup table also includes page size, a candidate cursor, wrapping behavior, orientation, and candidate labels. Fcitx candidate lists may similarly provide paging, cursor movement, labels, comments, placeholders, and other interfaces. Those features are intentionally excluded here.
+**IBus and Fcitx note:** IBus calls its candidate list a *lookup table*. An IBus lookup table also includes page size, a candidate cursor, wrapping behavior, orientation, and candidate labels. Fcitx candidate lists may similarly provide paging, cursor movement, labels, comments, placeholders, and other interfaces. Of those, only the cursor is present here — see *Candidate cursor* — and it is present because it is not merely presentation. Page size, wrapping, orientation, and labels are excluded.
 IBus lookup table pagination is controlled by key press events rather than an API, which is undesirable. ([Intelligent Input Bus][3])
+
+## Candidate cursor
+
+The **candidate cursor** is the position in the candidate list that the composition currently reflects: the entry a client draws highlighted, and the one whose text the unsettled span of the preedit is showing.
+
+It is **part of composition data**, not a separate query and not something the client tracks privately. It is a property of the list rather than of any candidate, it is always a position within the current list, and it is at the first position whenever the list is empty.
+
+The cursor exists in this model — where page size, labels and orientation do not — because it is not purely presentation. An engine may **preview** the candidate under the cursor: moving the cursor rewrites the unsettled span of the preedit to that candidate's text. The highlight and the preedit are then two views of one fact, and a model that let the client own the highlight privately would leave them unable to agree.
+
+Moving the cursor settles nothing. It commits no text, it does not advance the preedit display position, and it can be undone by moving the cursor back. That is what distinguishes it from *Select candidate*, which is irrevocable.
+
+The cursor moves in three ways, and only these:
+
+* the client moves it, by absolute position
+* a key event that asks for conversion advances it, on an engine that converts by cycling through its candidates
+* new composition data replaces the list, which returns the cursor to the first position
+
+Two of those three are not the client's, which fixes the client's obligation: **a client draws its highlight from the current composition data, and does not assume the cursor is where it last put it.** Asking for a cursor position is a request, not an assignment. Every one of the three movements arrives as new composition data, so a client that redraws from what it is given is never out of step.
+
+The client owns the key bindings. Which key moves the cursor, in which direction, and whether either end of the list wraps are decisions the engine takes no part in — the engine is told the resulting position and nothing else. There are correspondingly no "next" and "previous" operations in this model, only movement to an absolute position.
+
+An engine that produces no candidates has no cursor to move.
 
 ## Select candidate
 
@@ -285,7 +310,7 @@ The position is not relative to:
 
 For example, if the client displays candidates 20 through 29 as its third page, selecting the fourth displayed candidate selects absolute position 23, subject to the indexing convention chosen by the API.
 
-Candidate navigation is performed entirely by the client. The engine receives only the completed selection.
+Navigating to a candidate and choosing one are separate operations. Navigation moves the *Candidate cursor* and settles nothing; selection is what the client sends when the user has chosen. A client is free to select a position the cursor never visited — selection takes an absolute position and does not depend on where the cursor has been.
 
 Selection resolves the composition greedily, from the beginning toward the end. Choosing a candidate settles the portion of the composition that candidate covers, advances the preedit display position past it, and produces a fresh candidate list for whatever input remains. When nothing remains, the engine commits.
 
@@ -359,6 +384,8 @@ The frame of reference is the surrounding text the client most recently supplied
 
 Deletion is ordered ahead of any commit text produced by the same client call, so that the range is always relative to the document as the engine last saw it rather than to the result of a commit the client has just applied.
 
+At most one deletion is requested per client call. Several would each be described against the same surrounding text, so applying the first would move the text the second describes, and every client would have to collect them and apply them in reverse order. One request, applied where it says.
+
 This operation may be used for:
 
 * reconversion
@@ -386,7 +413,7 @@ The client informs the engine when the input context:
 * gains focus
 * loses focus
 
-Focus gates input and nothing else. An unfocused input context does not accept key events or candidate selections; reading composition data, supplying surrounding text, changing settings, and resetting all remain available.
+Focus gates input and nothing else. An unfocused input context does not accept key events, candidate cursor movements, or candidate selections; reading composition data — including the candidate cursor — supplying surrounding text, changing settings, and resetting all remain available.
 
 Losing focus neither commits nor discards. Composition state is preserved unchanged, so regaining focus resumes exactly where the user left off, and the engine produces no output as a result of the transition itself. A client that wants the preedit finalized or abandoned when the user leaves a field performs that itself, before dropping focus. Making this a fixed rule rather than negotiated behavior keeps a text field's contents a decision the client owns, which matters because engines disagree: some underlying libraries flush their pending syllable on focus loss and others ignore focus entirely.
 
@@ -575,6 +602,7 @@ The canonical terms used by this documentation are:
 | **Preedit text**            | Provisional text that has not been committed.                       |
 | **Auxiliary text**          | Supplemental plain text associated with the composition.            |
 | **Candidate list**          | The complete ordered list of selectable candidate texts.            |
+| **Candidate cursor**        | Composition data: the list position the composition reflects. Moving it settles nothing. |
 | **Select candidate**        | Choose a candidate by its absolute position in the current list.    |
 | **Surrounding text**        | Client text near the insertion position, supplied as context.       |
 | **Commit text**             | Insert finalized text into the client.                              |

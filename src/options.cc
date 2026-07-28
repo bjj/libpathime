@@ -310,6 +310,88 @@ static_assert(kOptionCount == static_cast<size_t>(PATHIME_OPT_TABLE_PINYIN_FALLB
 static_assert(kEngineCount <= 32, "engine ids no longer fit OptionDescriptor::engines");
 
 /* ---------------------------------------------------------------------------
+ * Value names
+ *
+ * The names pathime_option_value_name() hands out, for the two types that have
+ * values worth naming. A side table rather than a tenth OptionDescriptor field
+ * because only 15 of the 32 options have any: carrying an always-null array
+ * through every row, and through five constexpr factories, would cost more
+ * than the lookup below.
+ *
+ * Indexed by *bit position* for both types, which is the one thing to know
+ * before reading a row. For an ENUM that is the value itself; for a FLAGS it
+ * is the bit's position, so PATHIME_PINYIN_FUZZY_Z_ZH — 1u << 2 — is entry 2.
+ * That makes each row read in enumerator order and match the descriptor's
+ * valid_values, which is a bitmask in exactly the same terms.
+ *
+ * Names follow the rule pathime_option_name() follows, one level down: the
+ * enumerator minus the prefix its own enum shares, lowercased, underscores
+ * turned into hyphens. PATHIME_CHINESE_TRADITIONAL_FIRST is
+ * "traditional-first", PATHIME_PINYIN_CORRECT_GN_NG is "gn-ng". These are ABI
+ * for the same reason the option names are — a client stores them — so
+ * deriving them mechanically is what keeps the promise cheap.
+ * ------------------------------------------------------------------------- */
+
+/** Wide enough for the widest row: PATHIME_OPT_PINYIN_FUZZY's twenty bits. */
+constexpr size_t kMaxValueNames = 20;
+
+struct OptionValueNames {
+    pathime_option_t option;
+    /** By bit position. A null entry ends the row; trailing entries are null. */
+    const char *names[kMaxValueNames];
+};
+
+constexpr OptionValueNames kValueNames[] = {
+    {PATHIME_OPT_LATIN_WIDTH, {"half", "full"}},
+    {PATHIME_OPT_PUNCTUATION_WIDTH, {"half", "full"}},
+
+    {PATHIME_OPT_CHINESE_VARIANT,
+     {"simplified-only", "traditional-only", "simplified-first",
+      "traditional-first", "any"}},
+
+    {PATHIME_OPT_HANGUL_LAYOUT,
+     {"2set", "2set-yet", "3set-2", "3set-390", "3set-final", "3set-noshift",
+      "3set-yet", "romaja", "ahnmatae"}},
+    {PATHIME_OPT_HANGUL_PREEDIT, {"syllable", "word", "none"}},
+
+    {PATHIME_OPT_ANTHY_TYPING_METHOD, {"romaji", "kana"}},
+    {PATHIME_OPT_ANTHY_KANA_SCRIPT,
+     {"hiragana", "katakana", "halfwidth-katakana"}},
+    {PATHIME_OPT_ANTHY_PERIOD_STYLE, {"kuten", "fullwidth"}},
+    {PATHIME_OPT_ANTHY_SYMBOL_STYLE,
+     {"corner-slash", "corner-middot", "bracket-slash", "bracket-middot"}},
+    {PATHIME_OPT_ANTHY_ON_PERIOD, {"nothing", "convert", "commit"}},
+
+    {PATHIME_OPT_PINYIN_SCHEME,
+     {"full", "double-mspy", "double-zrm", "double-abc", "double-zgpy",
+      "double-pyjj", "double-xhe"}},
+    {PATHIME_OPT_BOPOMOFO_LAYOUT, {"standard", "ching-yeah", "eten", "ibm"}},
+
+    /* The two FLAGS options. Initials first, finals after, in the order the
+     * header groups them. */
+    {PATHIME_OPT_PINYIN_FUZZY,
+     {"c-ch", "ch-c", "z-zh", "zh-z", "s-sh", "sh-s", "l-n", "n-l", "f-h",
+      "h-f", "l-r", "r-l", "k-g", "g-k", "an-ang", "ang-an", "en-eng",
+      "eng-en", "in-ing", "ing-in"}},
+    {PATHIME_OPT_PINYIN_CORRECTION,
+     {"gn-ng", "mg-ng", "iou-iu", "uei-ui", "uen-un", "ue-ve", "v-u",
+      "on-ong"}},
+
+    {PATHIME_OPT_TABLE_INVALID_INPUT, {"commit-candidate", "commit-raw"}},
+};
+
+/** The row for @a option, or nullptr if it has no named values. */
+const OptionValueNames *value_names_row(pathime_option_t option)
+{
+    for (const OptionValueNames &row : kValueNames) {
+        if (row.option == option) {
+            return &row;
+        }
+    }
+    return nullptr;
+}
+
+/* ---------------------------------------------------------------------------
  * Setter kinds
  * ------------------------------------------------------------------------- */
 
@@ -1019,6 +1101,66 @@ const char *pathime_option_name(pathime_option_t option)
 {
     const pathime::OptionDescriptor *desc = pathime::option_descriptor(option);
     return (desc != nullptr) ? desc->name : "";
+}
+
+const char *pathime_option_value_name(pathime_option_t option, int64_t value)
+{
+    /* Static table lookup, so no initialization check — the same promise
+     * pathime_option_name() makes, for the same reason: a client builds its
+     * settings interface before it decides to start the library. */
+    const pathime::OptionDescriptor *desc = pathime::option_descriptor(option);
+    if (desc == nullptr) {
+        return "";
+    }
+
+    /*
+     * Turn the argument into a bit position, which is how both kinds of row are
+     * indexed. An ENUM value is already one. A FLAGS value is a single bit and
+     * must be exactly that: zero names nothing, and a combination has no single
+     * name to give, so both fall out here rather than being resolved to the
+     * lowest bit set — silently naming one of several bits would be worse than
+     * saying nothing.
+     */
+    size_t index = 0;
+    if (desc->type == PATHIME_OPTION_ENUM) {
+        if (value < 0 || static_cast<uint64_t>(value) >= pathime::kMaxValueNames) {
+            return "";
+        }
+        index = static_cast<size_t>(value);
+    } else if (desc->type == PATHIME_OPTION_FLAGS) {
+        const uint64_t bit = static_cast<uint64_t>(value);
+        if (bit == 0 || (bit & (bit - 1)) != 0) {
+            return "";
+        }
+        while ((bit >> index) != 1) {
+            index++;
+        }
+        if (index >= pathime::kMaxValueNames) {
+            return "";
+        }
+    } else {
+        /* BOOL, INT and STRING have no values worth naming. */
+        return "";
+    }
+
+    /*
+     * The descriptor is what decides whether the value exists at all, so an
+     * enumerator this option does not define is "" even if the row happens to
+     * carry a name at that position. valid_values is unnarrowed here — this
+     * function takes no engine, and the name of a value does not depend on who
+     * implements it — so an engine that does not honour a bit still gets the
+     * name for it, which is what lets a client label an option it has narrowed
+     * for itself.
+     */
+    if ((desc->valid_values & (UINT64_C(1) << index)) == 0) {
+        return "";
+    }
+
+    const pathime::OptionValueNames *row = pathime::value_names_row(option);
+    if (row == nullptr || row->names[index] == nullptr) {
+        return "";
+    }
+    return row->names[index];
 }
 
 pathime_status_t pathime_engine_option_info(const pathime_engine_t *engine,

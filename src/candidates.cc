@@ -12,17 +12,16 @@
  *  - The currently-shown candidate (TODO.md §2, Finding 2). Neither anthy nor
  *    pyzy durably records which candidate the user is hovering before commit
  *    — anthy records only at anthy_commit_segment() time — so the cursor is
- *    tracked here, per active region, and fed back to the backend only on
- *    selection or commit.
+ *    tracked here, per active region, and fed back to the backend when the
+ *    client moves it, when a selection makes it real, and on commit.
  *
  * The split with context.cc is deliberate: context.cc sequences a mutating
- * call, this file owns everything candidate-shaped. The one thing that has to
- * cross between them is materialize_candidates(), which refresh_composition()
- * calls; it is declared at the top of context.cc rather than in a header,
- * because a src/candidates.h holding a single function nothing else names
- * would be ceremony. It becomes the right answer the moment the pump has real
- * work to do — an enumeration entry point, a cursor accessor, and the
- * selection path all want declaring in one place.
+ * call, this file owns everything candidate-shaped. What crosses between them
+ * is materialize_candidates(), declared in candidates.h, plus the cursor
+ * itself — refresh_composition() publishes Composition::cursor into
+ * pathime_composition_t::candidate_cursor, which is why there is no cursor
+ * getter here to pair with the setter below. The cursor is composition data
+ * and is read from the struct.
  */
 
 #include <pathime/pathime.h>
@@ -32,6 +31,7 @@
 #include <limits>
 #include <string>
 
+#include "candidates.h"
 #include "context.h"
 #include "engine.h"
 #include "init.h"
@@ -88,7 +88,7 @@ namespace pathime {
  * and before any callback is dispatched — see the file comment for why that
  * ordering is load-bearing rather than tidy.
  *
- * Declared at the top of context.cc.
+ * Declared in candidates.h.
  */
 void materialize_candidates(pathime_context_t *ctx)
 {
@@ -188,6 +188,71 @@ pathime_status_t pathime_context_candidate(const pathime_context_t *ctx,
     const std::string &candidate = ctx->model.candidates[index];
     out->bytes = candidate.c_str();
     out->len = candidate.size();
+    return PATHIME_OK;
+}
+
+pathime_status_t pathime_context_set_candidate_cursor(pathime_context_t *ctx,
+                                                      size_t index)
+{
+    if (ctx == nullptr) {
+        return PATHIME_ERROR_INVALID_ARGUMENT;
+    }
+    if (!pathime::initialized()) {
+        return PATHIME_ERROR_NOT_INITIALIZED;
+    }
+    if (!ctx->focused) {
+        return PATHIME_ERROR_NOT_FOCUSED;
+    }
+
+    /*
+     * Out of range is rejected here rather than by the adapter, which is what
+     * lets ContextBackend::set_cursor() take the index on trust. An empty list
+     * fails this test for every index, so "no candidates" needs no separate
+     * arm: there is no position 0 to move to when there is nothing to show.
+     */
+    if (index >= ctx->model.candidates.size()) {
+        return PATHIME_ERROR_INVALID_ARGUMENT;
+    }
+
+    /*
+     * Moving the cursor settles nothing, so unlike select_candidate() there is
+     * no Output to clear and nothing to commit — the only thing that can come
+     * back is a rewritten active span, for a backend that previews the
+     * candidate it is hovering.
+     *
+     * The core's copy moves first, and the adapter may move it again. That
+     * ordering matters for a backend which cannot hover at all: it returns
+     * UNSUPPORTED below and the assignment is rolled back, so a failed call
+     * leaves the cursor exactly where it was. Which is also why this is not
+     * an assignment from the caller's point of view — the value that ends up
+     * in pathime_composition_t::candidate_cursor is whatever survives the
+     * refresh below, and the header tells clients to read it back rather than
+     * assume.
+     */
+    const size_t previous = ctx->model.cursor;
+    ctx->model.cursor = index;
+
+    pathime_status_t status = PATHIME_ERROR_UNSUPPORTED;
+    if (ctx->backend != nullptr) {
+        const pathime::ContextOptions options(ctx);
+        status = ctx->backend->set_cursor(index, options, &ctx->model);
+    }
+
+    if (status != PATHIME_OK) {
+        ctx->model.cursor = previous;
+        /*
+         * UNSUPPORTED is a rejection: the backend declined to hover and
+         * changed nothing, so the composition is intact. Anything else got
+         * partway and leaves it indeterminate until reset, as the header's
+         * Status section promises.
+         */
+        if (status != PATHIME_ERROR_UNSUPPORTED) {
+            ctx->indeterminate = true;
+        }
+        return status;
+    }
+
+    pathime::refresh_composition(ctx, false);
     return PATHIME_OK;
 }
 

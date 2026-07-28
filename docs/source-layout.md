@@ -23,11 +23,13 @@ src/
                         reset / surrounding text, callback dispatch ordering. The
                         header defines struct pathime_context
   composition.h/.cc     structured composition model + projection to the flat value
-  candidates.cc         pathime_context_candidate/_select_candidate; eager
-                        materialization to the cap; currently-shown cursor
-  options.h/.cc         descriptor table, two-level store, kind-typed accessors,
-                        introspection walk — and all 19 public option entry
-                        points, both levels
+  candidates.h/.cc      pathime_context_candidate/_set_candidate_cursor/
+                        _select_candidate; eager materialization to the cap;
+                        the hovered-candidate cursor, which context.cc
+                        publishes into the composition rather than a getter
+  options.h/.cc         descriptor table, value-name table, two-level store,
+                        kind-typed accessors, introspection walk — and all 20
+                        public option entry points, both levels
   keys.h/.cc            engine-agnostic key layer: validation, routing,
                         handled/unhandled
   utf8.h/.cc            encoding boundaries; copy-on-return helpers
@@ -85,9 +87,9 @@ because they are not obvious from the names:
 |---|---|
 | `pathime_version*`, `pathime_status_string`, `pathime_init`, `pathime_shutdown` | `init.cc` |
 | `pathime_has_engine`, `pathime_engine_create/destroy/id/requirements` | `engine.cc` |
-| `pathime_context_create/destroy/engine/user_data`, `_process_key`, `_composition`, `_set_surrounding_text`, `_set_focused`, `_reset` | `context.cc` |
-| `pathime_context_candidate`, `pathime_context_select_candidate` | `candidates.cc` |
-| all 19 `pathime_*option*` functions, both levels | `options.cc` |
+| `pathime_context_create/destroy/engine/user_data/requirements/is_focused`, `_process_key`, `_composition`, `_set_surrounding_text`, `_set_focused`, `_reset` | `context.cc` |
+| `pathime_context_candidate`, `_set_candidate_cursor`, `_select_candidate` | `candidates.cc` |
+| all 20 `pathime_*option*` functions, both levels | `options.cc` |
 
 The two seams: **candidate access lives with the candidate subsystem**, not with
 the rest of `pathime_context_*`, because both functions are thin faces over the

@@ -1,6 +1,5 @@
 #include "app.h"
 
-#include <algorithm>
 #include <cstdio>
 #include <cstring>
 
@@ -129,7 +128,6 @@ void App::on_commit(void *user_data, pathime_str_t text)
     App *app = static_cast<App *>(user_data);
     /* Deletions are dispatched before commits precisely so the document can be
      * put right before anything is inserted into it. */
-    app->flush_deletes();
     app->document_.append(text.bytes, text.len);
     app->note_callback("commit_text \"" +
                        escape_for_log(std::string(text.bytes, text.len)) + "\"");
@@ -164,27 +162,40 @@ void App::on_delete(void *user_data, ptrdiff_t offset, std::size_t count)
         return;
     }
 
-    app->deletes_.push_back(
-        PendingDelete{static_cast<std::size_t>(start), count});
+    /*
+     * Applied on the spot. The header guarantees at most one
+     * delete_surrounding_text per dispatch, so there is never an earlier
+     * deletion whose coordinates this one would invalidate — and all deletions
+     * arrive before any commit, so the document is in the state the engine
+     * described before anything is inserted into it.
+     */
+    erase_scalars(&app->document_, static_cast<std::size_t>(start), count);
     app->note_callback(line);
 }
 
 void App::on_changed(void *user_data, const pathime_composition_t *composition)
 {
     App *app = static_cast<App *>(user_data);
-    char buf[192];
+    char buf[224];
     /*
      * Only the non-mutating queries may be called from inside a callback, and
      * reading the composition is one of them — this is the same object
      * pathime_context_composition() returns. The demo copies nothing here: it
      * re-reads the composition when it draws, which is what the borrowed
      * lifetime is for.
+     *
+     * Every field of the struct is logged, cursor included, because the cursor
+     * is the field a reader is most likely to think the client owns. Seeing it
+     * arrive on a callback the client did not trigger — the second press of
+     * Space under anthy — is what shows it does not.
      */
     std::snprintf(buf, sizeof(buf),
-                  "composition_changed preedit=\"%s\" settled=%zu candidates=%zu",
+                  "composition_changed preedit=\"%s\" settled=%zu candidates=%zu "
+                  "cursor=%zu",
                   escape_for_log(std::string(composition->preedit.bytes,
                                              composition->preedit.len)).c_str(),
-                  composition->preedit_settled, composition->candidate_count);
+                  composition->preedit_settled, composition->candidate_count,
+                  composition->candidate_cursor);
     app->note_callback(buf);
 }
 
@@ -312,6 +323,21 @@ void App::input_key(const Term::Key &key)
         }
         if (key == Term::Key::PageDown) { page_forward(); return; }
         if (key == Term::Key::PageUp)   { page_back(); return; }
+
+        /*
+         * The arrows move the hover, and they are bound *here* — before the
+         * key is offered to the engine — because that is what owning the
+         * binding means. An engine that saw them first and reported them
+         * handled would take the decision back; anthy used to do exactly that
+         * and no longer does.
+         *
+         * The result is visible rather than cosmetic: on an engine that
+         * previews its candidates, the preedit rewrites itself to whatever is
+         * hovered, so this is the same operation the user would otherwise have
+         * to reach by pressing Space repeatedly and hoping.
+         */
+        if (key == Term::Key::ArrowDown) { move_cursor(1); return; }
+        if (key == Term::Key::ArrowUp)   { move_cursor(-1); return; }
     }
 
     pathime_key_event_t event;
@@ -332,8 +358,14 @@ void App::input_key(const Term::Key &key)
     const pathime_status_t st = pathime_context_process_key(ctx(), &event, &handled);
     note_result(call, st, handled ? "handled" : "declined");
 
-    flush_deletes();
-    page_ = 0;
+    /*
+     * Follow the cursor rather than jumping to page 0. A new list resets the
+     * cursor to 0 and this lands on the first page anyway, but Space advances
+     * the cursor without replacing the list, and on a long list that walks off
+     * the first page — at which point the highlighted entry has to still be
+     * the one on screen.
+     */
+    page_to_cursor();
     last_key_ = key_label(key) + "   " + event_label(event) +
                 (handled ? "   handled" : "   declined");
 
@@ -386,7 +418,28 @@ void App::options_key(const Term::Key &key)
     }
 
     const auto apply = [&](int step) {
-        const OptionRow &row = options_[option_index_];
+        OptionRow &row = options_[option_index_];
+
+        /*
+         * For a FLAGS option, Left/Right walk the option's bits rather than
+         * changing anything; the toggle key flips the one they landed on. That
+         * split only became worth offering when pathime_option_value_name()
+         * arrived — a user stepping through twenty anonymous bits learns
+         * nothing, but stepping through "c-ch", "z-zh", "an-ang" is an
+         * interface.
+         */
+        if (row.info.type == PATHIME_OPTION_FLAGS && step != 0) {
+            std::size_t bits = 0;
+            for (int b = 0; b < 64; b++)
+                if (row.info.valid_values & (UINT64_C(1) << b)) bits++;
+            if (bits == 0) return;
+            const std::size_t forward = step > 0 ? 1 : bits - 1;
+            row.flags_bit = (row.flags_bit + forward) % bits;
+            status_ = std::string(pathime_option_name(row.option)) + " — " +
+                      value_text(row, engine(), ctx(), engine_level_);
+            return;
+        }
+
         /* An option set is a call like any other, and one worth watching: it
          * can reset the composition, it re-materializes the candidate list,
          * and at engine level it dispatches composition_changed to contexts
@@ -476,7 +529,6 @@ void App::select_candidate(std::size_t index)
     const pathime_status_t st = pathime_context_select_candidate(ctx(), index);
     note_result(call, st);
 
-    flush_deletes();
     page_ = 0;
     if (st != PATHIME_OK) note_status("select_candidate", st);
     refresh_surrounding_text();
@@ -489,13 +541,101 @@ void App::page_forward()
 
     std::size_t count = comp->candidate_count;
     if ((page_ + 1) * kPageSize >= count) count = grow_candidate_list();
-    if ((page_ + 1) * kPageSize < count) page_++;
-    else status_ = "that is the whole list";
+    if ((page_ + 1) * kPageSize < count) {
+        page_++;
+        /* Turning the page takes the hover with it, so the highlighted entry
+         * is always one the user can see and 1-9 always pick from the page in
+         * front of them. Otherwise the highlight would sit on a page nobody is
+         * looking at, and the preedit would show a candidate that is not on
+         * screen. */
+        move_cursor_to(page_ * kPageSize);
+    } else {
+        status_ = "that is the whole list";
+    }
 }
 
 void App::page_back()
 {
-    if (page_ > 0) page_--;
+    if (page_ == 0) return;
+    page_--;
+    move_cursor_to(page_ * kPageSize);
+}
+
+void App::move_cursor(int delta)
+{
+    const pathime_composition_t *comp = composition();
+    if (comp == nullptr || comp->candidate_count == 0) {
+        status_ = "no candidates to move through";
+        return;
+    }
+
+    const std::size_t cursor = comp->candidate_cursor;
+
+    if (delta < 0) {
+        /* The top of the list does not wrap: a user holding Up expects to
+         * arrive at the best candidate and stop there, not to be thrown to the
+         * end of a list they were scrolling away from. */
+        const std::size_t back = static_cast<std::size_t>(-delta);
+        move_cursor_to(cursor < back ? 0 : cursor - back);
+        return;
+    }
+
+    std::size_t target = cursor + static_cast<std::size_t>(delta);
+
+    /*
+     * Running off the end is where the list may need to grow, and the same
+     * stop condition applies as when paging: a list shorter than the cap was
+     * not truncated by it, so there is nothing more to be had. Without that
+     * test this would raise max-candidates on every press at the bottom of a
+     * complete list.
+     */
+    std::size_t count = comp->candidate_count;
+    if (target >= count) count = grow_candidate_list();
+    if (target >= count) {
+        target = count - 1;
+        if (target == cursor) status_ = "that is the whole list";
+    }
+
+    move_cursor_to(target);
+}
+
+void App::move_cursor_to(std::size_t index)
+{
+    const pathime_composition_t *comp = composition();
+    if (comp == nullptr || index >= comp->candidate_count) return;
+    if (index == comp->candidate_cursor) {
+        page_to_cursor();
+        return;
+    }
+
+    const std::uint64_t call =
+        note_call("context_set_candidate_cursor  " + std::to_string(index));
+    const pathime_status_t st = pathime_context_set_candidate_cursor(ctx(), index);
+    note_result(call, st);
+
+    if (st != PATHIME_OK) {
+        /* UNSUPPORTED is the honest answer from an engine that has candidates
+         * but cannot show one without choosing it. Nothing moved, so there is
+         * nothing to undo — just say so. */
+        note_status("set_candidate_cursor", st);
+        return;
+    }
+    page_to_cursor();
+}
+
+void App::page_to_cursor()
+{
+    /*
+     * Read back from the composition rather than from whatever was last asked
+     * for. The library is explicit that the cursor is not the client's to
+     * assume: Space moves it, and any change that replaces the list returns it
+     * to 0. Paging off a remembered value would put the highlight on the wrong
+     * page the first time the engine moved it — which under anthy is the
+     * second press of Space.
+     */
+    const pathime_composition_t *comp = composition();
+    if (comp == nullptr || comp->candidate_count == 0) return;
+    page_ = comp->candidate_cursor / kPageSize;
 }
 
 std::size_t App::grow_candidate_list()
@@ -584,19 +724,6 @@ void App::refresh_surrounding_text()
     if (st != PATHIME_OK) note_status("set_surrounding_text", st);
 }
 
-void App::flush_deletes()
-{
-    if (deletes_.empty()) return;
-    /* Back to front, so an earlier range's coordinates are still valid when it
-     * is reached — see the declaration for why they are collected at all. */
-    std::sort(deletes_.begin(), deletes_.end(),
-              [](const PendingDelete &a, const PendingDelete &b) {
-                  return a.start > b.start;
-              });
-    for (const PendingDelete &d : deletes_) erase_scalars(&document_, d.start, d.count);
-    deletes_.clear();
-}
-
 std::uint64_t App::note_call(const std::string &line)
 {
     const std::uint64_t id = next_log_id_++;
@@ -683,8 +810,16 @@ bool App::is_option_shadowed(std::size_t index) const
 
 std::uint32_t App::requirements() const
 {
+    /*
+     * The *context's* requirements, not the engine's. This panel sits over the
+     * text field the user is typing into, and the option that drives these
+     * bits — hangul-preedit — is editable per context from the options pane
+     * two panels down. Asking the engine would leave the line reading
+     * "nothing" while the context in front of the user was in the mode that
+     * needs both callbacks.
+     */
     if (engines_.empty()) return 0;
-    return pathime_engine_requirements(engines_[active_].engine);
+    return pathime_context_requirements(engines_[active_].ctx);
 }
 
 }  // namespace demo

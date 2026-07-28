@@ -40,6 +40,16 @@
  *   same input context. There are therefore no free/release functions for
  *   returned data — only the explicit *_destroy calls for handles.
  *
+ *   "Mutates" is wider than it first reads, and the option setters are the ones
+ *   that surprise: pathime_engine_set_option_*, pathime_context_set_option_*
+ *   and both reset_option forms are mutating calls. An option set can discard
+ *   the composition outright, and it re-materializes the candidate list even
+ *   when it does not, so every slice reaching into a composition is invalid
+ *   afterwards. The pathime_composition_t itself is the context's own and keeps
+ *   its address, which makes this easy to get away with by accident — a stale
+ *   pointer still reads a live struct — but a pathime_str_t copied out of it
+ *   before the set points into storage the library has since reassigned.
+ *
  * Threading
  *   Every function is synchronous, and the library neither starts threads nor
  *   dispatches callbacks anywhere but on the calling thread.
@@ -71,8 +81,10 @@
  *     pathime_version, pathime_version_string, pathime_status_string,
  *     pathime_has_engine, pathime_engine_id, pathime_engine_requirements,
  *     pathime_context_engine, pathime_context_user_data,
+ *     pathime_context_requirements, pathime_context_is_focused,
  *     pathime_context_composition, pathime_context_candidate,
- *     pathime_option_count, pathime_option_name, pathime_engine_option_info,
+ *     pathime_option_count, pathime_option_name, pathime_option_value_name,
+ *     pathime_engine_option_info,
  *     pathime_engine_get_option_*, pathime_context_get_option_*,
  *     pathime_engine_option_is_set, pathime_context_option_is_set
  *
@@ -481,11 +493,10 @@ enum {
  *
  * The bits describe the engine's own resolved configuration, which is the
  * configuration a context inherits when it overrides nothing. A context that
- * overrides the responsible option needs whatever *its* resolved value needs,
- * so a client that sets such an option per context should read the requirement
- * from the option's own documentation rather than from this call — and a
- * context-level set that the client cannot satisfy is rejected at that point,
- * with the same PATHIME_ERROR_MISSING_CALLBACK. Callback-safe.
+ * overrides the responsible option needs whatever *its* resolved value needs;
+ * ask pathime_context_requirements() for that. A context-level set the client
+ * cannot satisfy is rejected at that point, with the same
+ * PATHIME_ERROR_MISSING_CALLBACK. Callback-safe.
  */
 PATHIME_API uint32_t pathime_engine_requirements(const pathime_engine_t *engine);
 
@@ -662,8 +673,47 @@ typedef struct pathime_composition {
      * backends enumerate lazily materialize up to PATHIME_OPT_MAX_CANDIDATES
      * and stop; the client is never obliged to ask for more, and pagination is
      * purely a display concern.
+     *
+     * Whether the list is *complete* is therefore readable from its length,
+     * and a client that offers to page beyond it needs the test: a count below
+     * the resolved PATHIME_OPT_MAX_CANDIDATES was not truncated by the cap, so
+     * there is nothing further to be had and raising the cap would only leave
+     * the option changed for nothing. A count equal to the cap may or may not
+     * have more behind it. That one case is genuinely undecidable from here —
+     * a lazy backend sitting on exactly the cap looks the same as a truncated
+     * one — and a client that wants the rest raises the cap and re-reads,
+     * which appends without renumbering anything already handed out.
      */
     size_t candidate_count;
+
+    /**
+     * Which candidate this composition currently reflects: the entry a client
+     * draws highlighted, and the one whose text the unsettled span of
+     * @a preedit is showing. Always < @a candidate_count, and 0 when the list
+     * is empty.
+     *
+     * Highlighting is not decoration. An engine may *preview* the candidate
+     * under the cursor, so moving the cursor rewrites the unsettled span of
+     * the preedit — the highlight and the text the user is looking at are two
+     * views of one fact, which is why the cursor is composition data rather
+     * than something the client tracks privately.
+     *
+     * It follows that a client must draw its highlight from this field, and
+     * must not assume the value it last set is still here. The cursor moves
+     * three ways and two of them are not the client's:
+     *
+     *   - pathime_context_set_candidate_cursor(), which is the client's.
+     *   - PATHIME_KEY_SPACE, on an engine that converts by cycling. Space asks
+     *     for conversion, and once a composition is being converted the next
+     *     press advances to the next candidate.
+     *   - Any change that replaces the list — a span settling, a fresh
+     *     conversion, new input — which starts the new list at 0.
+     *
+     * Every one of those arrives with a composition_changed, so a client that
+     * redraws from this struct on that callback is never out of step. That is
+     * the whole of the obligation: set it freely, read it back always.
+     */
+    size_t candidate_cursor;
 } pathime_composition_t;
 
 /* =========================================================================
@@ -721,6 +771,13 @@ typedef struct pathime_client {
      * Ordering is fixed to make this unambiguous: within one dispatch, any
      * delete_surrounding_text arrives before any commit_text, so the deletion
      * is always relative to the document as the engine last saw it.
+     *
+     * At most one delete_surrounding_text arrives per dispatch. This is worth
+     * stating because the alternative is expensive for every client: several
+     * deletions would all be expressed against the same snapshot, so applying
+     * the first would move the text the second describes, and each client
+     * would have to collect them and apply them back to front. It never has
+     * to. One request, applied where it says.
      *
      * The engine's own commits are what most often move the document out from
      * under this frame of reference: a commit_text invalidates the snapshot
@@ -803,6 +860,29 @@ PATHIME_API void pathime_context_destroy(pathime_context_t *ctx);
  */
 PATHIME_API pathime_engine_t *pathime_context_engine(const pathime_context_t *ctx);
 PATHIME_API void *pathime_context_user_data(const pathime_context_t *ctx);
+
+/**
+ * What one context needs from its client, as a bitwise OR of PATHIME_REQUIRES_*
+ * — the same bits pathime_engine_requirements() returns, resolved against this
+ * context's own settings rather than the engine's.
+ *
+ * This is the form a client displays. A settings interface built by walking
+ * pathime_option_count() has no per-option knowledge to fall back on, and an
+ * engine-level answer goes stale the moment a context overrides the option
+ * behind it: a context switched to PATHIME_HANGUL_PREEDIT_NONE requires both
+ * callbacks while its engine, left at the default, still reports none.
+ *
+ * The two calls differ in one further respect, and it is deliberate rather
+ * than an inconsistency. This one reports the *effective* value — what the
+ * context is actually doing, after any capping against what its client can
+ * serve. pathime_engine_requirements() reports the configured value uncapped,
+ * because that is what pathime_context_create() must test a new client
+ * against. A client asking this question has already supplied what it has, so
+ * the honest answer to "what do you need from me" is what is in force.
+ *
+ * Zero for NULL. Callback-safe.
+ */
+PATHIME_API uint32_t pathime_context_requirements(const pathime_context_t *ctx);
 
 /* ---- Key input -------------------------------------------------------- */
 
@@ -891,6 +971,46 @@ PATHIME_API pathime_status_t pathime_context_candidate(const pathime_context_t *
                                                        pathime_str_t *out);
 
 /**
+ * Move pathime_composition_t::candidate_cursor to absolute position @a index,
+ * without choosing what is there. Requires the context to be focused;
+ * otherwise returns PATHIME_ERROR_NOT_FOCUSED and does nothing.
+ *
+ * This is how a client navigates a candidate list: it is what the arrow keys
+ * of a desktop client and the swipe of a phone keyboard both end in. The
+ * library deliberately offers no "next" and "previous" — the client owns the
+ * key bindings, knows its own pagination, and decides whether either end of
+ * the list wraps, so an absolute index is the only part of that it needs from
+ * here.
+ *
+ * There is no matching getter, and that is the point: the cursor is
+ * composition data, read from the struct like everything else there. This call
+ * is a request rather than an assignment, and the value it produces is not
+ * necessarily the value it leaves behind — Space and any replacement of the
+ * list move the cursor too. See the field for the full rule; the short form is
+ * that a client sets the cursor freely and always redraws from the struct.
+ *
+ * The distinction from pathime_context_select_candidate() is the whole point
+ * of having both: moving the cursor changes what is *shown* and settles
+ * nothing, so it can be undone by moving it back and it commits no text.
+ * Selecting is irrevocable — it settles the span and advances the composition.
+ *
+ * An engine that previews its candidates rewrites the unsettled span of the
+ * preedit to match. Either way composition_changed is dispatched before this
+ * returns, so the cursor a client draws from is never the one it just asked
+ * for on trust.
+ *
+ * @param index Absolute 0-based position, unrelated to any pagination the
+ *              client performs. Must be < composition.candidate_count, which
+ *              also means this fails for an engine that produces no candidates.
+ *
+ * Returns PATHIME_ERROR_INVALID_ARGUMENT for an index outside the current
+ * list, and PATHIME_ERROR_UNSUPPORTED from an engine that has candidates but
+ * cannot show one without choosing it.
+ */
+PATHIME_API pathime_status_t pathime_context_set_candidate_cursor(pathime_context_t *ctx,
+                                                                  size_t index);
+
+/**
  * Tell the engine the client has chosen the candidate at absolute position
  * @a index in the most recently supplied candidate list. Requires the context
  * to be focused; otherwise returns PATHIME_ERROR_NOT_FOCUSED and does nothing.
@@ -950,9 +1070,10 @@ PATHIME_API pathime_status_t pathime_context_set_surrounding_text(pathime_contex
  * should focus it once after creation.
  *
  * Focus gates input, and only input: an unfocused context rejects
- * pathime_context_process_key() and pathime_context_select_candidate() with
- * PATHIME_ERROR_NOT_FOCUSED, so a client that forgets to focus gets a
- * diagnosable error rather than silence. Everything else — reading the
+ * pathime_context_process_key(), pathime_context_set_candidate_cursor() and
+ * pathime_context_select_candidate() with PATHIME_ERROR_NOT_FOCUSED, so a
+ * client that forgets to focus gets a diagnosable error rather than silence.
+ * Everything else — reading the
  * composition, supplying surrounding text, changing settings, resetting —
  * works regardless of focus.
  *
@@ -963,6 +1084,18 @@ PATHIME_API pathime_status_t pathime_context_set_surrounding_text(pathime_contex
  * Redundant transitions are no-ops.
  */
 PATHIME_API pathime_status_t pathime_context_set_focused(pathime_context_t *ctx, bool focused);
+
+/**
+ * Whether @a ctx currently holds focus. False for NULL, and for any call made
+ * before pathime_init() has succeeded; there is no error channel because the
+ * useful reading of both is the same — this context is not taking input.
+ *
+ * A client that focuses its own contexts already knows the answer. This is for
+ * the caller that does not: a language binding handed a bare context handle by
+ * its own callback plumbing, in the same position as pathime_context_engine()
+ * and pathime_context_user_data() are for. Callback-safe.
+ */
+PATHIME_API bool pathime_context_is_focused(const pathime_context_t *ctx);
 
 /**
  * Discard transient composition state and return to a neutral state, without
@@ -1809,6 +1942,44 @@ PATHIME_API size_t pathime_option_count(void);
  * A static table lookup: safe to call before pathime_init(). Callback-safe.
  */
 PATHIME_API const char *pathime_option_name(pathime_option_t option);
+
+/**
+ * A stable, machine-readable name for one *value* of an option, such as
+ * "traditional-first" or "correct-gn-ng". The counterpart of
+ * pathime_option_name(), and it draws the line in the same place: this is a
+ * key a client maps to its own strings, not text to put in front of a user.
+ * There is no localization surface in this header and should not be.
+ *
+ * It is what makes the inventory walk produce something a client can render.
+ * Without it a client learns an option's type, bounds and legal values and
+ * still cannot say what any of them is, so it either hardcodes a table of
+ * labels — the very thing walking the inventory was meant to avoid — or shows
+ * the user a bare number.
+ *
+ * @param value For PATHIME_OPTION_ENUM, the enumerator itself. For
+ *              PATHIME_OPTION_FLAGS, a single bit — one of the bits set in
+ *              pathime_option_info_t::valid_values, not a combination of them.
+ *
+ * Those two are the only types that have values worth naming; BOOL, INT and
+ * STRING yield "". So does an option id that does not exist, a value this
+ * option does not define, and a FLAGS argument with more or fewer than one bit
+ * set. "" is never a valid name, so one test covers all of them.
+ *
+ * Together with the descriptor this enumerates from nothing: valid_values
+ * gives the legal set — bit i meaning the value i for an ENUM, and the bit
+ * itself for a FLAGS — and this names each one.
+ *
+ *     for (int bit = 0; bit < 64; bit++) {
+ *         if (!(info.valid_values & (UINT64_C(1) << bit))) continue;
+ *         int64_t value = info.type == PATHIME_OPTION_FLAGS
+ *                             ? (int64_t)(UINT64_C(1) << bit) : bit;
+ *         ... pathime_option_value_name(opt, value)
+ *     }
+ *
+ * A static table lookup: safe to call before pathime_init(). Callback-safe.
+ */
+PATHIME_API const char *pathime_option_value_name(pathime_option_t option,
+                                                  int64_t value);
 
 /**
  * Describe @a option as this engine implements it. Fails with

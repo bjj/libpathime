@@ -535,10 +535,15 @@ void test_before_init()
      * halves of that sentence are exercised at once. */
     PT_CHECK(!pathime_engine_option_is_set(&engine, PATHIME_OPT_LEARNING));
 
-    /* The two documented exceptions work here and answer the same as they will
-     * for the rest of the process. */
+    /* The three documented exceptions work here and answer the same as they
+     * will for the rest of the process. They are the static table lookups, and
+     * they are what lets a client build its settings interface before it has
+     * decided to start the library at all. */
     PT_CHECK_SIZE(pathime_option_count(), kExpectedCount);
     PT_CHECK_STR(pathime_option_name(PATHIME_OPT_CHINESE_VARIANT), "chinese-variant");
+    PT_CHECK_STR(pathime_option_value_name(PATHIME_OPT_CHINESE_VARIANT,
+                                           PATHIME_CHINESE_ANY),
+                 "any");
 }
 
 /* ---------------------------------------------------------------------------
@@ -1882,6 +1887,152 @@ void test_engine_broadcast()
     PT_CHECK_I64(value, 12);
 }
 
+/*
+ * Value names, checked against the descriptor rather than against a list
+ * repeated here.
+ *
+ * The promise pathime_option_value_name() makes is what turns the inventory
+ * walk into something a client can render: valid_values gives the legal set,
+ * and every member of it must have a name. So this drives the exact loop the
+ * header documents and demands an answer at each stop — which means a value
+ * added to an option without a name added beside it fails here, and a name
+ * left behind by a value that was removed fails too.
+ */
+void test_value_names()
+{
+    /* Named engine-independently, so the whole inventory is reachable from a
+     * single descriptor query per option. */
+    pathime_engine any;
+    any.id = PATHIME_ENGINE_PINYIN;
+
+    size_t named_options = 0;
+    size_t named_values = 0;
+
+    for (size_t row = 0; row < pathime_option_count(); ++row) {
+        const pathime_option_t option = static_cast<pathime_option_t>(row);
+
+        pathime_option_info_t info;
+        std::memset(&info, 0, sizeof info);
+        info.struct_size = sizeof info;
+        PT_CHECK_STATUS(pathime_engine_option_info(&any, option, &info), PATHIME_OK);
+
+        /*
+         * valid_values is only populated for the two types that have values,
+         * and those are exactly the two types that get names. Everything else
+         * is "" — including, deliberately, a BOOL, whose two values are not
+         * worth a vocabulary.
+         */
+        const bool nameable = info.type == PATHIME_OPTION_ENUM ||
+                              info.type == PATHIME_OPTION_FLAGS;
+        if (!nameable) {
+            PT_CHECK_STR(pathime_option_value_name(option, 0), "");
+            PT_CHECK_STR(pathime_option_value_name(option, 1), "");
+            continue;
+        }
+
+        /*
+         * The per-engine descriptor is narrowed; the names are not, because a
+         * value's name does not depend on who implements it — that is what
+         * lets a client label an option it has narrowed for itself. So the set
+         * to walk is the union across every engine, which is the unnarrowed
+         * set the naming table is keyed to.
+         */
+        uint64_t valid = 0;
+        for (size_t e = 0; e < kEngineCount; ++e) {
+            pathime_engine probe;
+            probe.id = static_cast<pathime_engine_id_t>(e);
+            pathime_option_info_t probe_info;
+            std::memset(&probe_info, 0, sizeof probe_info);
+            probe_info.struct_size = sizeof probe_info;
+            if (pathime_engine_option_info(&probe, option, &probe_info) == PATHIME_OK &&
+                probe_info.supported) {
+                valid |= probe_info.valid_values;
+            }
+        }
+        PT_CHECK_MSG(valid != 0, "%s: an ENUM or FLAGS option with no legal values",
+                     pathime_option_name(option));
+        named_options++;
+
+        std::vector<std::string> seen;
+        for (int bit = 0; bit < 64; ++bit) {
+            if ((valid & (UINT64_C(1) << bit)) == 0) continue;
+
+            /* Exactly the conversion the header's example performs. */
+            const int64_t value = info.type == PATHIME_OPTION_FLAGS
+                                      ? static_cast<int64_t>(UINT64_C(1) << bit)
+                                      : bit;
+            const char *name = pathime_option_value_name(option, value);
+
+            PT_CHECK_MSG(name[0] != '\0', "%s: legal value %d has no name",
+                         pathime_option_name(option), bit);
+
+            /* Names are a client's storage keys, so two values of one option
+             * sharing one would make a stored setting ambiguous. */
+            for (const std::string &prior : seen) {
+                PT_CHECK_MSG(prior != name, "%s: \"%s\" names two values",
+                             pathime_option_name(option), name);
+            }
+            seen.push_back(name);
+            named_values++;
+        }
+
+        /*
+         * A value no option defines is unnamed. Bit 40 is past the widest row
+         * in the library — the twenty Pinyin fuzzy bits — and past the naming
+         * table's own capacity, so it exercises both bounds at once and cannot
+         * become legal without this line being revisited deliberately.
+         */
+        {
+            const int64_t past = info.type == PATHIME_OPTION_FLAGS
+                                     ? static_cast<int64_t>(UINT64_C(1) << 40)
+                                     : 40;
+            PT_CHECK_STR(pathime_option_value_name(option, past), "");
+        }
+
+        /* A FLAGS combination has no single name to give, and neither does
+         * zero. Naming the lowest bit set would be worse than saying nothing:
+         * a client storing it would round-trip the wrong value. */
+        if (info.type == PATHIME_OPTION_FLAGS) {
+            PT_CHECK_STR(pathime_option_value_name(option, 0), "");
+            PT_CHECK_STR(pathime_option_value_name(option, 3), "");
+        } else {
+            PT_CHECK_STR(pathime_option_value_name(option, -1), "");
+        }
+    }
+
+    /* The walk really did reach the inventory, rather than passing because it
+     * found nothing to check. Thirteen ENUM options and two FLAGS. */
+    PT_CHECK_SIZE(named_options, 15u);
+    PT_CHECK(named_values > 60);
+
+    /* A few names pinned literally, since everything above is self-referential
+     * — a table and a descriptor that drifted together would satisfy it. */
+    PT_CHECK_STR(pathime_option_value_name(PATHIME_OPT_ANTHY_PERIOD_STYLE,
+                                           PATHIME_ANTHY_PERIOD_KUTEN),
+                 "kuten");
+    PT_CHECK_STR(pathime_option_value_name(PATHIME_OPT_CHINESE_VARIANT,
+                                           PATHIME_CHINESE_TRADITIONAL_FIRST),
+                 "traditional-first");
+    PT_CHECK_STR(pathime_option_value_name(PATHIME_OPT_PINYIN_SCHEME,
+                                           PATHIME_PINYIN_SCHEME_DOUBLE_MSPY),
+                 "double-mspy");
+    PT_CHECK_STR(pathime_option_value_name(PATHIME_OPT_HANGUL_LAYOUT,
+                                           PATHIME_HANGUL_LAYOUT_3SET_390),
+                 "3set-390");
+    PT_CHECK_STR(pathime_option_value_name(PATHIME_OPT_PINYIN_CORRECTION,
+                                           PATHIME_PINYIN_CORRECT_GN_NG),
+                 "gn-ng");
+    PT_CHECK_STR(pathime_option_value_name(PATHIME_OPT_PINYIN_FUZZY,
+                                           PATHIME_PINYIN_FUZZY_ING_IN),
+                 "ing-in");
+
+    /* Not an option id, and an option id with the wrong kind of value. */
+    PT_CHECK_STR(pathime_option_value_name(
+                     static_cast<pathime_option_t>(pathime_option_count()), 0),
+                 "");
+    PT_CHECK_STR(pathime_option_value_name(PATHIME_OPT_MAX_CANDIDATES, 1), "");
+}
+
 }  // namespace
 
 int main()
@@ -1893,6 +2044,7 @@ int main()
 
     test_descriptor_table();
     test_descriptor_spot_checks();
+    test_value_names();
     test_struct_size_protocol();
     test_two_level_resolution();
     test_setter_kinds();

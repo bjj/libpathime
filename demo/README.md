@@ -23,7 +23,7 @@ they learn. `F1` inside the program lists the keys.
 | Panel | What it shows |
 |---|---|
 | document | The client's own text, with the preedit drawn into it — settled text green, the still-changing tail yellow, exactly as `preedit_settled` divides them |
-| composition | The same thing as data: the preedit, how many of its scalars the engine considers settled, the auxiliary text, and the candidate list |
+| composition | The same thing as data: the preedit, how many of its scalars the engine considers settled, the auxiliary text, and the candidate list with the hovered entry highlighted |
 | event log | Everything that crossed the API boundary, in order |
 | options | Every option the active engine implements, editable at either level |
 
@@ -51,10 +51,23 @@ it while the options panel has the keyboard.
 - **Type `nihao` then Space under Pinyin.** Then do it again and press `Return`
   instead: the preedit reads 你好 but Return commits `nihao`, because the
   conversion was a preview the user never chose.
+- **Type `nihao` and hold `Down`.** The highlight walks the candidate list and
+  the preedit above rewrites itself to whatever is under it, because moving the
+  cursor settles nothing — press `Up` and it all goes back. That is
+  `pathime_context_set_candidate_cursor()`, and the arrows are bound here rather
+  than in the engine: which key navigates, and whether the list wraps, are the
+  client's to decide, so the demo decides them.
 - **Page past the end of a candidate list with `PgDn`.** The program raises
   `max-candidates` and asks for more — the option is composition-safe precisely
   so a client can do that while a list is on screen. The panel shows the new
-  value marked *set here*.
+  value marked *set here*. Holding `Down` off the end of the page does the same
+  thing, and the page follows the highlight so the digit keys always pick from
+  what is on screen.
+- **Walk `pinyin-fuzzy` in the options panel.** Left and Right step through the
+  option's twenty bits by name — `c-ch`, `z-zh`, `an-ang` — and Space toggles
+  the one under the cursor. Every one of those names comes from
+  `pathime_option_value_name()`; this program carries no table of its own, which
+  is the whole point of the inventory walk.
 - **Switch engines mid-composition with `Ctrl+E` and come back.** Losing focus
   neither commits nor discards, so the composition is exactly where you left it.
 - **Set `hangul-preedit` to `none` in the options panel, then type `gks`.**

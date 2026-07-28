@@ -7,55 +7,6 @@
 namespace demo {
 namespace {
 
-/*
- * Display names for the enum values, keyed by option. The library gives a
- * client the *set* of legal values through pathime_option_info_t::valid_values
- * and nothing else, on the ground that naming them is presentation — so this
- * table is the demo's, and an option missing from it still works and shows its
- * bare number.
- */
-struct EnumLabels {
-    pathime_option_t option;
-    const char *labels[9];  /**< Indexed by value; a null ends the list. */
-};
-
-const EnumLabels kEnumLabels[] = {
-    {PATHIME_OPT_LATIN_WIDTH,        {"half", "full", nullptr}},
-    {PATHIME_OPT_PUNCTUATION_WIDTH,  {"half", "full", nullptr}},
-    {PATHIME_OPT_CHINESE_VARIANT,    {"simplified", "traditional",
-                                      "simplified first", "traditional first",
-                                      "any", nullptr}},
-    {PATHIME_OPT_HANGUL_LAYOUT,      {"2-set", "2-set yetgeul", "3-set/2",
-                                      "3-set 390", "3-set final",
-                                      "3-set noshift", "3-set yetgeul",
-                                      "romaja", "ahnmatae"}},
-    {PATHIME_OPT_HANGUL_PREEDIT,     {"syllable", "word", "none", nullptr}},
-    {PATHIME_OPT_ANTHY_TYPING_METHOD,{"romaji", "kana", nullptr}},
-    {PATHIME_OPT_ANTHY_KANA_SCRIPT,  {"hiragana", "katakana",
-                                      "halfwidth katakana", nullptr}},
-    {PATHIME_OPT_ANTHY_PERIOD_STYLE, {"kuten", "full-width", nullptr}},
-    {PATHIME_OPT_ANTHY_SYMBOL_STYLE, {"corner + slash", "corner + middot",
-                                      "bracket + slash", "bracket + middot",
-                                      nullptr}},
-    {PATHIME_OPT_ANTHY_ON_PERIOD,    {"nothing", "convert", "commit", nullptr}},
-    {PATHIME_OPT_PINYIN_SCHEME,      {"full", "double MSPY", "double ZRM",
-                                      "double ABC", "double ZGPY",
-                                      "double PYJJ", "double XHE", nullptr}},
-    {PATHIME_OPT_BOPOMOFO_LAYOUT,    {"standard", "ching-yeah", "eten", "ibm",
-                                      nullptr}},
-    {PATHIME_OPT_TABLE_INVALID_INPUT,{"commit candidate", "commit raw", nullptr}},
-};
-
-const char *enum_label(pathime_option_t option, std::int64_t value)
-{
-    if (value < 0 || value >= 9) return nullptr;
-    for (const EnumLabels &entry : kEnumLabels) {
-        if (entry.option != option) continue;
-        return entry.labels[value];
-    }
-    return nullptr;
-}
-
 /** The legal values of an ENUM option, lowest first. */
 std::vector<std::int64_t> legal_values(const pathime_option_info_t &info)
 {
@@ -63,6 +14,15 @@ std::vector<std::int64_t> legal_values(const pathime_option_info_t &info)
     for (int bit = 0; bit < 64; bit++)
         if (info.valid_values & (UINT64_C(1) << bit)) values.push_back(bit);
     return values;
+}
+
+/** The honoured bits of a FLAGS option, as masks, lowest first. */
+std::vector<std::uint64_t> legal_bits(const pathime_option_info_t &info)
+{
+    std::vector<std::uint64_t> bits;
+    for (int bit = 0; bit < 64; bit++)
+        if (info.valid_values & (UINT64_C(1) << bit)) bits.push_back(UINT64_C(1) << bit);
+    return bits;
 }
 
 pathime_status_t get_number(const OptionRow &row,
@@ -157,18 +117,34 @@ std::string value_text(const OptionRow &row,
         std::snprintf(buf, sizeof(buf), "%" PRId64, value);
         return buf;
     case PATHIME_OPTION_ENUM: {
-        const char *label = enum_label(row.option, value);
-        if (label != nullptr) {
-            std::snprintf(buf, sizeof(buf), "%s", label);
+        /* The library's own name for the value. Not display text — it is a
+         * machine-readable key a real client would map to its own localized
+         * strings — but it is what turns the inventory walk into something
+         * renderable, and printing it directly is the honest demonstration of
+         * how far the walk gets on its own. */
+        const char *name = pathime_option_value_name(row.option, value);
+        if (name[0] != '\0') {
+            std::snprintf(buf, sizeof(buf), "%s", name);
         } else {
             std::snprintf(buf, sizeof(buf), "value %" PRId64, value);
         }
         return buf;
     }
     case PATHIME_OPTION_FLAGS: {
+        /* The bit under the edit cursor is named beside the count, which is
+         * what makes bit-at-a-time editing legible: "12 of 20 bits" alone says
+         * nothing about which one Left/Right is about to flip. */
         const std::uint64_t bits = static_cast<std::uint64_t>(value);
-        std::snprintf(buf, sizeof(buf), "0x%08" PRIx64 "  (%d of %d bits)", bits,
-                      popcount64(bits), popcount64(row.info.valid_values));
+        const std::vector<std::uint64_t> all = legal_bits(row.info);
+        const std::size_t at = row.flags_bit < all.size() ? row.flags_bit : 0;
+        const char *name = all.empty()
+                               ? ""
+                               : pathime_option_value_name(
+                                     row.option, static_cast<std::int64_t>(all[at]));
+        std::snprintf(buf, sizeof(buf), "%d of %d bits   %s%s",
+                      popcount64(bits), popcount64(row.info.valid_values),
+                      (!all.empty() && (bits & all[at]) != 0) ? "[x] " : "[ ] ",
+                      name);
         return buf;
     }
     default:
@@ -215,13 +191,21 @@ pathime_status_t adjust_option(const OptionRow &row,
     }
 
     case PATHIME_OPTION_FLAGS: {
-        /* All or nothing. Turning PATHIME_OPT_PINYIN_FUZZY off wholesale shows
-         * what the option does; picking individual mergers out of twenty
-         * unnamed bits would not, and the library gives no names for them —
-         * see this file's header comment. */
-        const std::uint64_t all = row.info.valid_values;
-        value = (static_cast<std::uint64_t>(value) == all)
-                    ? 0 : static_cast<std::int64_t>(all);
+        /*
+         * One bit at a time, which is only worth offering because
+         * pathime_option_value_name() can say which bit it is. This used to be
+         * all-or-nothing: twenty anonymous fuzzy-pinyin bits taught a user
+         * nothing individually, so the panel flipped the whole set. Now each
+         * one has a name, so each one is worth reaching.
+         *
+         * step 0 — the toggle key — flips the bit under the edit cursor; the
+         * cursor itself moves with the same Left/Right that walks an enum's
+         * values, which is handled by the caller in app.cc.
+         */
+        const std::vector<std::uint64_t> all = legal_bits(row.info);
+        if (all.empty()) return PATHIME_ERROR_UNSUPPORTED;
+        const std::size_t at = row.flags_bit < all.size() ? row.flags_bit : 0;
+        value = static_cast<std::int64_t>(static_cast<std::uint64_t>(value) ^ all[at]);
         break;
     }
 

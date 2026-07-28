@@ -96,6 +96,10 @@ public:
                                       Composition *model,
                                       Output *out) override;
 
+    pathime_status_t set_cursor(size_t index,
+                                const OptionReader &options,
+                                Composition *model) override;
+
     void materialize_candidates(size_t cap,
                                 const OptionReader &options,
                                 Composition *model) override;

@@ -97,6 +97,10 @@ public:
                                       Composition *model,
                                       Output *out) override;
 
+    pathime_status_t set_cursor(size_t index,
+                                const OptionReader &options,
+                                Composition *model) override;
+
     void materialize_candidates(size_t cap,
                                 const OptionReader &options,
                                 Composition *model) override;
@@ -120,7 +124,8 @@ private:
 
     bool begin_conversion(Composition *model, const RomajiSettings &settings);
     void cancel_conversion(Composition *model, const RomajiSettings &settings);
-    void move_candidate(int delta, const OptionReader &options, Composition *model);
+    void advance_candidate(const OptionReader &options, Composition *model);
+    bool show_candidate(int cursor, Composition *model);
 
     void commit_kana(Composition *model, Output *out, const RomajiSettings &settings);
     void commit_conversion(Composition *model, Output *out, const OptionReader &options);
@@ -361,9 +366,8 @@ void AnthyContextBackend::commit_conversion(Composition *model,
  * Candidates
  * ------------------------------------------------------------------------- */
 
-void AnthyContextBackend::move_candidate(int delta,
-                                         const OptionReader &options,
-                                         Composition *model)
+void AnthyContextBackend::advance_candidate(const OptionReader &options,
+                                            Composition *model)
 {
     struct anthy_segment_stat stat;
     if (anthy_get_segment_stat(context_, active_, &stat) < 0 || stat.nr_candidate <= 0) return;
@@ -376,14 +380,53 @@ void AnthyContextBackend::move_candidate(int delta,
     const int64_t cap = options.number(PATHIME_OPT_MAX_CANDIDATES);
     if (cap > 0 && cap < count) count = static_cast<int>(cap);
 
-    int cursor = chosen_[static_cast<size_t>(active_)] + delta;
-    if (cursor < 0) cursor = count - 1;
+    /* Wrapping is this function's own, and belongs to Space rather than to the
+     * cursor: pressing convert repeatedly must never dead-end. A client
+     * navigating with set_cursor() decides for itself whether its own ends
+     * wrap, which is why that path takes an absolute index and does no
+     * arithmetic. */
+    int cursor = chosen_[static_cast<size_t>(active_)] + 1;
     if (cursor >= count) cursor = 0;
-    chosen_[static_cast<size_t>(active_)] = cursor;
 
+    show_candidate(cursor, model);
+}
+
+pathime_status_t AnthyContextBackend::set_cursor(size_t index,
+                                                 const OptionReader &options,
+                                                 Composition *model)
+{
+    (void)options;
+
+    /* Not PATHIME_ERROR_UNSUPPORTED — that is for an engine with no candidates
+     * at all. This one has them, just not before anything has been converted,
+     * so a hover now is an out-of-range index. The same distinction
+     * select_candidate() draws. */
+    if (!converting_) return PATHIME_ERROR_INVALID_ARGUMENT;
+
+    if (!show_candidate(static_cast<int>(index), model)) {
+        return PATHIME_ERROR_INVALID_ARGUMENT;
+    }
+    return PATHIME_OK;
+}
+
+/**
+ * Show candidate @a cursor of the active segment: record it, and rewrite the
+ * active span to its text so the preedit previews what is being hovered.
+ *
+ * The one place the shown candidate changes, reached from both the client's
+ * set_cursor() and Space's advance_candidate(). Keeping chosen_, model->cursor
+ * and model->active in step is exactly the bookkeeping Finding 2 says is ours,
+ * and having one writer is what stops the three drifting apart.
+ */
+bool AnthyContextBackend::show_candidate(int cursor, Composition *model)
+{
     std::string text;
-    if (fetch_segment(active_, cursor, &text)) model->active = text;
+    if (cursor < 0 || !fetch_segment(active_, cursor, &text)) return false;
+
+    chosen_[static_cast<size_t>(active_)] = cursor;
+    model->active = text;
     model->cursor = static_cast<size_t>(cursor);
+    return true;
 }
 
 void AnthyContextBackend::materialize_candidates(size_t cap,
@@ -557,16 +600,22 @@ bool AnthyContextBackend::key_while_converting(const KeyEvent &key,
                                                Output *out)
 {
     switch (key.keysym) {
-    /* Space keeps meaning "convert" once conversion has begun, which is what
-     * every Japanese IME does: the second press is the next candidate. */
+    /*
+     * Space keeps meaning "convert" once conversion has begun, which is what
+     * every Japanese IME does: the second press is the next candidate. It is
+     * the one key whose meaning the header fixes across every engine that
+     * composes, so it stays here.
+     *
+     * The arrow keys used to sit alongside it and no longer do. Navigating a
+     * candidate list is the client's — it owns the key bindings, its own
+     * pagination, and whether either end wraps — and
+     * pathime_context_set_candidate_cursor() is how it says so. An engine that
+     * also swallowed Up and Down would take the decision back, because a key
+     * this adapter reports handled never reaches the client's binding at all.
+     */
     case PATHIME_KEY_SPACE:
     case PATHIME_KEY_HENKAN:
-    case PATHIME_KEY_DOWN:
-        move_candidate(1, options, model);
-        return true;
-
-    case PATHIME_KEY_UP:
-        move_candidate(-1, options, model);
+        advance_candidate(options, model);
         return true;
 
     case PATHIME_KEY_RETURN:

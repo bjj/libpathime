@@ -10,11 +10,13 @@
  * this; the demo does it the general way because the general way is the thing
  * worth demonstrating.
  *
- * The one thing it cannot get from the library is a *display* name for an
- * option or an enum value. That is deliberate on the library's side — labels
- * and presentation belong to the client — so the tables below are the demo's
- * own, and anything they do not cover falls back to the machine-readable name
- * from pathime_option_name() and the bare number.
+ * Every string it shows comes from the library: pathime_option_name() for the
+ * option and pathime_option_value_name() for an enum value or a flags bit.
+ * Neither is display text — both are stable machine-readable keys, and a
+ * shipping client would map them to its own localized strings — but printing
+ * them directly is the honest demonstration of how far the inventory walk gets
+ * without a table of its own. This file used to carry thirteen hardcoded label
+ * sets, which was exactly the hardcoding the walk exists to avoid.
  */
 
 #ifndef PATHIME_DEMO_OPTIONS_VIEW_H
@@ -31,6 +33,15 @@ namespace demo {
 struct OptionRow {
     pathime_option_t option;
     pathime_option_info_t info;
+
+    /**
+     * FLAGS only: which of the option's honoured bits the panel is pointing
+     * at, as an index into them lowest-first. Purely this program's cursor —
+     * the library has no such notion — and it exists because each bit now has
+     * a name from pathime_option_value_name(), which is what makes editing
+     * them one at a time worth offering.
+     */
+    std::size_t flags_bit = 0;
 };
 
 /** Every option @a engine reports supported, in inventory order. */

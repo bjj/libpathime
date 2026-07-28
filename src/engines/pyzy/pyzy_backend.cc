@@ -820,6 +820,55 @@ pathime_status_t PyzyContext::select_candidate(size_t index,
     return ok ? PATHIME_OK : PATHIME_ERROR_BACKEND;
 }
 
+pathime_status_t PyzyContext::set_cursor(size_t index,
+                                         const OptionReader &options,
+                                         Composition *model)
+{
+    if (context_ == nullptr) {
+        return PATHIME_ERROR_BACKEND;
+    }
+
+    observer_.clear();
+    apply_options(options);
+    if (context_ == nullptr) {
+        return PATHIME_ERROR_BACKEND;
+    }
+
+    /*
+     * focusCandidate() is what TODO.md §3 recorded as reachable and undriven:
+     * pyzy has always tracked a focused index and rewritten its preedit to
+     * match (PhoneticContext.cc:143-155, which sets m_focused_candidate and
+     * calls updatePreeditText), but nothing in this library could move it, so
+     * the active span always showed candidate 0 however the client's highlight
+     * moved. This call is the thing that was missing.
+     *
+     * It fires preeditChanged and nothing else — no commit, and no
+     * candidatesChanged, since the list it is hovering within is unchanged —
+     * so the harvest below updates the active span and leaves both the list
+     * and the cursor the core just set alone.
+     *
+     * The index is already known to be in range against the list this adapter
+     * materialized, so a false return means pyzy's list moved out from under
+     * that: a backend disagreement rather than a caller error.
+     */
+    const bool ok = context_->focusCandidate(index);
+
+    Output discarded;
+    harvest(options, model, &discarded);
+
+    /*
+     * A hover settles nothing, so anything in the Output is pyzy having
+     * committed behind our back — which it has no path to do here. Reporting
+     * it rather than dropping it is the only honest choice: the text would
+     * otherwise be lost, and the core's failure handling marks the composition
+     * indeterminate, which is the accurate description of what would be left.
+     */
+    if (!discarded.empty()) {
+        return PATHIME_ERROR_BACKEND;
+    }
+    return ok ? PATHIME_OK : PATHIME_ERROR_BACKEND;
+}
+
 void PyzyContext::materialize_candidates(size_t cap,
                                          const OptionReader &options,
                                          Composition *model)

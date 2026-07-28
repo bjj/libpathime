@@ -39,28 +39,13 @@
 #include <string>
 #include <vector>
 
+#include "candidates.h"
 #include "context.h"
 #include "engine.h"
 #include "init.h"
 #include "keys.h"
 #include "options.h"
 #include "utf8.h"
-
-namespace pathime {
-
-/**
- * Fetch every candidate the PATHIME_OPT_MAX_CANDIDATES cap allows into
- * ctx->candidates, and drop any past it. Defined in candidates.cc, which owns
- * everything candidate-shaped; declared here because refresh_composition()
- * below is its only caller and there is no candidates.h to put it in.
- *
- * A src/candidates.h is the tidier home for this the moment the pump has real
- * work to do and more than one entry point to offer — see the note at the top
- * of candidates.cc.
- */
-void materialize_candidates(pathime_context_t *ctx);
-
-}  // namespace pathime
 
 namespace {
 
@@ -288,6 +273,35 @@ void *pathime_context_user_data(const pathime_context_t *ctx)
     return ctx != nullptr ? ctx->user_data : nullptr;
 }
 
+uint32_t pathime_context_requirements(const pathime_context_t *ctx)
+{
+    /* As at the engine level, a handle that does not exist has an honest
+     * answer: no callback obligation can arise from it. */
+    if (ctx == nullptr) {
+        return 0;
+    }
+
+    /*
+     * The same one option that drives pathime_engine_requirements(), resolved
+     * with the context in hand instead of nullptr — which is the whole of the
+     * difference between the two calls, and is what makes this cheap enough to
+     * be worth having rather than a thing a client derives.
+     *
+     * Passing ctx also brings in the capping rule in options.cc's
+     * resolve_number(): a context whose client cannot delete resolves
+     * PATHIME_HANGUL_PREEDIT_NONE down to _SYLLABLE, so this reports what the
+     * context is actually doing. That is the right answer *here* and the wrong
+     * one at the engine level, where the uncapped value is what
+     * pathime_context_create() must test a new client against — see the note
+     * in engine.cc.
+     */
+    if (pathime::resolve_option_number(ctx->engine, ctx, PATHIME_OPT_HANGUL_PREEDIT) ==
+        PATHIME_HANGUL_PREEDIT_NONE) {
+        return PATHIME_REQUIRES_SURROUNDING_TEXT | PATHIME_REQUIRES_DELETE_SURROUNDING;
+    }
+    return 0;
+}
+
 /* ===========================================================================
  * Key input
  * ======================================================================== */
@@ -490,6 +504,20 @@ pathime_status_t pathime_context_set_focused(pathime_context_t *ctx, bool focuse
     return PATHIME_OK;
 }
 
+bool pathime_context_is_focused(const pathime_context_t *ctx)
+{
+    /*
+     * No error channel, for the reason pathime_context_option_is_set() has
+     * none: every case this cannot answer — a null handle, a library that was
+     * never started — reads the same way, which is that this context is not
+     * taking input.
+     */
+    if (ctx == nullptr || !pathime::initialized()) {
+        return false;
+    }
+    return ctx->focused;
+}
+
 pathime_status_t pathime_context_reset(pathime_context_t *ctx)
 {
     if (ctx == nullptr) {
@@ -658,16 +686,29 @@ void refresh_composition(pathime_context_t *ctx, bool force)
     const std::string previous_auxiliary = ctx->auxiliary;
     const size_t previous_settled = ctx->composition.preedit_settled;
     const size_t previous_candidates = ctx->composition.candidate_count;
+    const size_t previous_cursor = ctx->composition.candidate_cursor;
 
     pathime::project_composition(ctx->model, &ctx->preedit, &ctx->auxiliary,
                                  &ctx->composition);
     ctx->composition.candidate_count = ctx->model.candidates.size();
+    ctx->composition.candidate_cursor = ctx->model.cursor;
 
+    /*
+     * The cursor is part of the comparison, not just part of the value. A
+     * client draws its highlight from this struct and is told to trust nothing
+     * it set itself, which only works if a cursor that moved is announced —
+     * and a move with no other effect is possible in principle, for a backend
+     * that tracks the hover without previewing it. Today every backend that
+     * has a cursor also rewrites the active span, so this term never decides
+     * the answer alone; it is here so that the promise does not depend on that
+     * remaining true.
+     */
     const bool changed = force ||
                          ctx->preedit != previous_preedit ||
                          ctx->auxiliary != previous_auxiliary ||
                          ctx->composition.preedit_settled != previous_settled ||
-                         ctx->composition.candidate_count != previous_candidates;
+                         ctx->composition.candidate_count != previous_candidates ||
+                         ctx->composition.candidate_cursor != previous_cursor;
 
     /* --- 4. Dispatch, in the fixed order ----------------------------------
      *

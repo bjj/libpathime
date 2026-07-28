@@ -287,6 +287,19 @@ static void test_syllable_composition(pathime_engine_t *engine)
                         PATHIME_ERROR_INVALID_ARGUMENT);
         PT_CHECK_STATUS(pathime_context_select_candidate(ctx, 0),
                         PATHIME_ERROR_INVALID_ARGUMENT);
+
+        /*
+         * Nor is there a cursor to move. The empty list is what rejects this,
+         * before the adapter is consulted at all — so the answer is
+         * INVALID_ARGUMENT for an index that cannot exist, not the UNSUPPORTED
+         * that ContextBackend::set_cursor() defaults to. This engine can never
+         * reach that default, which is why it is here as a check rather than
+         * as a distinction the client has to handle.
+         */
+        PT_CHECK_STATUS(pathime_context_set_candidate_cursor(ctx, 0),
+                        PATHIME_ERROR_INVALID_ARGUMENT);
+        /* And the field is still there, and still 0. */
+        PT_CHECK_SIZE(c->candidate_cursor, 0);
     }
 
     /*
@@ -526,14 +539,18 @@ static void test_reset_and_focus(pathime_engine_t *engine)
     press(ctx, 'g');
     press(ctx, 'k');
     log_reset(&log);
+    PT_CHECK(pathime_context_is_focused(ctx));
     PT_CHECK_STATUS(pathime_context_set_focused(ctx, false), PATHIME_OK);
+    PT_CHECK(!pathime_context_is_focused(ctx));
     PT_CHECK(log.changed_count == 0);
     PT_CHECK_SIZE(strlen(log.commits), 0);
     check_str("preedit survives focus loss", preedit_of(ctx), HA);
 
     /* Redundant transitions are no-ops. */
     PT_CHECK_STATUS(pathime_context_set_focused(ctx, false), PATHIME_OK);
+    PT_CHECK(!pathime_context_is_focused(ctx));
     PT_CHECK_STATUS(pathime_context_set_focused(ctx, true), PATHIME_OK);
+    PT_CHECK(pathime_context_is_focused(ctx));
     PT_CHECK(log.changed_count == 0);
     check_str("preedit survives refocus", preedit_of(ctx), HA);
 
@@ -620,6 +637,100 @@ static void refresh_snapshot(pathime_context_t *ctx, client_log_t *log)
     PT_CHECK_STATUS(pathime_context_set_surrounding_text(ctx, text,
                                                          doc_scalars(log->doc)),
                     PATHIME_OK);
+}
+
+/*
+ * Per-context requirements, which is the case pathime_engine_requirements()
+ * cannot answer.
+ *
+ * PATHIME_OPT_HANGUL_PREEDIT is settable per context, and it is the one option
+ * in the library that drives a PATHIME_REQUIRES_* bit. So an engine left at its
+ * default reports nothing required while a context that overrode it requires
+ * both callbacks — and a client displaying the engine's answer over its text
+ * field is simply wrong about the context it is actually typing into.
+ *
+ * The capping half is the other reason the two calls differ. A context whose
+ * client cannot delete resolves PREEDIT_NONE back down, so it needs nothing
+ * and says so, while the engine that was configured into that mode still
+ * reports the requirement it was configured with.
+ */
+static void test_context_requirements(pathime_engine_t *engine)
+{
+    pathime_client_t full;
+    pathime_client_t no_delete;
+    pathime_context_t *ctx = NULL;
+    pathime_context_t *limited = NULL;
+    client_log_t log;
+
+    log_reset(&log);
+
+    memset(&full, 0, sizeof(full));
+    full.struct_size = sizeof(full);
+    full.commit_text = on_commit;
+    full.delete_surrounding_text = on_delete;
+    full.composition_changed = on_changed;
+
+    /* A client with no delete_surrounding_text — legal, and the reason the
+     * capping rule exists. */
+    memset(&no_delete, 0, sizeof(no_delete));
+    no_delete.struct_size = sizeof(no_delete);
+    no_delete.commit_text = on_commit;
+    no_delete.composition_changed = on_changed;
+
+    PT_CHECK_STATUS(pathime_context_create(engine, &full, &log, &ctx), PATHIME_OK);
+    PT_CHECK_STATUS(pathime_context_create(engine, &no_delete, &log, &limited),
+                    PATHIME_OK);
+
+    /* Nothing overridden anywhere: both levels agree on nothing required. */
+    PT_CHECK(pathime_engine_requirements(engine) == 0);
+    PT_CHECK(pathime_context_requirements(ctx) == 0);
+    PT_CHECK(pathime_context_requirements(limited) == 0);
+
+    /* The override that §4b's demo got wrong. The context now requires both
+     * bits; the engine, untouched, still requires neither. */
+    PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_HANGUL_PREEDIT,
+                                                   PATHIME_HANGUL_PREEDIT_NONE),
+                    PATHIME_OK);
+    PT_CHECK(pathime_context_requirements(ctx) ==
+             (PATHIME_REQUIRES_SURROUNDING_TEXT | PATHIME_REQUIRES_DELETE_SURROUNDING));
+    PT_CHECK(pathime_engine_requirements(engine) == 0);
+    /* The other context is unaffected: this is per-context state. */
+    PT_CHECK(pathime_context_requirements(limited) == 0);
+
+    /* Back to a mode that needs nothing. */
+    PT_CHECK_STATUS(pathime_context_reset_option(ctx, PATHIME_OPT_HANGUL_PREEDIT),
+                    PATHIME_OK);
+    PT_CHECK(pathime_context_requirements(ctx) == 0);
+
+    /*
+     * Now from the engine level, which is where the two calls part company.
+     * The engine reports the configured value uncapped — that is what context
+     * creation must test a new client against. The context whose client cannot
+     * delete reports the *effective* value, which is nothing, because its
+     * resolution capped PREEDIT_NONE back to _SYLLABLE.
+     */
+    PT_CHECK_STATUS(pathime_engine_set_option_int(engine, PATHIME_OPT_HANGUL_PREEDIT,
+                                                  PATHIME_HANGUL_PREEDIT_NONE),
+                    PATHIME_OK);
+    PT_CHECK(pathime_engine_requirements(engine) ==
+             (PATHIME_REQUIRES_SURROUNDING_TEXT | PATHIME_REQUIRES_DELETE_SURROUNDING));
+    PT_CHECK(pathime_context_requirements(ctx) ==
+             (PATHIME_REQUIRES_SURROUNDING_TEXT | PATHIME_REQUIRES_DELETE_SURROUNDING));
+    PT_CHECK(pathime_context_requirements(limited) == 0);
+
+    /* And that uncapped engine answer is exactly what refuses a new client
+     * that cannot serve it. */
+    {
+        pathime_context_t *rejected = NULL;
+        PT_CHECK_STATUS(pathime_context_create(engine, &no_delete, &log, &rejected),
+                        PATHIME_ERROR_MISSING_CALLBACK);
+        PT_CHECK(rejected == NULL);
+    }
+
+    PT_CHECK_STATUS(pathime_engine_reset_option(engine, PATHIME_OPT_HANGUL_PREEDIT),
+                    PATHIME_OK);
+    pathime_context_destroy(limited);
+    pathime_context_destroy(ctx);
 }
 
 static void test_preedit_none_builds_in_document(pathime_engine_t *engine)
@@ -866,6 +977,7 @@ int main(void)
         test_backspace(engine);
         test_key_position_and_shift(engine);
         test_reset_and_focus(engine);
+        test_context_requirements(engine);
         test_layout_option(engine);
         test_preedit_none_builds_in_document(engine);
         test_preedit_none_backspace(engine);

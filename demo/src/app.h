@@ -179,9 +179,23 @@ private:
     /** Raise PATHIME_OPT_MAX_CANDIDATES by one page. Returns the new count. */
     std::size_t grow_candidate_list();
 
+    /**
+     * Move the hover by @a delta entries, growing the list and turning the
+     * page as needed. The library takes an absolute index and offers no
+     * next/previous, because which key moves which way — and whether either
+     * end wraps — is the client's to decide. This is where this client decides
+     * it.
+     */
+    void move_cursor(int delta);
+
+    /** Move the hover to an absolute index, and follow it with the page. */
+    void move_cursor_to(std::size_t index);
+
+    /** Scroll so that the page on screen is the one holding the cursor. */
+    void page_to_cursor();
+
     void set_active(std::size_t index);
     void refresh_surrounding_text();
-    void flush_deletes();
 
     /* ---- The log. One entry-point per direction, so that no call site can
      * accidentally record traffic as the wrong kind. ---- */
@@ -214,20 +228,6 @@ private:
      * on since is exactly the case the header says a client may decline. */
     std::string snapshot_;
     std::size_t snapshot_cursor_ = 0;
-
-    /*
-     * Deletions the engine asked for during the dispatch in progress.
-     *
-     * They are collected rather than applied on the spot because every one of
-     * them is measured against the *same* snapshot: applying the first would
-     * move the text the second is described in terms of. The library orders
-     * all deletions before any commit, so flushing them at the first commit —
-     * and again when the call returns — puts the document in the right state
-     * before anything is inserted into it. Applied back to front, so an
-     * earlier range's coordinates are still valid when it is reached.
-     */
-    struct PendingDelete { std::size_t start; std::size_t count; };
-    std::vector<PendingDelete> deletes_;
 
     std::size_t page_ = 0;
     std::deque<LogEntry> log_;

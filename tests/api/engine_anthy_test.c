@@ -433,6 +433,136 @@ static void test_conversion_candidates(pathime_engine_t *engine)
 }
 
 /*
+ * The candidate cursor: navigation the client drives, and the preedit
+ * following it.
+ *
+ * anthy is where this is observable, because it previews the candidate it is
+ * hovering — the active span of the preedit *is* the hovered candidate's text.
+ * So each check below tests the cursor and the preedit against each other, and
+ * either one drifting from the other fails.
+ *
+ * The arrow keys are the other half. They used to cycle candidates inside this
+ * adapter; they no longer do, because navigating a list is the client's and an
+ * engine that reports the key handled takes that decision back. So Up and Down
+ * must now be *declined* mid-conversion, which is what lets a client bind them
+ * to pathime_context_set_candidate_cursor() at all.
+ */
+static void test_candidate_cursor(pathime_engine_t *engine)
+{
+    client_log_t log;
+    pathime_client_t client;
+    pathime_context_t *ctx = open_context(engine, &client, &log);
+    const pathime_composition_t *c = NULL;
+
+    /* Before there is a list there is no cursor to move, and 0 is where the
+     * field sits rather than an error. */
+    PT_CHECK_SIZE(pathime_context_composition(ctx)->candidate_cursor, 0);
+    PT_CHECK_STATUS(pathime_context_set_candidate_cursor(ctx, 0),
+                    PATHIME_ERROR_INVALID_ARGUMENT);
+
+    type(ctx, "kanji");
+    /* Still no candidates: a reading being typed is not a span anthy has an
+     * opinion about yet, so there is nothing to hover. */
+    PT_CHECK_STATUS(pathime_context_set_candidate_cursor(ctx, 0),
+                    PATHIME_ERROR_INVALID_ARGUMENT);
+
+    PT_CHECK(press(ctx, ' '));
+    c = pathime_context_composition(ctx);
+    PT_CHECK(c->candidate_count > 1);
+
+    /* Conversion starts at the head of the list, and the preedit shows it. */
+    PT_CHECK_SIZE(pathime_context_composition(ctx)->candidate_cursor, 0);
+    check_str("preedit at cursor 0", preedit_of(ctx), KANJI);
+
+    /* Moving the cursor rewrites the active span to the hovered candidate,
+     * and says so with a composition_changed. */
+    log_reset(&log);
+    PT_CHECK_STATUS(pathime_context_set_candidate_cursor(ctx, 1), PATHIME_OK);
+    PT_CHECK_SIZE(pathime_context_composition(ctx)->candidate_cursor, 1);
+    check_str("preedit follows cursor", preedit_of(ctx), KANJI_2ND);
+    PT_CHECK(log.changed_count == 1);
+    /* Hovering settles nothing and commits nothing — the whole difference
+     * between this and pathime_context_select_candidate(). */
+    PT_CHECK(log.commit_count == 0);
+    PT_CHECK_SIZE(pathime_context_composition(ctx)->preedit_settled, 0);
+
+    /* And it is reversible, which selection is not. */
+    PT_CHECK_STATUS(pathime_context_set_candidate_cursor(ctx, 0), PATHIME_OK);
+    check_str("cursor moves back", preedit_of(ctx), KANJI);
+
+    /* Out of range leaves the cursor exactly where it was. */
+    c = pathime_context_composition(ctx);
+    PT_CHECK_STATUS(pathime_context_set_candidate_cursor(ctx, c->candidate_count),
+                    PATHIME_ERROR_INVALID_ARGUMENT);
+    PT_CHECK_SIZE(pathime_context_composition(ctx)->candidate_cursor, 0);
+    check_str("failed move changes nothing", preedit_of(ctx), KANJI);
+
+    /*
+     * The invariant that makes the cursor composition data rather than a value
+     * the client owns: it moves under the client. Space is conversion — the
+     * one meaning the header fixes across every engine — and its second press
+     * is the next candidate, so a key the client forwarded for an unrelated
+     * reason has just relocated the highlight it set two lines ago.
+     *
+     * A client that drew from what it last set would now be highlighting the
+     * wrong row and showing a preedit that disagrees with it. Reading it back
+     * from the composition, as here, is the whole obligation.
+     */
+    PT_CHECK_SIZE(pathime_context_composition(ctx)->candidate_cursor, 0);
+    PT_CHECK(press(ctx, ' '));
+    PT_CHECK_SIZE(pathime_context_composition(ctx)->candidate_cursor, 1);
+    check_str("space advances the cursor", preedit_of(ctx), KANJI_2ND);
+
+    /* The arrows are the client's now, so mid-conversion they are declined and
+     * handed back for the client to bind. */
+    PT_CHECK(!press(ctx, PATHIME_KEY_DOWN));
+    PT_CHECK(!press(ctx, PATHIME_KEY_UP));
+    /* Declining left the conversion untouched — no accidental cycling. */
+    PT_CHECK_SIZE(pathime_context_composition(ctx)->candidate_cursor, 1);
+    check_str("arrows change nothing", preedit_of(ctx), KANJI_2ND);
+
+    /*
+     * The cursor is always a position in the *current* list, so shrinking the
+     * list out from under it must leave something a client can draw with. This
+     * is checked here rather than on pyzy because anthy is where the clamp in
+     * materialize_candidates() is what does it: anthy takes the default no-op
+     * options_changed(), so lowering the cap truncates the list and nothing
+     * else volunteers to fix the cursor. On pyzy the same sequence is caught
+     * earlier, by the observer resetting the hover when its candidate list is
+     * regenerated, which would hide a missing clamp rather than test it.
+     */
+    PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_MAX_CANDIDATES, 8),
+                    PATHIME_OK);
+    c = pathime_context_composition(ctx);
+    PT_CHECK_SIZE(c->candidate_count, 8);
+    PT_CHECK_STATUS(pathime_context_set_candidate_cursor(ctx, 6), PATHIME_OK);
+    PT_CHECK_SIZE(pathime_context_composition(ctx)->candidate_cursor, 6);
+
+    PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_MAX_CANDIDATES, 3),
+                    PATHIME_OK);
+    c = pathime_context_composition(ctx);
+    PT_CHECK_SIZE(c->candidate_count, 3);
+    PT_CHECK(c->candidate_cursor < c->candidate_count);
+    PT_CHECK_STATUS(pathime_context_reset_option(ctx, PATHIME_OPT_MAX_CANDIDATES),
+                    PATHIME_OK);
+
+    /* Selecting settles the span, which drops the list and the cursor with
+     * it — a new span starts hovering its own first candidate. */
+    PT_CHECK_STATUS(pathime_context_select_candidate(ctx, 0), PATHIME_OK);
+    PT_CHECK_SIZE(pathime_context_composition(ctx)->candidate_cursor, 0);
+
+    /* Focus gates it, as it gates every other input operation. */
+    PT_CHECK_STATUS(pathime_context_set_focused(ctx, false), PATHIME_OK);
+    PT_CHECK_STATUS(pathime_context_set_candidate_cursor(ctx, 0),
+                    PATHIME_ERROR_NOT_FOCUSED);
+    /* But reading it is not gated, because it is not a call: the cursor is
+     * composition data, and reading the composition is always available. */
+    PT_CHECK(pathime_context_composition(ctx) != NULL);
+
+    pathime_context_destroy(ctx);
+}
+
+/*
  * The multi-segment projection — the case this file is really for.
  *
  * "kyouhaiitenkidesune" reads きょうはいいてんきですね and anthy segments it
@@ -944,6 +1074,7 @@ int main(void)
 
         test_romaji_state_machine(engine);
         test_conversion_candidates(engine);
+        test_candidate_cursor(engine);
         test_multi_segment_settled_boundary(engine);
         test_commit_and_cancel(engine);
         test_options(engine);

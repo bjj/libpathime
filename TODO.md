@@ -20,7 +20,7 @@ Done:
   `cmake/pathime-config.h.in`.
 - **The model and the contract.** `docs/CONCEPTS.md` and
   `include/pathime/pathime.h`, both settled and kept in lockstep.
-- **The core.** All 40 public entry points, implemented rather than stubbed:
+- **The core.** All 44 public entry points, implemented rather than stubbed:
   process-global lifetime and `data_dir` resolution, the engine registry, both
   handle lifecycles, focus, the surrounding-text snapshot, the key layer
   (`keys.*`), the encoding boundary (`utf8.*`), the structured composition
@@ -41,8 +41,9 @@ Done:
 - **The first client.** `demo/`, an interactive IME in a terminal, behind
   `LIBPATHIME_BUILD_DEMO`. It exists to be *used*, not to verify anything — but
   being the first program written against the header rather than to test it
-  found six places where a client has to work around the API's shape. Those are
-  §4b, and they are the best input the next design round has.
+  found six places where a client has to work around the API's shape. Those
+  were §4b, and **all six are now closed** — three by new API, three by saying
+  in the header what was already true.
 - **Tests: 31, all passing.** `tests/core/` compiles internal sources directly,
   because internal helpers carry no `PATHIME_API` and a shared build would not
   export them. `tests/api/` holds the ABI, lifecycle and options suites plus one
@@ -300,15 +301,14 @@ reasoning is what stops them being reopened.
    such key. It is wrong for a desktop client wanting to repair the middle of a
    long pinyin run without backspacing to it. Revisit only with a real consumer.
 
-4. **Nothing moves `Composition::cursor` except a selection.** The API has no
-   candidate-hover operation — a client paginates and displays for itself, and
-   `pathime_context_select_candidate()` is the only thing it can call. So the
-   currently-shown candidate this library tracks (Finding 2) is only ever set at
-   the moment it stops being ours. That is coherent, but it means pyzy's
-   `focusCandidate()` can never be driven and the active span always shows
-   candidate 0's text however the client's highlight moves. If a preedit that
-   follows the hover is wanted, `ContextBackend` needs a `set_cursor(size_t)`
-   and the API needs an operation to reach it.
+4. ~~**Nothing moves `Composition::cursor` except a selection.**~~
+   **Answered, and built (2026-07-28.)** It ends exactly where this note
+   predicted: `ContextBackend::set_cursor(size_t)` and a public operation
+   reaching it, `pathime_context_set_candidate_cursor()`, with the position
+   published in `pathime_composition_t::candidate_cursor`. pyzy's
+   `focusCandidate()` is driven and the active span follows the hover. See §4b
+   for what else came with it — chiefly that anthy's Up/Down bindings went, so
+   that navigating a list is the client's decision and not two engines'.
 
 Resolved by the API round, recorded so they are not reopened: candidates are
 active-region-only (greedy, no segment navigation); lazy enumeration is hidden
@@ -533,38 +533,66 @@ Three smaller header/implementation divergences, all pinned down by tests:
   preedit shown, because an engine may *preview* an unchosen conversion, and
   Pinyin and Bopomofo do.
 
-## 4b. What the first client found
+## 4b. What the first client found — **all six closed (2026-07-28)**
 
 `demo/` is the first program written *against* this API rather than to test it,
 and being a client is a different exercise from being a test: a test knows what
 it is checking, so it can reach for whatever the header offers and assert on the
 answer, while a client has to build a whole interface out of what is there and
-discovers the shape of the holes. These are the holes. None of them blocked the
-demo and none is a bug; each cost it either a workaround in `demo/src/` or a
-feature it does not have. They are the places where the next design round should
-ask whether the client should have had to do that.
+discovers the shape of the holes. These were the holes. None of them blocked the
+demo and none was a bug; each cost it either a workaround in `demo/src/` or a
+feature it did not have.
 
-Roughly in the order of how much a client suffers without them.
+The design round has now been held. Three were answered with new API —
+`pathime_context_set_candidate_cursor()`, `pathime_context_requirements()`,
+`pathime_option_value_name()`, plus `pathime_context_is_focused()` from the
+smaller list — and three by writing down in the header what the implementation
+already guaranteed. The header grew from 40 public entry points to 44, and
+`pathime_composition_t` gained one field; no existing entry point changed shape,
+so all of it is additive.
 
-- **A client cannot ask whether a candidate list is complete.** It must infer
-  it: a list shorter than `PATHIME_OPT_MAX_CANDIDATES` was not truncated by the
-  cap, so there is nothing more to be had; a list exactly as long as the cap
-  might have more behind it. The header supports the inference — it says a lazy
-  backend materializes up to the cap and stops — but it is an inference, and
-  *every* client that pages a list has to rederive it. Without it the demo
-  raised the cap each time the user reached the end of a list that was already
-  complete, leaving the option permanently changed for nothing
-  (`App::grow_candidate_list()`).
+Kept in the order they were found, with what each became.
 
-  Two fixes, and they are not equivalent. Stating the rule in the header beside
-  `candidate_count` costs nothing and closes the question. A `bool
-  candidates_complete` in `pathime_composition_t` costs a struct field and makes
-  it unmissable — and it would also let the library answer honestly for a
-  backend that *knows* it has more, which the length test cannot.
+**The one decision that went the other way:** a `bool candidates_complete` in
+`pathime_composition_t` was considered and **declined**. The struct stays as it
+is and the completeness rule is stated beside `candidate_count` instead. The
+argument for the field was that a backend which *knows* it has more could say
+so where the length test cannot — pyzy can be asked, via `hasCandidate(cap)` —
+but it would have grown the struct for one engine's benefit and made every
+adapter answer a question only one of them finds interesting. Do not reopen this
+without a backend whose list length genuinely misleads.
 
-- **`pathime_engine_requirements()` has no context-level counterpart, and the
-  header's advice in its place is the one thing a generic client cannot
-  follow.** Requirements depend on the resolved configuration, and
+- ~~**A client cannot ask whether a candidate list is complete.**~~ **Closed by
+  the header (2026-07-28.)** The rule is now stated beside `candidate_count`: a
+  count below the resolved `PATHIME_OPT_MAX_CANDIDATES` was not truncated by the
+  cap and there is nothing more to be had; a count equal to it may or may not
+  have more behind it. The header also states plainly that the equal case is
+  undecidable from there, rather than leaving a reader to wonder.
+
+  `candidates_complete` was the alternative and was declined — see the note at
+  the top of this section. What the backends can actually do was checked first,
+  because the shape of the answer depended on it: anthy knows its total for free
+  (`anthy_get_segment_stat().nr_candidate`), pyzy genuinely does not (candidates
+  fill twelve at a time from a SQLite query, `FILL_GRAN` in
+  `pyzy/src/PhraseEditor.h:30`), hangul has none, and the table engine's will be
+  ours. So the cap is not a wart that could be removed by enumerating
+  everything: pyzy is what it exists for.
+
+  `App::grow_candidate_list()` keeps its length test, which is now the
+  documented rule rather than a client's guess.
+
+- ~~**`pathime_engine_requirements()` has no context-level counterpart.**~~
+  **Done (2026-07-28.)** `pathime_context_requirements()`, in `src/context.cc`:
+  the same `resolve_option_number()` call with `ctx` in place of `nullptr`, so
+  it also picks up the capping rule in `options.cc`'s `resolve_number()` and
+  reports the *effective* value, which is what the note below argued for. The
+  engine form keeps its uncapped answer and the header now says why the two
+  differ. The demo's "engine requires:" line reads the context form and is
+  right about the field in front of the user. Covered by
+  `test_context_requirements()` in `api.engine_hangul`, including the case where
+  a client that cannot delete caps the value back down.
+
+  The original finding: Requirements depend on the resolved configuration, and
   `PATHIME_OPT_HANGUL_PREEDIT` — the option that drives them — is settable per
   context. The header says so and tells a client that sets it per context to
   "read the requirement from the option's own documentation rather than from
@@ -587,7 +615,46 @@ Roughly in the order of how much a client suffers without them.
   capped one — because a client asking "what do you need from me" has already
   supplied what it has.
 
-- **The currently-shown candidate exists internally and is not exposed.**
+- ~~**The currently-shown candidate exists internally and is not exposed.**~~
+  **Done (2026-07-28), and it grew into more than a projection.** The answer is
+  not a read-only field but a pair —
+  `pathime_context_candidate_cursor()` and
+  `pathime_context_set_candidate_cursor()` — because the finding understated the
+  gap: the model had no candidate *navigation* at all, only selection, which
+  mashed hovering and committing into one irreversible step. A client can now
+  move the highlight without choosing, and on an engine that previews its
+  candidates the preedit follows.
+
+  **The cursor is a `pathime_composition_t` field, plus a setter — and getting
+  that wrong first is worth recording.** It was built as a getter/setter pair on
+  the reasoning that a struct field would imply the engine could change the
+  value at will, which had not been established. It had: Space advances the
+  cursor on an engine that converts by cycling (`advance_candidate()`), a span
+  settling drops it, and pyzy's observer resets it when its list is
+  regenerated. Once that is true the cursor *is* composition data, a getter is a
+  second way to read something the client must re-read on every
+  `composition_changed` anyway, and the field is the honest shape.
+
+  So the invariant is stated rather than implied: a client draws its highlight
+  from the composition and never assumes the cursor is where it last put it.
+  `refresh_composition()` includes the cursor in its change comparison, so a
+  move is always announced. The setter's documentation says outright that it is
+  a request rather than an assignment.
+
+  `ContextBackend::set_cursor()` is the seam, defaulting to `UNSUPPORTED` so
+  hangul inherits the honest answer. anthy's `move_candidate(delta)` became
+  `show_candidate()` behind both an absolute `set_cursor()` and Space's
+  `advance_candidate()`; **anthy's Up/Down bindings were removed**, because a
+  key the engine reports handled never reaches the client's binding, which would
+  take back the decision this API just handed over. pyzy's `set_cursor()` is one
+  `focusCandidate()` call — the function §3 q4 recorded as reachable and
+  undriven. Both are covered, and the anthy checks were mutation-tested against
+  restoring the arrow binding and against dropping the preedit rewrite.
+
+  `docs/CONCEPTS.md` gained a *Candidate cursor* section, since the model now
+  has the concept in public.
+
+  The original finding:
   `Composition::cursor` (`src/composition.h:117`) is per active span, is reset
   when a span settles, and is fed to the backend on selection — the core tracks
   it because neither anthy nor pyzy durably records it (§2, Finding 2). The
@@ -610,8 +677,17 @@ Roughly in the order of how much a client suffers without them.
   the internal cursor means the model already has it, and only the projection
   is missing.
 
-- **Whether one dispatch may contain more than one `delete_surrounding_text` is
-  unstated.** It matters because every deletion is expressed against the *same*
+  (That last paragraph called the field right and the scope wrong: the round
+  admitted hovering *and* gave the client a way to drive it, because a
+  projection with no operation behind it would have exposed a cursor only the
+  engine could move.)
+
+- ~~**Whether one dispatch may contain more than one `delete_surrounding_text`
+  is unstated.**~~ **Closed by the header (2026-07-28.)** It now guarantees at
+  most one per dispatch, with the reason a client cares. `App::flush_deletes()`
+  and its `PendingDelete` queue are gone; `on_delete()` erases where it is told.
+
+  The original finding: It matters because every deletion is expressed against the *same*
   snapshot: applying the first would move the text the second is described in
   terms of, so a client that assumes several must collect them and apply them
   back to front, and a client that assumes one can just delete. The header fixes
@@ -633,7 +709,24 @@ Roughly in the order of how much a client suffers without them.
   happens to do today. Do not "simplify" it away without changing the header
   first.
 
-- **The inventory walk cannot produce a readable interface.** The header
+- ~~**The inventory walk cannot produce a readable interface.**~~ **Done
+  (2026-07-28.)** `pathime_option_value_name(option, value)` — the enumerator for
+  an ENUM, a single bit for a FLAGS — returning a stable machine-readable name
+  like `"kuten"`, `"double-mspy"`, `"gn-ng"`. A side table in `src/options.cc`
+  rather than a tenth `OptionDescriptor` field, because only 15 of the 32
+  options have values to name.
+
+  No separate enumeration call was needed: `valid_values` already gives the
+  legal set, so a client walks that bitmask and names each bit, and the header
+  carries that loop as its example. `core.options`'s `test_value_names()` drives
+  exactly that loop and demands a name at every stop, so a value added without
+  one fails the build's tests.
+
+  The demo deleted its thirteen hardcoded label sets, and its FLAGS editing is
+  no longer all-bits-or-none: Left/Right walk the bits by name and Space toggles
+  the one under the cursor.
+
+  The original finding: The header
   advertises `pathime_option_count()` + `pathime_option_name()` +
   `pathime_engine_option_info()` as what lets a client "build a settings
   interface that follows the inventory rather than hardcoding it", and it does
@@ -659,8 +752,14 @@ Roughly in the order of how much a client suffers without them.
   inventory walk from "types and numbers" into something a client can render
   before it has ever heard of the option.
 
-- **An option setter invalidates the borrowed composition, and does not read
-  like it does.** The lifetime rule is "valid until the next call that mutates
+- ~~**An option setter invalidates the borrowed composition, and does not read
+  like it does.**~~ **Closed by the header (2026-07-28.)** The Ownership section
+  now names all six setters and both reset forms as mutating calls, and spells
+  out the trap: the `pathime_composition_t` keeps its address, so a stale
+  pointer still reads a live struct and the mistake hides, but a `pathime_str_t`
+  copied out of it before the set points into storage that has been reassigned.
+
+  The original finding: The lifetime rule is "valid until the next call that mutates
   the same input context", and an option set is such a call — it can reset the
   composition, and it re-materializes the candidate list even when it does not.
   A client naturally reads "mutates" as `process_key` and `select_candidate`.
@@ -677,11 +776,11 @@ Roughly in the order of how much a client suffers without them.
 
 Three smaller ones, recorded so they are not rediscovered:
 
-- **There is no `pathime_context_is_focused()`.** The demo does not need one —
-  it focused the context itself — but the two accessors that do exist
-  (`pathime_context_engine`, `pathime_context_user_data`) exist "for language
-  bindings", and a binding handed a bare context handle is in exactly the
-  position of not knowing.
+- ~~**There is no `pathime_context_is_focused()`.**~~ **Done (2026-07-28.)**
+  Alongside `pathime_context_engine` and `pathime_context_user_data`, and for
+  the same reason those exist: a language binding handed a bare context handle
+  is in exactly the position of not knowing. No error channel — false for NULL
+  and false before `pathime_init()`, both of which read the same way.
 - **A pasted string has nowhere to go.** `pathime_context_process_key()` takes
   one key press, so text arriving other than by typing cannot be offered to an
   engine at all. The demo treats a paste as an ordinary client-side insertion
@@ -758,13 +857,10 @@ demo's event log.
   made symmetric, on the strength of "when a change takes effect: always
   immediately."
 
-- **`src/candidates.h` still does not exist, and the trigger has now fired.**
-  `materialize_candidates()` is declared at the top of `src/context.cc` rather
-  than in a header, on the grounds that one function nothing else names is not
-  worth one. `src/candidates.cc` now has real work in it, so the condition that
-  note set for itself is met: the enumeration entry point, the currently-shown
-  cursor accessor, and the selection path all want declaring in one place.
-  Mechanical, do it with the next change that touches the pump.
+- ~~**`src/candidates.h` still does not exist, and the trigger has now
+  fired.**~~ **Done (2026-07-28.)** The cursor work was the next change to touch
+  the pump, so `src/candidates.h` landed with it and `context.cc` includes it
+  instead of forward-declaring `materialize_candidates()` itself.
 
 - **The header explains itself against the backends; one day it should not.**
   Much of the commentary in `include/pathime/pathime.h` justifies a decision by
@@ -815,4 +911,9 @@ demo's event log.
   the end of a complete list. `App::grow_candidate_list()`.
 
   What it found about the *API* — as opposed to about terminals and key
-  bindings — is §4b, and that is the part worth acting on.
+  bindings — was §4b, and that round has since been held: all six are closed,
+  and the demo was rewritten against the result. It now binds Up/Down to
+  `pathime_context_set_candidate_cursor()` rather than forwarding them,
+  highlights the hovered entry, keeps the page and the highlight together, and
+  names every enum value and flags bit from `pathime_option_value_name()`
+  instead of its own table.

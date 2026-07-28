@@ -488,6 +488,9 @@ static void check_null_context_calls(void)
     PT_CHECK_STATUS(pathime_context_select_candidate(NULL, 0),
                     PATHIME_ERROR_INVALID_ARGUMENT);
 
+    PT_CHECK_STATUS(pathime_context_set_candidate_cursor(NULL, 0),
+                    PATHIME_ERROR_INVALID_ARGUMENT);
+
     PT_CHECK_STATUS(pathime_context_set_surrounding_text(NULL, text, 0),
                     PATHIME_ERROR_INVALID_ARGUMENT);
 
@@ -508,6 +511,8 @@ static void check_null_context_calls(void)
     PT_CHECK(pathime_context_user_data(NULL) == NULL);
     PT_CHECK(pathime_context_composition(NULL) == NULL);
     PT_CHECK(pathime_engine_requirements(NULL) == 0);
+    PT_CHECK(pathime_context_requirements(NULL) == 0);
+    PT_CHECK(!pathime_context_is_focused(NULL));
 }
 
 static void test_null_handle_gate(void)
