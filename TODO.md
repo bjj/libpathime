@@ -38,6 +38,56 @@ and five of them ship: cangjie5, quick5, wubi-jidian86, stroke5, zhuyin.
 
 `src/engines/table/README.md` is the map. What follows is only what is missing.
 
+### Next: table enumeration — how does a client know what tables exist?
+
+**Top priority.** It blocks the demo, and it is the one question the bare-name
+decision left open rather than answered.
+
+Today `PATHIME_OPT_TABLE_FILE` takes a bare name that resolves to
+`<resource_dir>/table/<name>.db`, or a path used verbatim. That is enough for a
+client that already knows which table it wants. It is not enough for a client
+that wants to *offer* a choice, and nothing in the API lets one ask what is
+installed — `resource_dir` itself is not reported, so a client cannot even look.
+
+The demo is the proof. Its status line says `needs a table file`, but tabbing
+into the options panel and pressing Enter on `table-file` answers "engine does
+not implement this operation" — `demo/src/options_view.cc:162`, where
+`adjust_option()` declines every `PATHIME_OPTION_STRING`. The message is doubly
+misleading: nothing is unimplemented, and the engine named is not what refused.
+But making the message honest does not make the demo usable, because the demo
+edits options by *stepping through values* and a table name has no value list to
+step through. It needs to enumerate.
+
+What has to be decided:
+
+- **Does enumeration return names, or descriptions?** A table declares `NAME`,
+  localized `NAME.zh_CN/HK/TW`, `LANGUAGES`, an author and a description. A
+  picker wants a display name; `PATHIME_OPT_TABLE_FILE` wants the bare name.
+  Returning only the latter makes every client build its own label out of a
+  filename.
+- **What is enumerated — shipped tables, or loaded ones?** Scanning
+  `<resource_dir>/table/` is a directory read at a moment the API currently has
+  no reason to touch the disk, and it says nothing about tables the client
+  supplies by path.
+- **Where does it hang?** It is not an option: it is a property of the
+  installation, not a value with tiers. Most likely new entry points beside
+  `pathime_has_engine()`, which is the existing "what can this build do"
+  question.
+- **What does it cost to open a table just to describe it?** A name and a
+  language list live in the `ime` table, so describing one means opening the
+  database. Doing that for every table in the directory on one call is real work
+  — and the alternative, a manifest written at build time, is a second data
+  format to keep in step with the tables themselves.
+- **Does it stay honest when a client names a path?** Enumeration cannot know
+  about a table outside the resource directory, so whatever it returns is "what
+  I ship", not "what you can use".
+
+The cheap answer that was declined earlier — three entry points returning count,
+name and path — is still on the table; it was declined as premature surface for
+an engine with no consumers, and the demo is now a consumer. The expensive
+answer is a described-table struct with `struct_size`, which is the shape the
+rest of the API uses for anything it expects to grow.
+
 ### Not implemented, in rough priority order
 
 - **Learning (§10).** The user database is created, attached as `user_db` and
@@ -103,23 +153,6 @@ and five of them ship: cangjie5, quick5, wubi-jidian86, stroke5, zhuyin.
   composition); and the `AUTO_SELECT` retry recurses one level to reprocess the
   character that broke the match. Both are choices, both are commented at the
   code, and neither has a table in the shipped set that exercises it hard.
-- **The demo cannot reach the table engine, and says so confusingly.** The
-  status line reports `needs a table file`, but tabbing into the options panel
-  and pressing Enter on `table-file` answers "engine does not implement this
-  operation". That is `demo/src/options_view.cc:162`: `adjust_option()` declines
-  every `PATHIME_OPTION_STRING` outright. The message is doubly misleading —
-  nothing is unimplemented, and the engine named is not the one refusing.
-
-  The fix needs a decision, because the demo edits options by *stepping through
-  values* and a table name has no value list to step through. Either the demo
-  carries its own list of names to cycle (matching how it already hardcodes
-  engine names, but going stale against a build with a different
-  `LIBPATHIME_TABLES`), or it scans the table directory — which it cannot do,
-  because it never learns where `resource_dir` resolved to. The second option is
-  the one that would argue for a table-enumeration API, which was considered and
-  declined at the bare-name decision.
-
-  Minimum worth doing regardless: make the refusal say what is actually wrong.
 - **`ibus-table-chinese` is GPL-3, and its compiled tables now ship inside
   `pathime-data/`.** Flagged at the decision round and still open: it is a
   licensing question about what libpathime distributes, not a technical one.
@@ -143,13 +176,42 @@ and five of them ship: cangjie5, quick5, wubi-jidian86, stroke5, zhuyin.
   renderable on their target — that is a promise about their UI, not a
   preference about their table.
 
-  So the work is to make it optionally possible rather than to decide it away.
-  Open: whether it belongs at compile time (a `--font` flag on
-  `tools/table-compile`, needing fontconfig at build time, filtering baked into
-  the shipped `.db`) or at runtime (a coverage set the embedder supplies, so one
-  shipped table serves targets with different fonts). Compile time is what the
-  fork does and is far cheaper; runtime is what an embedder shipping one library
-  to several targets would actually want.
+  The shape it should take is **both, with runtime strictly narrowing compile
+  time**: a table is filtered once at build time against an inclusive font, and
+  an embedder may additionally supply a coverage set at runtime that can only
+  remove more. Runtime never widens, so the shipped `.db` stays the upper bound
+  and nothing has to be re-added from a table that no longer carries it.
+
+  **In scope now: the compile-time half only.** A `--font` flag on
+  `tools/table-compile`, filtering against something deliberately inclusive —
+  Noto CJK is the obvious target. That is what the fork already does, it needs
+  no API surface, and it is the half that removes the tofu.
+
+  Portability is not a blocker for it: fontconfig covers Linux, and Windows can
+  read its own fonts through the Windows APIs. Two implementations of "which
+  code points does this font cover", both build-time and neither touching the
+  library.
+
+  **The runtime half is deferred**, and not only for effort. Four things have to
+  be answered first, and none of them is about tables:
+
+  - *What does it mean for the other three backends?* A coverage set that
+    filters table candidates but not anthy's or pyzy's would be a promise the
+    library keeps in one place and breaks in another. Either it is a
+    library-wide concept or it is a misleading one.
+  - *What is the API surface?* A set of code points is not a shape the option
+    system has — every option today is a number, an enum, a flag set or a short
+    string, and a coverage set is none of those.
+  - *Is it sane to let a client narrow this far at all?* Nothing would stop
+    "here is ASCII, now do Pinyin", and the honest result is nonsense. Whether
+    the library refuses that, degrades predictably, or simply lets the client
+    have what it asked for is a real decision.
+  - *Can it be done without touching the vendored trees?* pyzy and anthy choose
+    their own output; filtering theirs means intercepting it at the adapter, or
+    it means patching submodules, which is the rule this project does not break.
+
+  So: build the compile-time filter, and leave the runtime one until those four
+  have answers.
 
 - **Is it worth implementing the input methods the other backends already
   cover?** `PINYIN_MODE` and `SUGGESTION_MODE` are the immediate cases, but the

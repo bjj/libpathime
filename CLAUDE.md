@@ -110,3 +110,9 @@ same habits should carry into the implementation:
   nature all follow from it.
 - **Never edit the vendored submodule trees.** Windows fixes go through the
   compat headers or a configure-time generated copy; see `docs/windows-port.md`.
+
+- **Keep commit messages short.** A subject line and a few sentences. The
+  reasoning belongs in the code comments and in `docs/`, where it is next to
+  what it explains and gets updated with it; a commit message repeating it just
+  goes stale somewhere no one looks. Say what changed and why, not how it was
+  decided — `git log` is not a design document.
