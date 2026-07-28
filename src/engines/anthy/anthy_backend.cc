@@ -5,22 +5,46 @@
  * The shape of a composition here
  * ---------------------------------------------------------------------------
  *
- * Two states, and every method below begins by branching on which one it is
- * in, because anthy is two libraries stitched together at that seam:
+ * Two facts, four states — and the facts are deliberately separate, because
+ * conflating them is the trap TODO.md §4c warned this file about. The first
+ * fact is whether anthy holds a conversion (segment_count_ > 0); the second is
+ * whether the user *asked* for one (converting_). The eager state is the one
+ * where the first is true and the second is false. It is what fills the
+ * suggestion strip a phone-keyboard client draws — but the strip is that
+ * client's widget, and what exists here is only the model's candidate list,
+ * produced eagerly:
  *
- *   typing      No conversion has been asked for. anthy has not been called
- *               and holds nothing. The composition is the romaji front end's
- *               kana buffer, all of it in model->active, with no candidates:
- *               there is nothing to choose between until anthy has segmented
- *               something.
- *   converting  anthy_set_string() has run and the context holds N segments.
- *               The active-segment index is ours and private (backend.h rule
+ *   typing      Nothing converted, nothing asked. The composition is the
+ *               romaji front end's kana buffer, all of it in model->active,
+ *               with no candidates. This is the whole of the typing state
+ *               when PATHIME_OPT_PREDICTION is off.
+ *   eager       PATHIME_OPT_PREDICTION is on and the buffer is non-empty:
+ *               every mutation re-runs anthy_set_string() on the current
+ *               reading, so candidates for the leftmost segment are up from
+ *               the first keystroke — but the user has asked for nothing, so
+ *               the preedit still shows the kana and the cursor *browses*
+ *               without previewing. Selecting here settles the
+ *               leftmost segment greedily: its text joins eager_settled_, the
+ *               composer is re-seeded with the readings of what remains, and
+ *               the conversion re-runs on that remainder — which is what lets
+ *               the user keep typing after a partial selection, the case the
+ *               ordinary converting machinery cannot express. (pyzy is the
+ *               model: its unbidden list behaves exactly this way.)
+ *   converting  anthy_set_string() has run *and the user asked* — Space,
+ *               Henkan, or PATHIME_ANTHY_ON_PERIOD_CONVERT. The
+ *               active-segment index is ours and private (backend.h rule
  *               3): segments before it appear in model->settled at their
  *               chosen candidate, the active one in model->active, and the
  *               segments after it in model->tail at
  *               NTH_UNCONVERTED_CANDIDATE — their reading, since the user has
  *               not reached them and the engine has not been asked what it
- *               thinks of them yet.
+ *               thinks of them yet. Entering this state adopts the eager
+ *               list's browse cursor: conversion begins previewing the
+ *               hovered entry, which is candidate 0 unless the client moved
+ *               it.
+ *
+ * (The fourth combination — asked but nothing converted — does not exist:
+ * begin_conversion() only sets converting_ once anthy has segments.)
  *
  * Greedy left-to-right resolution moves the index forward one segment at a
  * time and never back. That is the phone-keyboard target's call, and its cost
@@ -101,6 +125,10 @@ public:
                                 const OptionReader &options,
                                 Composition *model) override;
 
+    void options_changed(const OptionReader &options,
+                         Composition *model,
+                         Output *out) override;
+
     void materialize_candidates(size_t cap,
                                 const OptionReader &options,
                                 Composition *model) override;
@@ -123,9 +151,21 @@ private:
     void show_segments(Composition *model);
 
     bool begin_conversion(Composition *model, const RomajiSettings &settings);
-    void cancel_conversion(Composition *model, const RomajiSettings &settings);
+    void cancel_conversion(Composition *model,
+                           const OptionReader &options,
+                           const RomajiSettings &settings);
     void advance_candidate(const OptionReader &options, Composition *model);
     bool show_candidate(int cursor, Composition *model);
+
+    void refresh_eager_conversion(const OptionReader &options, const RomajiSettings &settings);
+    void drop_eager_conversion();
+    pathime_status_t select_from_eager(size_t index,
+                                       const OptionReader &options,
+                                       Composition *model,
+                                       Output *out);
+    void learn_eager_choice(const std::string &reading, const std::string &text);
+    std::string eager_settled_text() const;
+    std::string eager_settled_reading() const;
 
     void commit_kana(Composition *model, Output *out, const RomajiSettings &settings);
     void commit_conversion(Composition *model, Output *out, const OptionReader &options);
@@ -135,11 +175,32 @@ private:
     anthy_context_t context_ = nullptr;
     RomajiComposer  composer_;
 
-    /** False while the kana buffer is being typed, true once anthy has run. */
+    /**
+     * True once the user has asked for conversion and the preedit previews
+     * segments. *Not* "anthy has run" — the eager state runs anthy without setting
+     * this, which is exactly the split the file comment describes.
+     */
     bool converting_ = false;
 
-    /** Segment count from anthy_get_stat(); 0 unless converting_. */
+    /**
+     * Segment count from anthy_get_stat(); 0 unless a conversion is live,
+     * which the eager state's runs are. `segment_count_ > 0 && !converting_`
+     * is the eager state.
+     */
     int segment_count_ = 0;
+
+    /**
+     * One entry per eager selection not yet committed or walked back: the
+     * chosen text, still preedit (it prefixes model->settled), and the
+     * reading it consumed, kept because un-settling — Backspace past the
+     * remainder, or Escape — restores the reading, and anthy no longer holds
+     * it once the conversion has re-run on the remainder.
+     */
+    struct EagerSpan {
+        std::string text;
+        std::string reading;
+    };
+    std::vector<EagerSpan> eager_settled_;
 
     /**
      * The leftmost unsettled segment. Private by rule 3 of backend.h: the API
@@ -201,10 +262,15 @@ bool AnthyContextBackend::fetch_segment(int segment, int candidate, std::string 
  * Projection
  * ------------------------------------------------------------------------- */
 
-/** The typing state: the kana buffer, whole, with nothing to choose from. */
+/**
+ * The typing and eager states: the kana buffer, whole, preceded by whatever
+ * eager selections have settled. Candidates are cleared here and refilled by
+ * the pump once refresh_eager_conversion() has re-run the conversion — which is what
+ * makes "any new key regenerates the list" true by construction.
+ */
 void AnthyContextBackend::show_kana(Composition *model, const RomajiSettings &settings)
 {
-    model->settled.clear();
+    model->settled = eager_settled_text();
     model->active = composer_.display(settings);
     model->tail.clear();
     model->candidates.clear();
@@ -215,7 +281,7 @@ void AnthyContextBackend::show_kana(Composition *model, const RomajiSettings &se
 /** The converting state: N segments as the three strings the API has. */
 void AnthyContextBackend::show_segments(Composition *model)
 {
-    model->settled.clear();
+    model->settled = eager_settled_text();
     model->active.clear();
     model->tail.clear();
 
@@ -256,6 +322,18 @@ bool AnthyContextBackend::begin_conversion(Composition *model, const RomajiSetti
     const std::string reading = composer_.reading(settings);
     if (reading.empty()) return true;
 
+    /*
+     * Adopt the eager list's browse cursor before the state is rebuilt: a hover
+     * made while candidates were showing unasked is the user's most recent
+     * expression of interest, and the convert key previews it rather than
+     * discarding it — the header's rule at PATHIME_KEY_SPACE, and pyzy's
+     * existing treatment of Space-as-select-the-hover. When nothing was
+     * browsed the cursor sits at 0 and adoption is invisible, which is why
+     * the desktop habit — Space previews anthy's first choice — is untouched.
+     */
+    const size_t adopt =
+        (segment_count_ > 0 && !converting_ && !model->candidates.empty()) ? model->cursor : 0;
+
     /* A status code, 0 or -1 — not a segment count (main.c:202). The count
      * comes from anthy_get_stat(), below. Reading it as a count is the mistake
      * docs/anthy-mapping.md calls out by name. */
@@ -269,14 +347,34 @@ bool AnthyContextBackend::begin_conversion(Composition *model, const RomajiSetti
     recorded_.assign(static_cast<size_t>(segment_count_), 0);
     active_ = 0;
     converting_ = true;
-    listed_segment_ = -1;
+
+    /*
+     * The set_string here re-ran the same reading the eager state's last run used,
+     * against the same record, so segment 0's list is unchanged and the
+     * adopted index is still in range; the belt below is against the record
+     * having been perturbed in ways this file does not model.
+     */
+    if (adopt > 0) {
+        struct anthy_segment_stat seg;
+        if (anthy_get_segment_stat(context_, 0, &seg) == 0 &&
+            static_cast<int>(adopt) < seg.nr_candidate) {
+            chosen_[0] = static_cast<int>(adopt);
+        }
+    }
 
     show_segments(model);
     return true;
 }
 
-/** Back to the kana buffer, which the composer never stopped holding. */
-void AnthyContextBackend::cancel_conversion(Composition *model, const RomajiSettings &settings)
+/**
+ * Back to the kana buffer, which the composer never stopped holding — and
+ * back into the eager state if the option asks for it, since cancelling the
+ * conversion returns to typing, not to a state with fewer candidates than
+ * typing would have.
+ */
+void AnthyContextBackend::cancel_conversion(Composition *model,
+                                            const OptionReader &options,
+                                            const RomajiSettings &settings)
 {
     /* Not required for correctness — anthy_set_string() calls
      * anthy_do_reset_context() as its first action (main.c:212) — but it frees
@@ -286,6 +384,172 @@ void AnthyContextBackend::cancel_conversion(Composition *model, const RomajiSett
     anthy_reset_context(context_);
     forget_conversion();
     show_kana(model, settings);
+    refresh_eager_conversion(options, settings);
+}
+
+/* ---------------------------------------------------------------------------
+ * The eager state
+ * ------------------------------------------------------------------------- */
+
+std::string AnthyContextBackend::eager_settled_text() const
+{
+    std::string out;
+    for (const EagerSpan &span : eager_settled_) out += span.text;
+    return out;
+}
+
+std::string AnthyContextBackend::eager_settled_reading() const
+{
+    std::string out;
+    for (const EagerSpan &span : eager_settled_) out += span.reading;
+    return out;
+}
+
+/**
+ * Re-run the eager conversion on the current reading, or drop it if
+ * PATHIME_OPT_PREDICTION is off or there is nothing to convert. Called after
+ * every mutation that leaves the context in the typing state; the caller has
+ * already show_kana()'d, so the candidate list is empty and the pump refills
+ * it from segment 0 once this has set the segment state up.
+ *
+ * Failure at any step leaves the eager list empty rather than the key unhandled: a
+ * dictionary problem must not cost the user their typing, which is the same
+ * judgement begin_conversion() records for the convert key.
+ */
+void AnthyContextBackend::refresh_eager_conversion(const OptionReader &options,
+                                        const RomajiSettings &settings)
+{
+    if (!options.flag(PATHIME_OPT_PREDICTION) || composer_.empty()) {
+        drop_eager_conversion();
+        return;
+    }
+
+    const std::string reading = composer_.reading(settings);
+    if (reading.empty() || anthy_set_string(context_, reading.c_str()) < 0) {
+        drop_eager_conversion();
+        return;
+    }
+
+    struct anthy_conv_stat stat;
+    if (anthy_get_stat(context_, &stat) < 0 || stat.nr_segment <= 0) {
+        /* Explicit rather than drop_eager_conversion(): the set_string above succeeded,
+         * so anthy holds state the members will not describe, which is
+         * exactly the case drop_eager_conversion()'s guard would skip. */
+        anthy_reset_context(context_);
+        forget_conversion();
+        return;
+    }
+
+    segment_count_ = stat.nr_segment;
+    chosen_.assign(static_cast<size_t>(segment_count_), 0);
+    recorded_.assign(static_cast<size_t>(segment_count_), 0);
+    active_ = 0;
+}
+
+/**
+ * Release an eager conversion. Never reached while converting_. Guarded so
+ * that plain typing with the option off does not pay an anthy_reset_context()
+ * per keystroke for a context that holds nothing.
+ */
+void AnthyContextBackend::drop_eager_conversion()
+{
+    if (segment_count_ > 0) anthy_reset_context(context_);
+    forget_conversion();
+}
+
+/**
+ * Teach anthy one eager choice, in a context of its own.
+ *
+ * The ordinary converting flow records choices inside the live conversion and
+ * lets the final segment's commit flush the history (the file comment's
+ * all-or-nothing rule). The eager state cannot: a selection re-runs the conversion
+ * on the remainder, which discards any partially-committed segment list
+ * before the flush. Committing the leftover segments at
+ * NTH_UNCONVERTED_CANDIDATE to force the flush would be worse than losing
+ * the lesson — it teaches anthy the user *chose the plain reading* for text
+ * they were still working on, and §3 of docs/japanese-input-model.md measures
+ * how durably that demotes real conversions.
+ *
+ * So the choice is re-staged alone: convert just the reading the selection
+ * consumed, find the candidate carrying the same text, commit it as the only
+ * — and therefore last — segment, which flushes. What is lost against the
+ * in-context commit is anthy's view of the surrounding segments; what is
+ * gained is that every eager selection is learned, not only the ones the
+ * user followed to the end of the buffer.
+ *
+ * The caller re-runs set_string() afterward in every path, so the context
+ * state this leaves behind is never read.
+ */
+void AnthyContextBackend::learn_eager_choice(const std::string &reading,
+                                             const std::string &text)
+{
+    if (anthy_set_string(context_, reading.c_str()) < 0) return;
+
+    struct anthy_conv_stat stat;
+    if (anthy_get_stat(context_, &stat) < 0 || stat.nr_segment != 1) return;
+
+    struct anthy_segment_stat seg;
+    if (anthy_get_segment_stat(context_, 0, &seg) < 0) return;
+
+    std::string candidate;
+    for (int i = 0; i < seg.nr_candidate; ++i) {
+        if (!fetch_segment(0, i, &candidate)) break;
+        if (candidate == text) {
+            anthy_commit_segment(context_, 0, i);
+            break;
+        }
+    }
+}
+
+/**
+ * A selection while the eager candidates are up: settle segment 0 greedily and keep
+ * typing possible, which is the one thing the converting machinery cannot do.
+ *
+ * The chosen text joins eager_settled_ — still preedit, exactly as a pyzy
+ * partial selection grows selectedText() without committing it — the
+ * composer is re-seeded with the readings of the segments the selection did
+ * not consume, and the conversion re-runs on that remainder. When nothing
+ * remains the composition is finished and commits whole, which is also what
+ * the converting path does when its last segment settles.
+ */
+pathime_status_t AnthyContextBackend::select_from_eager(size_t index,
+                                                        const OptionReader &options,
+                                                        Composition *model,
+                                                        Output *out)
+{
+    std::string text;
+    if (!fetch_segment(0, static_cast<int>(index), &text)) {
+        return PATHIME_ERROR_INVALID_ARGUMENT;
+    }
+
+    /* Copies, not borrows: learn_eager_choice() and refresh_eager_conversion() both
+     * re-run set_string(), which frees what these point into (rule 1). */
+    std::string reading;
+    if (!fetch_segment(0, NTH_UNCONVERTED_CANDIDATE, &reading)) {
+        return PATHIME_ERROR_INVALID_ARGUMENT;
+    }
+    std::string remainder;
+    std::string piece;
+    for (int i = 1; i < segment_count_; ++i) {
+        if (fetch_segment(i, NTH_UNCONVERTED_CANDIDATE, &piece)) remainder += piece;
+    }
+
+    if (options.flag(PATHIME_OPT_LEARNING)) learn_eager_choice(reading, text);
+
+    eager_settled_.push_back(EagerSpan{text, reading});
+    composer_.assign_kana(remainder);
+
+    const RomajiSettings settings = romaji_settings(options);
+    if (composer_.empty()) {
+        out->commit = eager_settled_text();
+        eager_settled_.clear();
+        drop_eager_conversion();
+        model->clear();
+    } else {
+        show_kana(model, settings);
+        refresh_eager_conversion(options, settings);
+    }
+    return PATHIME_OK;
 }
 
 void AnthyContextBackend::forget_conversion()
@@ -334,10 +598,15 @@ void AnthyContextBackend::commit_kana(Composition *model,
                                       Output *out,
                                       const RomajiSettings &settings)
 {
-    out->commit = composer_.commit_text(settings);
+    /* Eager selections settled before this point are part of the composition
+     * and commit with it; the remainder commits as typed, unlearned — the
+     * user never engaged the candidates for it, and recording it as a chosen
+     * reading is the §3 poison learn_eager_choice()'s comment names. */
+    out->commit = eager_settled_text() + composer_.commit_text(settings);
+    eager_settled_.clear();
     composer_.clear();
+    drop_eager_conversion();
     model->clear();
-    listed_segment_ = -1;
 }
 
 /**
@@ -355,7 +624,10 @@ void AnthyContextBackend::commit_conversion(Composition *model,
 {
     if (options.flag(PATHIME_OPT_LEARNING)) record_choices(segment_count_ - 1);
 
+    /* model->preedit() already begins with the eager-settled prefix, because
+     * show_segments() seeds model->settled with it. */
     out->commit = model->preedit();
+    eager_settled_.clear();
     anthy_reset_context(context_);
     forget_conversion();
     composer_.clear();
@@ -398,10 +670,20 @@ pathime_status_t AnthyContextBackend::set_cursor(size_t index,
     (void)options;
 
     /* Not PATHIME_ERROR_UNSUPPORTED — that is for an engine with no candidates
-     * at all. This one has them, just not before anything has been converted,
-     * so a hover now is an out-of-range index. The same distinction
-     * select_candidate() draws. */
-    if (!converting_) return PATHIME_ERROR_INVALID_ARGUMENT;
+     * at all. This one has them, just not with nothing converted, so a hover
+     * then is an out-of-range index. The same distinction select_candidate()
+     * draws. (The core rejects any index into an empty list before this is
+     * reached, so the arm is defensive.) */
+    if (segment_count_ <= 0) return PATHIME_ERROR_INVALID_ARGUMENT;
+
+    /*
+     * Browsing: the eager candidates arrived unasked, so the cursor moves —
+     * the core has already written model->cursor — and nothing previews. The
+     * hover is not discarded; begin_conversion() adopts it if the user then
+     * asks to convert. This is the per-moment rule docs/CONCEPTS.md's
+     * *Candidate cursor* states, and pyzy's set_cursor() is its mirror.
+     */
+    if (!converting_) return PATHIME_OK;
 
     if (!show_candidate(static_cast<int>(index), model)) {
         return PATHIME_ERROR_INVALID_ARGUMENT;
@@ -429,15 +711,47 @@ bool AnthyContextBackend::show_candidate(int cursor, Composition *model)
     return true;
 }
 
+/**
+ * The one derived state an option change can strand here is the eager state:
+ * PATHIME_OPT_PREDICTION turned off mid-composition must take the candidates
+ * away, and turned on must produce them, and in neither case is there
+ * necessarily a next keystroke to do it at (the §4a lesson that put this hook
+ * in backend.h).
+ *
+ * Everything else stays with the default's reasoning — this adapter consults
+ * options at the point of use — and the *presence* test below is what keeps
+ * it that way: a change that leaves the eager state's presence correct (the cap,
+ * learning, a width) returns without touching the list, so raising
+ * PATHIME_OPT_MAX_CANDIDATES mid-browse appends to the eager list without
+ * resetting the cursor, exactly as it does to a converted list.
+ */
+void AnthyContextBackend::options_changed(const OptionReader &options,
+                                          Composition *model,
+                                          Output *out)
+{
+    (void)out;
+
+    if (converting_) return;
+
+    const bool want = options.flag(PATHIME_OPT_PREDICTION) && !composer_.empty();
+    const bool have = segment_count_ > 0;
+    if (want == have) return;
+
+    const RomajiSettings settings = romaji_settings(options);
+    show_kana(model, settings);
+    refresh_eager_conversion(options, settings);
+}
+
 void AnthyContextBackend::materialize_candidates(size_t cap,
                                                  const OptionReader &options,
                                                  Composition *model)
 {
     (void)options;
 
-    /* Nothing to enumerate before conversion: the kana buffer is not a span
-     * anthy has an opinion about yet. */
-    if (!converting_) return;
+    /* Nothing to enumerate with no conversion live — which the eager state's
+     * runs are, so this gate is on the segments and not on converting_: the
+     * eager state publishes candidates the preedit is not previewing. */
+    if (segment_count_ <= 0) return;
 
     struct anthy_segment_stat stat;
     if (anthy_get_segment_stat(context_, active_, &stat) < 0 || stat.nr_candidate <= 0) return;
@@ -460,9 +774,11 @@ pathime_status_t AnthyContextBackend::select_candidate(size_t index,
                                                        Output *out)
 {
     /* Not PATHIME_ERROR_UNSUPPORTED: that is for an engine with no candidates
-     * at all, which is Hangul. This engine has them, just not before anything
-     * has been converted, so a selection now is an out-of-range index. */
-    if (!converting_) return PATHIME_ERROR_INVALID_ARGUMENT;
+     * at all, which is Hangul. This engine has them, just not with nothing
+     * converted, so a selection then is an out-of-range index. */
+    if (segment_count_ <= 0) return PATHIME_ERROR_INVALID_ARGUMENT;
+
+    if (!converting_) return select_from_eager(index, options, model, out);
 
     std::string text;
     if (!fetch_segment(active_, static_cast<int>(index), &text)) {
@@ -480,8 +796,10 @@ pathime_status_t AnthyContextBackend::select_candidate(size_t index,
 
     if (active_ >= segment_count_) {
         /* Nothing is left unsettled, so settle_active() has already put the
-         * whole text in model->settled and preedit() is exactly that. */
+         * whole text in model->settled — which began with the eager-settled
+         * prefix — and preedit() is exactly that. */
         out->commit = model->preedit();
+        eager_settled_.clear();
         anthy_reset_context(context_);
         forget_conversion();
         composer_.clear();
@@ -540,25 +858,45 @@ bool AnthyContextBackend::key_while_typing(const KeyEvent &key,
 {
     switch (key.keysym) {
     case PATHIME_KEY_BACKSPACE:
-        /* Declined when there is nothing to delete, so the client's own
-         * backspace still reaches its document. */
-        if (!composer_.backspace()) return false;
+        if (!composer_.backspace()) {
+            /* Declined when there is nothing at all to delete, so the
+             * client's own backspace still reaches its document. But an eager
+             * selection deletes like anything else in the preedit: once the
+             * remainder is gone, Backspace walks the most recent selection
+             * back to the reading it consumed, one selection per press. */
+            if (eager_settled_.empty()) return false;
+            composer_.assign_kana(eager_settled_.back().reading);
+            eager_settled_.pop_back();
+        }
         show_kana(model, settings);
+        refresh_eager_conversion(options, settings);
         return true;
 
     case PATHIME_KEY_RETURN:
-        if (composer_.empty()) return false;
+        if (composer_.empty() && eager_settled_.empty()) return false;
         commit_kana(model, out, settings);
         return true;
 
     case PATHIME_KEY_ESCAPE:
     case PATHIME_KEY_MUHENKAN:
-        /* Discards the buffer without committing it, which is what cancelling
-         * means here — there is no conversion to fall back to. */
+        /*
+         * Cancelling walks the same stairs it came up: eager selections are
+         * un-settled first — the whole kana comes back, symmetrical with
+         * cancel_conversion() undoing a conversion — and a second press
+         * discards the buffer. There is no conversion to fall back to after
+         * that.
+         */
+        if (!eager_settled_.empty()) {
+            composer_.prepend_kana(eager_settled_reading());
+            eager_settled_.clear();
+            show_kana(model, settings);
+            refresh_eager_conversion(options, settings);
+            return true;
+        }
         if (composer_.empty()) return false;
         composer_.clear();
+        drop_eager_conversion();
         model->clear();
-        listed_segment_ = -1;
         return true;
 
     case PATHIME_KEY_HENKAN:
@@ -594,6 +932,11 @@ bool AnthyContextBackend::key_while_typing(const KeyEvent &key,
          * mode hotkey this API excludes (refs/ibus-hangul/src/engine.c:423).
          */
         if (composer_.empty()) {
+            /* With eager selections settled and nothing left to convert, the
+             * composition is ended first and both commits are dispatched in
+             * order — the header's rule for any self-committed key arriving
+             * mid-composition. */
+            if (!eager_settled_.empty()) commit_kana(model, out, settings);
             out->commit += settings.latin_width == PATHIME_WIDTH_FULL
                                ? "\xE3\x80\x80"  /* 　 U+3000 ideographic space */
                                : " ";
@@ -622,6 +965,11 @@ bool AnthyContextBackend::key_while_typing(const KeyEvent &key,
             break;
         }
     }
+
+    /* The eager conversion follows every mutation that ends in the typing state; a
+     * conversion or a commit above leaves nothing for it to convert or has
+     * left the typing state altogether. */
+    if (!converting_) refresh_eager_conversion(options, settings);
     return true;
 }
 
@@ -661,7 +1009,7 @@ bool AnthyContextBackend::key_while_converting(const KeyEvent &key,
          * mid-conversion the buffer it would delete from is not what is on
          * screen, so undoing the conversion first is the only reading that
          * leaves the user somewhere they recognize. */
-        cancel_conversion(model, settings);
+        cancel_conversion(model, options, settings);
         return true;
 
     default:
@@ -674,6 +1022,7 @@ bool AnthyContextBackend::key_while_converting(const KeyEvent &key,
     if (keysym_to_ascii(key.keysym) == 0) return false;
     commit_conversion(model, out, options);
     if (composer_.insert(key, settings)) show_kana(model, settings);
+    refresh_eager_conversion(options, settings);
     return true;
 }
 
@@ -683,12 +1032,14 @@ void AnthyContextBackend::reset(Composition *model, Output *out)
     (void)out;
 
     /* Nothing goes into `out`: everything this context holds is preedit, which
-     * reset discards by definition. The header's "must not commit implicitly"
-     * is not a rule we have to work around here — it is already what
-     * cancelling a composition means for this engine. */
+     * reset discards by definition — eager selections included, since they
+     * were never committed. The header's "must not commit implicitly" is not
+     * a rule we have to work around here — it is already what cancelling a
+     * composition means for this engine. */
     anthy_reset_context(context_);
     forget_conversion();
     composer_.clear();
+    eager_settled_.clear();
 }
 
 /* ---------------------------------------------------------------------------

@@ -269,14 +269,16 @@ It is **part of composition data**, not a separate query and not something the c
 
 The cursor exists in this model — where page size, labels and orientation do not — because it is not purely presentation. On some engines it **previews**: moving the cursor rewrites the unsettled span of the preedit to that candidate's text. The highlight and the preedit are then two views of one fact, and a model that let the client own the highlight privately would leave them unable to agree.
 
-Which engines preview follows from the rule in *Preedit text* rather than being a per-engine quirk. The preedit only ever shows a conversion the user asked for, so the cursor rewrites it exactly where the user has already asked. An engine that converts on request — where a key event asks for conversion and the candidates appear in response — is being told by the cursor *which* conversion, so its preedit follows. An engine that offers candidates from the first keystroke was never asked, so moving the cursor there is browsing rather than choosing, and its preedit does not move. Either way the invariant holds: ending the composition commits what is on screen.
+When the cursor previews follows from the rule in *Preedit text* rather than being a per-engine quirk — and it is a property of the moment, not of the engine. The preedit only ever shows a conversion the user asked for, so the cursor rewrites it exactly where the user has already asked, and only there. Candidates that appeared in response to a request for conversion are being chosen *among*, so moving the cursor through them is being told *which* conversion, and the preedit follows. Candidates the engine volunteered unasked — from the first keystroke, or however they arrived — are being *browsed*, and moving the cursor through them settles nothing and moves no text. One engine can be in each state at different moments: a Japanese engine offering candidates while the user types is being browsed, and the same list after the convert key is being chosen among. Either way the invariant holds: ending the composition commits what is on screen.
+
+A request for conversion made while the cursor is browsing **adopts** the hovered candidate: conversion begins previewing the entry the cursor was on, not the first entry. A hover is the user's most recent expression of interest, and a convert key that discarded it would surprise exactly the client interfaces — a phone keyboard's suggestion strip, a gamepad-driven selector — where moving the highlight is deliberate work. When the cursor was never moved it sits at the first position and adoption is invisible.
 
 Moving the cursor settles nothing. It commits no text, it does not advance the preedit display position, and it can be undone by moving the cursor back. That is what distinguishes it from *Select candidate*, which is irrevocable.
 
 The cursor moves in three ways, and only these:
 
 * the client moves it, by absolute position
-* a key event that asks for conversion advances it, on an engine that converts by cycling through its candidates
+* a key event that asks for conversion advances it, on an engine that converts by cycling through its candidates — the first such press adopts the position the cursor is already at, and each further press advances it
 * new composition data replaces the list, which returns the cursor to the first position
 
 Two of those three are not the client's, which fixes the client's obligation: **a client draws its highlight from the current composition data, and does not assume the cursor is where it last put it.** Asking for a cursor position is a request, not an assignment. Every one of the three movements arrives as new composition data, so a client that redraws from what it is given is never out of step.

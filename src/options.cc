@@ -195,7 +195,14 @@ constexpr OptionDescriptor kOptions[] = {
               enum_mask(PATHIME_WIDTH_FULL + 1)),
     make_enum("chinese-variant", kChinese, PATHIME_CHINESE_SIMPLIFIED_ONLY,
               enum_mask(PATHIME_CHINESE_ANY + 1)),
-    make_bool("prediction", kAnthy | kTable, false),
+    /*
+     * Default true: the phone-keyboard target reads candidates from the first
+     * keystroke, and pyzy's are unconditional anyway, so one out-of-the-box
+     * behaviour covers every engine that has candidates at all. A
+     * desktop-style client turns it off and gets convert-on-request, which is
+     * the other shipping paradigm — the header's doc carries both sides.
+     */
+    make_bool("prediction", kAnthy | kTable, true),
     make_bool("special-phrases", kPyzy, true),
     make_bool("incomplete-input", kChinese, true),
 

@@ -720,24 +720,28 @@ typedef struct pathime_composition {
      * which is why the cursor is composition data rather than something the
      * client tracks privately.
      *
-     * Which engines do that follows from the rule at @a preedit rather than
-     * being a per-engine quirk: the preedit only ever shows a conversion the
-     * user asked for, so the cursor rewrites it exactly where the user has
-     * already asked. On Japanese, PATHIME_KEY_SPACE is that request, and after
-     * it the cursor chooses *among* conversions, so the preedit follows.
-     * Pinyin and Bopomofo offer candidates from the first keystroke, unasked,
-     * so moving the cursor there is browsing rather than choosing and the
-     * preedit does not move. Either way the invariant a client depends on
-     * holds: ending the composition commits what is on screen.
+     * When that happens follows from the rule at @a preedit rather than being
+     * a per-engine quirk: the preedit only ever shows a conversion the user
+     * asked for, so the cursor rewrites it exactly where the user has already
+     * asked, and only there. It is a property of the moment, not of the
+     * engine. Candidates that arrived unasked — Pinyin and Bopomofo from the
+     * first keystroke, Japanese while PATHIME_OPT_PREDICTION offers them
+     * before any convert key — are being *browsed*, and moving the cursor
+     * through them leaves the preedit alone. On Japanese,
+     * PATHIME_KEY_SPACE is the request: after it the same cursor chooses
+     * *among* conversions, so the preedit follows it. Either way the
+     * invariant a client depends on holds: ending the composition commits
+     * what is on screen.
      *
      * It follows that a client must draw its highlight from this field, and
      * must not assume the value it last set is still here. The cursor moves
      * three ways and two of them are not the client's:
      *
      *   - pathime_context_set_candidate_cursor(), which is the client's.
-     *   - PATHIME_KEY_SPACE, on an engine that converts by cycling. Space asks
-     *     for conversion, and once a composition is being converted the next
-     *     press advances to the next candidate.
+     *   - PATHIME_KEY_SPACE, on an engine that converts by cycling. The first
+     *     press begins previewing at whatever the cursor already points to —
+     *     a hover made while browsing is adopted, never discarded — and each
+     *     further press advances it.
      *   - Any change that replaces the list — a span settling, a fresh
      *     conversion, new input — which starts the new list at 0.
      *
@@ -944,7 +948,10 @@ PATHIME_API uint32_t pathime_context_requirements(const pathime_context_t *ctx);
  * client should not rebind them into each other:
  *
  * - PATHIME_KEY_SPACE asks for conversion. It is what advances a composition
- *   from what was typed toward what the engine thinks was meant. With nothing
+ *   from what was typed toward what the engine thinks was meant. Where
+ *   candidates are already showing unasked — see PATHIME_OPT_PREDICTION — the
+ *   conversion begins at the hovered candidate, so a hover made while
+ *   browsing is adopted rather than discarded. With nothing
  *   composing there is nothing to convert, and it inserts a space instead, at
  *   the width PATHIME_OPT_LATIN_WIDTH selects. Hangul is the exception: it
  *   implements no width option, so it declines the key and the client inserts
@@ -1368,11 +1375,42 @@ typedef enum pathime_option {
     PATHIME_OPT_CHINESE_VARIANT = 4,
 
     /**
-     * BOOL, default false. Anthy, Table.
+     * BOOL, default true. Anthy, Table.
      *
-     * Whether the engine offers continuations of what has been typed so far, in
-     * addition to conversions of it. Anthy's prediction and the table engine's
-     * suggestions are the same feature under two names.
+     * Whether the engine volunteers candidates the user has not asked to
+     * convert — the always-populated strip of a phone keyboard, which is what
+     * Japanese IMEs ship under the name 予測入力.
+     *
+     * On Anthy it fills the candidate list from the first keystroke by
+     * converting the growing reading eagerly, exactly as Gboard and the iOS
+     * Japanese keyboard do. The preedit stays kana — the rule at
+     * pathime_composition_t::preedit is not suspended — and the cursor
+     * browses without previewing until PATHIME_KEY_SPACE asks for
+     * conversion, which begins at the hovered entry. Selecting from that
+     * list settles the leftmost span it describes, greedily, as selection
+     * always does. Off, candidates appear only once conversion is asked
+     * for, which is what every desktop Japanese IME does; the difference
+     * between the two is deliberate on both sides, which is why this is an
+     * option and not a fixed behaviour. On, the engine re-converts on every
+     * keystroke, so the candidate list can reshuffle as input grows and
+     * anthy re-segments; that churn is the measured cost of eagerness and
+     * is ordinary for phrase-at-a-time typing.
+     *
+     * On the table engine it enables suggestion mode: after a commit, the
+     * candidate list offers continuations of what was just committed, drawn
+     * from the table's suggestion data. The two surfaces differ — before
+     * the commit on Anthy, after it on Table — but the choice a client is
+     * making is the same one, whether the engine puts forward what the user
+     * did not ask for, and shipping IMEs present both in the same strip.
+     * Anthy's own history-based completions are deliberately *not* what
+     * this enables — they are empty on a fresh profile and whenever
+     * learning is off — but they may be merged into the same candidate
+     * list in a later release without the option changing meaning.
+     *
+     * Pinyin and Bopomofo have no row here because for them unbidden
+     * candidates are not a choice: conversion by selection is the only route
+     * from pinyin to Chinese text, so their list is always populated while
+     * composing.
      */
     PATHIME_OPT_PREDICTION = 5,
 

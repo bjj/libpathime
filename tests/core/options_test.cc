@@ -259,9 +259,9 @@ const Expected kExpected[] = {
      kP | kB | kT, false, PATHIME_CHINESE_SIMPLIFIED_ONLY, 0, 0,
      values_upto(PATHIME_CHINESE_ANY), ""},
 
-    /* "BOOL, default false. Anthy, Table." */
+    /* "BOOL, default true. Anthy, Table." */
     {PATHIME_OPT_PREDICTION, "prediction", PATHIME_OPTION_BOOL,
-     kA | kT, false, 0, 0, 0, 0, ""},
+     kA | kT, false, 1, 0, 0, 0, ""},
 
     /* "BOOL, default true. Pinyin, Bopomofo." */
     {PATHIME_OPT_SPECIAL_PHRASES, "special-phrases", PATHIME_OPTION_BOOL,

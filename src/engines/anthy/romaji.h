@@ -113,6 +113,32 @@ public:
     }
 
     /**
+     * Replace the buffer with @a kana, dropping any pending Latin. The anthy
+     * adapter's eager state uses this to re-seed the composer with the
+     * readings anthy reports for the spans a selection did not consume.
+     *
+     * @a kana is stored verbatim, so it must be hiragana — which is what
+     * anthy's readings are — plus whatever raw Latin was passed through
+     * unresolved. A pending fragment that round-trips this way stops pending:
+     * it was handed to anthy as literal characters and comes back as part of
+     * the reading, so a later vowel no longer resolves it. That is the cost
+     * of selecting mid-word with garbage in the buffer, and it is paid here
+     * rather than hidden.
+     */
+    void assign_kana(const std::string &kana)
+    {
+        kana_ = kana;
+        pending_.clear();
+    }
+
+    /**
+     * Put @a kana in front of what is typed, leaving the pending Latin alone.
+     * This is the un-settle direction: an eager selection is walked back by
+     * restoring the span's reading ahead of whatever has been typed since.
+     */
+    void prepend_kana(const std::string &kana) { kana_.insert(0, kana); }
+
+    /**
      * Offer one key.
      *
      * @return true if the key was consumed. Only printable ASCII is consumed;

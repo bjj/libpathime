@@ -293,6 +293,23 @@ static pathime_context_t *open_context(pathime_engine_t *engine,
     return ctx;
 }
 
+/*
+ * The same context with PATHIME_OPT_PREDICTION off: the desktop paradigm,
+ * where candidates appear only once conversion is asked for. The option
+ * defaults on, so the tests written against convert-on-request pin the off
+ * state here explicitly — that state has to keep working exactly, and these
+ * tests are what holds it still. test_prediction_strip() is the on state.
+ */
+static pathime_context_t *open_classic_context(pathime_engine_t *engine,
+                                               pathime_client_t *client,
+                                               client_log_t *log)
+{
+    pathime_context_t *ctx = open_context(engine, client, log);
+    PT_CHECK_STATUS(pathime_context_set_option_bool(ctx, PATHIME_OPT_PREDICTION, false),
+                    PATHIME_OK);
+    return ctx;
+}
+
 /* ---------------------------------------------------------------------- */
 
 /*
@@ -304,7 +321,9 @@ static void test_romaji_state_machine(pathime_engine_t *engine)
 {
     client_log_t log;
     pathime_client_t client;
-    pathime_context_t *ctx = open_context(engine, &client, &log);
+    /* Classic (strip off): this test is about the composer, and asserting
+     * candidate_count == 0 while typing is only true without the strip. */
+    pathime_context_t *ctx = open_classic_context(engine, &client, &log);
 
     /*
      * "nihon". The trailing n stays an n: one more key still decides whether it
@@ -377,7 +396,7 @@ static void test_conversion_candidates(pathime_engine_t *engine)
 {
     client_log_t log;
     pathime_client_t client;
-    pathime_context_t *ctx = open_context(engine, &client, &log);
+    pathime_context_t *ctx = open_classic_context(engine, &client, &log);
     const pathime_composition_t *c = NULL;
     size_t i;
 
@@ -410,6 +429,8 @@ static void test_conversion_candidates(pathime_engine_t *engine)
     log_reset(&log);
     type(ctx, "kanji");
     check_str("kanji reading", preedit_of(ctx), KANJI_KANA);
+    /* Prediction is off in this context, so a reading being typed has no
+     * candidates until the user asks — the desktop paradigm this test pins. */
     PT_CHECK_SIZE(pathime_context_composition(ctx)->candidate_count, 0);
 
     log_reset(&log);
@@ -473,7 +494,7 @@ static void test_candidate_cursor(pathime_engine_t *engine)
 {
     client_log_t log;
     pathime_client_t client;
-    pathime_context_t *ctx = open_context(engine, &client, &log);
+    pathime_context_t *ctx = open_classic_context(engine, &client, &log);
     const pathime_composition_t *c = NULL;
 
     /* Before there is a list there is no cursor to move, and 0 is where the
@@ -483,8 +504,9 @@ static void test_candidate_cursor(pathime_engine_t *engine)
                     PATHIME_ERROR_INVALID_ARGUMENT);
 
     type(ctx, "kanji");
-    /* Still no candidates: a reading being typed is not a span anthy has an
-     * opinion about yet, so there is nothing to hover. */
+    /* Still no candidates with prediction off: a reading being typed is not a
+     * span this context has been asked for an opinion about, so there is
+     * nothing to hover. */
     PT_CHECK_STATUS(pathime_context_set_candidate_cursor(ctx, 0),
                     PATHIME_ERROR_INVALID_ARGUMENT);
 
@@ -713,7 +735,7 @@ static void test_commit_and_cancel(pathime_engine_t *engine)
 {
     client_log_t log;
     pathime_client_t client;
-    pathime_context_t *ctx = open_context(engine, &client, &log);
+    pathime_context_t *ctx = open_classic_context(engine, &client, &log);
 
     /*
      * Return with no conversion asked for commits the kana — and finishes the
@@ -755,7 +777,9 @@ static void test_commit_and_cancel(pathime_engine_t *engine)
     log_reset(&log);
     PT_CHECK(press(ctx, PATHIME_KEY_ESCAPE));
     check_str("escape returns to the kana", preedit_of(ctx), KANJI_KANA);
-    /* Nothing was committed, and the candidate list went with the conversion. */
+    /* Nothing was committed, and — prediction being off here — the candidate
+     * list went with the conversion. With it on, cancelling refills the strip;
+     * test_prediction_strip() holds that side. */
     PT_CHECK(log.commit_count == 0);
     PT_CHECK_SIZE(pathime_context_composition(ctx)->candidate_count, 0);
 
@@ -767,6 +791,282 @@ static void test_commit_and_cancel(pathime_engine_t *engine)
 
     /* And with nothing composing, Escape belongs to the client again. */
     PT_CHECK(!press(ctx, PATHIME_KEY_ESCAPE));
+
+    pathime_context_destroy(ctx);
+}
+
+/* Scalar count of a UTF-8 string: lead bytes only. The strip tests compare
+ * preedit_settled against candidate text captured at runtime, so the expected
+ * value cannot be a compile-time constant. */
+static size_t scalar_len(const char *s)
+{
+    size_t n = 0;
+    for (; *s != '\0'; s++) {
+        if (((unsigned char)*s & 0xC0) != 0x80) n++;
+    }
+    return n;
+}
+
+/*
+ * PATHIME_OPT_PREDICTION on — the default — is the eager candidate strip:
+ * candidates from the first keystroke, the preedit staying kana, the cursor
+ * browsing without previewing until Space asks. Every check here is one of the
+ * places TODO.md §4c said the obvious implementation would be quietly wrong,
+ * plus the strip-selection semantics that came with building it: selection
+ * settles the leftmost segment greedily and *typing can continue*, which the
+ * converting flow never needed to support.
+ *
+ * Candidate text is captured at runtime rather than asserted by name wherever
+ * learning earlier in this run could have reordered a list — the file comment
+ * on the clean fixture is about runs, not about the tests inside one.
+ */
+static void test_prediction_strip(pathime_engine_t *engine)
+{
+    client_log_t log;
+    pathime_client_t client;
+    pathime_context_t *ctx = open_context(engine, &client, &log);
+    const pathime_composition_t *c = NULL;
+    char cand1[64];
+    char cand2[64];
+    char chosen[64];
+    char shown[256];
+    size_t i;
+
+    /* Candidates from the very first keystroke. A lone "n" is displayed as
+     * the pending Latin it is, but its *reading* is ん — the same resolved
+     * form Return has always committed — and that is what the strip converts.
+     * So the preedit honestly reads "n" while the candidates are up. */
+    PT_CHECK(press(ctx, 'n'));
+    c = pathime_context_composition(ctx);
+    PT_CHECK(c->candidate_count > 0);
+    check_str("preedit is the pending latin, not a conversion",
+              preedit_of(ctx), "n");
+
+    type(ctx, "ihon");
+    c = pathime_context_composition(ctx);
+    check_str("preedit keeps the pending n", preedit_of(ctx), NIHON_PENDING);
+    PT_CHECK(c->candidate_count > 1);
+    PT_CHECK_SIZE(c->preedit_settled, 0);
+
+    /* Browsing: the cursor moves and the preedit does not. These candidates
+     * arrived unasked, so hovering one settles and previews nothing. */
+    PT_CHECK_STATUS(pathime_context_set_candidate_cursor(ctx, 1), PATHIME_OK);
+    c = pathime_context_composition(ctx);
+    PT_CHECK_SIZE(c->candidate_cursor, 1);
+    check_str("browsing does not rewrite the preedit",
+              preedit_of(ctx), NIHON_PENDING);
+
+    /* Any new key regenerates the list and drops the hover. */
+    PT_CHECK(press(ctx, PATHIME_KEY_BACKSPACE));
+    c = pathime_context_composition(ctx);
+    PT_CHECK_SIZE(c->candidate_cursor, 0);
+    PT_CHECK(c->candidate_count > 0);
+    check_str("backspace regenerated against the shorter reading",
+              preedit_of(ctx), NI HO);
+
+    /* Return commits the kana and never candidate 0 — the §4c invariant, on
+     * the engine where the strip newly puts it at risk. */
+    type(ctx, "n");
+    log_reset(&log);
+    PT_CHECK(press(ctx, PATHIME_KEY_RETURN));
+    PT_CHECK(log.commit_count == 1);
+    check_str("return commits the kana under the strip", log.commits, NIHON);
+    check_str("preedit cleared", preedit_of(ctx), "");
+    PT_CHECK_SIZE(pathime_context_composition(ctx)->candidate_count, 0);
+
+    /*
+     * Space adopts the browsed cursor: conversion begins previewing the
+     * hovered entry, not candidate 0 — a hover is the user's most recent
+     * expression of interest, and with an untouched cursor the two rules are
+     * indistinguishable, which is why the desktop habit is unaffected.
+     */
+    type(ctx, "kanji");
+    c = pathime_context_composition(ctx);
+    PT_CHECK(c->candidate_count > 2);
+    snprintf(cand1, sizeof(cand1), "%s", candidate_of(ctx, 1));
+    snprintf(cand2, sizeof(cand2), "%s", candidate_of(ctx, 2));
+    PT_CHECK_STATUS(pathime_context_set_candidate_cursor(ctx, 1), PATHIME_OK);
+    check_str("still browsing before space", preedit_of(ctx), KANJI_KANA);
+    PT_CHECK(press(ctx, ' '));
+    c = pathime_context_composition(ctx);
+    PT_CHECK_SIZE(c->candidate_cursor, 1);
+    check_str("space previews the hovered candidate", preedit_of(ctx), cand1);
+
+    /* And the second press advances, exactly as it always has. */
+    PT_CHECK(press(ctx, ' '));
+    c = pathime_context_composition(ctx);
+    PT_CHECK_SIZE(c->candidate_cursor, 2);
+    check_str("space then advances", preedit_of(ctx), cand2);
+
+    /* Escape from the conversion lands back in the strip, not in a typing
+     * state with fewer candidates than typing would have. */
+    log_reset(&log);
+    PT_CHECK(press(ctx, PATHIME_KEY_ESCAPE));
+    check_str("escape returns to the kana", preedit_of(ctx), KANJI_KANA);
+    PT_CHECK(pathime_context_composition(ctx)->candidate_count > 0);
+    PT_CHECK(log.commit_count == 0);
+    PT_CHECK(press(ctx, PATHIME_KEY_ESCAPE));
+
+    /* The option takes effect mid-composition, in both directions — the
+     * options_changed hook, which exists exactly because there may be no next
+     * keystroke to pull the new value at. */
+    type(ctx, "kanji");
+    PT_CHECK(pathime_context_composition(ctx)->candidate_count > 0);
+    PT_CHECK_STATUS(pathime_context_set_option_bool(ctx, PATHIME_OPT_PREDICTION, false),
+                    PATHIME_OK);
+    c = pathime_context_composition(ctx);
+    PT_CHECK_SIZE(c->candidate_count, 0);
+    check_str("preedit survives the toggle", preedit_of(ctx), KANJI_KANA);
+    PT_CHECK_STATUS(pathime_context_set_option_bool(ctx, PATHIME_OPT_PREDICTION, true),
+                    PATHIME_OK);
+    PT_CHECK(pathime_context_composition(ctx)->candidate_count > 0);
+
+    /* Raising the cap appends to the strip without resetting the hover — the
+     * same append-only promise a converted list keeps. */
+    PT_CHECK_STATUS(pathime_context_set_candidate_cursor(ctx, 1), PATHIME_OK);
+    PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_MAX_CANDIDATES, 80),
+                    PATHIME_OK);
+    c = pathime_context_composition(ctx);
+    PT_CHECK_SIZE(c->candidate_cursor, 1);
+    PT_CHECK_STATUS(pathime_context_reset_option(ctx, PATHIME_OPT_MAX_CANDIDATES),
+                    PATHIME_OK);
+    PT_CHECK(press(ctx, PATHIME_KEY_ESCAPE));
+
+    /*
+     * Selecting from the strip settles greedily. かんじ is one segment, so
+     * the selection consumes the whole reading and the composition commits —
+     * and with learning on (the default) the choice is recorded: anthy's
+     * candidate 0 is "what you chose last time" (docs/japanese-input-model.md
+     * §3), so the chosen text must lead the next list for the same reading.
+     */
+    type(ctx, "kanji");
+    c = pathime_context_composition(ctx);
+    PT_CHECK(c->candidate_count > 1);
+    snprintf(chosen, sizeof(chosen), "%s", candidate_of(ctx, 1));
+    log_reset(&log);
+    PT_CHECK_STATUS(pathime_context_select_candidate(ctx, 1), PATHIME_OK);
+    PT_CHECK(log.commit_count == 1);
+    check_str("strip selection commits the chosen text", log.commits, chosen);
+    check_str("nothing left composing", preedit_of(ctx), "");
+    check_str("callback order on strip selection", log.order, "cx");
+
+    type(ctx, "kanji");
+    check_str("the choice was learned", candidate_of(ctx, 0), chosen);
+
+    /* With learning off the same selection leaves no trace: the head still
+     * belongs to the earlier, recorded choice. */
+    PT_CHECK_STATUS(pathime_context_set_option_bool(ctx, PATHIME_OPT_LEARNING, false),
+                    PATHIME_OK);
+    c = pathime_context_composition(ctx);
+    PT_CHECK(c->candidate_count > 2);
+    PT_CHECK_STATUS(pathime_context_select_candidate(ctx, 2), PATHIME_OK);
+    type(ctx, "kanji");
+    check_str("an unlearned selection does not move the head",
+              candidate_of(ctx, 0), chosen);
+    PT_CHECK(press(ctx, PATHIME_KEY_ESCAPE));
+    PT_CHECK_STATUS(pathime_context_reset_option(ctx, PATHIME_OPT_LEARNING),
+                    PATHIME_OK);
+
+    /* Put the record back where the tests after this one expect it: they
+     * assert 漢字 at the head of かんじ's list, and the deliberate 監事
+     * selection above moved it. Selecting 漢字 — learning is back on — makes
+     * it the most recent choice again. */
+    type(ctx, "kanji");
+    c = pathime_context_composition(ctx);
+    for (i = 0; i < c->candidate_count; i++) {
+        if (strcmp(candidate_of(ctx, i), KANJI) == 0) break;
+    }
+    PT_CHECK(i < c->candidate_count);
+    PT_CHECK_STATUS(pathime_context_select_candidate(ctx, i), PATHIME_OK);
+    log_reset(&log);
+
+    /*
+     * A partial selection: the sentence segments as 今日は | いい | 天気ですね,
+     * so selecting from the strip consumes only the leftmost segment. Nothing
+     * commits — the settled span is still preedit, exactly as a pyzy partial
+     * selection leaves selectedText() — and the strip is already offering the
+     * remainder.
+     */
+    log_reset(&log);
+    type(ctx, "kyouhaiitenkidesune");
+    c = pathime_context_composition(ctx);
+    PT_CHECK(c->candidate_count > 0);
+    check_str("the whole sentence is kana", preedit_of(ctx),
+              KYOU_HA_KANA II_KANA TENKI_KANA DESUNE);
+    PT_CHECK_SIZE(c->preedit_settled, 0);
+
+    snprintf(chosen, sizeof(chosen), "%s", candidate_of(ctx, 0));
+    PT_CHECK_STATUS(pathime_context_select_candidate(ctx, 0), PATHIME_OK);
+    c = pathime_context_composition(ctx);
+    PT_CHECK(log.commit_count == 0);
+    PT_CHECK_SIZE(c->preedit_settled, scalar_len(chosen));
+    pt_checks++;
+    if (strncmp(preedit_of(ctx), chosen, strlen(chosen)) != 0 ||
+        strlen(preedit_of(ctx)) <= strlen(chosen)) {
+        PT_FAILF("preedit \"%s\" does not extend the chosen \"%s\"",
+                 preedit_of(ctx), chosen);
+    }
+    PT_CHECK(c->candidate_count > 0);
+
+    /* Return commits exactly what is on screen: settled text plus the
+     * remaining kana — the §4c guarantee with a partial settlement in play. */
+    snprintf(shown, sizeof(shown), "%s", preedit_of(ctx));
+    log_reset(&log);
+    PT_CHECK(press(ctx, PATHIME_KEY_RETURN));
+    PT_CHECK(log.commit_count == 1);
+    check_str("return commits what was shown", log.commits, shown);
+    check_str("empty after the partial-then-return", preedit_of(ctx), "");
+
+    /* Escape un-settles: the readings come back, so the user is back at
+     * exactly the kana they typed — cancel_conversion()'s mirror image. */
+    type(ctx, "kyouhaiitenkidesune");
+    PT_CHECK_STATUS(pathime_context_select_candidate(ctx, 0), PATHIME_OK);
+    PT_CHECK(press(ctx, PATHIME_KEY_ESCAPE));
+    check_str("escape restores the whole kana", preedit_of(ctx),
+              KYOU_HA_KANA II_KANA TENKI_KANA DESUNE);
+    PT_CHECK(pathime_context_composition(ctx)->candidate_count > 0);
+    PT_CHECK(press(ctx, PATHIME_KEY_ESCAPE));
+    check_str("second escape discards", preedit_of(ctx), "");
+
+    /*
+     * Backspace deletes the remainder kana first; with only settled text
+     * left, the strip has nothing to convert and goes quiet. Space then has
+     * nothing to convert either: the composition is ended first and the
+     * space follows — the header's rule for a self-committed key arriving
+     * mid-composition.
+     */
+    type(ctx, "kyouhaiitenkidesune");
+    snprintf(chosen, sizeof(chosen), "%s", candidate_of(ctx, 0));
+    PT_CHECK_STATUS(pathime_context_select_candidate(ctx, 0), PATHIME_OK);
+    for (i = 0; i < 32 && strcmp(preedit_of(ctx), chosen) != 0; i++) {
+        PT_CHECK(press(ctx, PATHIME_KEY_BACKSPACE));
+    }
+    check_str("remainder deleted down to the settled span",
+              preedit_of(ctx), chosen);
+    c = pathime_context_composition(ctx);
+    PT_CHECK_SIZE(c->preedit_settled, scalar_len(chosen));
+    PT_CHECK_SIZE(c->candidate_count, 0);
+
+    log_reset(&log);
+    PT_CHECK(press(ctx, ' '));
+    PT_CHECK(log.commit_count == 1);
+    snprintf(shown, sizeof(shown), "%s ", chosen);
+    check_str("space ends the composition, then inserts", log.commits, shown);
+    check_str("empty after", preedit_of(ctx), "");
+
+    /* And one further Backspace past the remainder walks the selection
+     * itself back to the reading it consumed. */
+    type(ctx, "kyouhaiitenkidesune");
+    snprintf(chosen, sizeof(chosen), "%s", candidate_of(ctx, 0));
+    PT_CHECK_STATUS(pathime_context_select_candidate(ctx, 0), PATHIME_OK);
+    for (i = 0; i < 32 && strcmp(preedit_of(ctx), chosen) != 0; i++) {
+        PT_CHECK(press(ctx, PATHIME_KEY_BACKSPACE));
+    }
+    PT_CHECK(press(ctx, PATHIME_KEY_BACKSPACE));
+    check_str("backspace walks the selection back to its reading",
+              preedit_of(ctx), KYOU_HA_KANA);
+    PT_CHECK(pathime_context_composition(ctx)->candidate_count > 0);
+    PT_CHECK(press(ctx, PATHIME_KEY_ESCAPE));
 
     pathime_context_destroy(ctx);
 }
@@ -1099,6 +1399,7 @@ int main(void)
         test_candidate_cursor(engine);
         test_multi_segment_settled_boundary(engine);
         test_commit_and_cancel(engine);
+        test_prediction_strip(engine);
         test_options(engine);
         test_reset_and_focus(engine);
 

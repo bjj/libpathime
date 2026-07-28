@@ -191,6 +191,11 @@ phrase-at-a-time typing a phone keyboard sees; ugly for a whole sentence.
 Japanese keyboard show. Desktop Japanese IMEs do *not* show candidates before a
 convert key, which is a deliberate difference and not an oversight.
 
+**Shipped (2026-07-28)** as `PATHIME_OPT_PREDICTION`, default on — optional
+precisely because the paragraph above describes two deliberate paradigms, not
+one behaviour and a bug. `TODO.md` §4c records the rulings and the
+strip-selection semantics that building it settled.
+
 ## 6. Preedit and auxiliary: the two engines were mirror images
 
 **Superseded by the work this file prompted.** The table below is what the two
@@ -308,6 +313,11 @@ is visible in the text. If candidates were published without previewing, a clien
 would see `きょうはいいてんきですね` with candidates for `今日は` and no way to
 know they cover only the first four kana.
 
+*(Accepted with the strip, 2026-07-28: no span field. pyzy has shipped exactly
+this shape all along, and one pyzy list mixes candidates covering different
+spans — 你 beside 你好 — so a composition-level span could not even be honest.
+The extension stays additive if a real client needs it. `TODO.md` §4c.)*
+
 ## 9. Return was already consistent; the preview was not
 
 **measured**:
@@ -354,17 +364,60 @@ both now covered by `api.engine_pyzy`:
 
 ## 10. Reproducing these measurements
 
-The probes live in the session scratchpad rather than the tree, because they are
-one-off instruments rather than assertions. Each is a single translation unit:
+The probes were one-off instruments rather than assertions, so they are not in
+the tree. Each is a single translation unit, and the recipes below are exact
+because the setup is the part that costs time — every one of them has at least
+one non-obvious step that is not worth rediscovering.
 
-- against anthy directly, linked to `libanthy-unicode` with
-  `anthy_conf_override("DIC_FILE", …)` and a scratch `HOME`, exactly as
-  `tests/anthy/anthy_test_util.h` does — candidate order, record dependence,
-  segmentation, prediction, eager-conversion timings;
-- against pyzy directly, linked to `libpyzy-1.0` with `pyzy_set_data_dir()` and a
-  scratch cache/config pair — the four text surfaces across a partial selection;
-- against `pathime.h`, linked to `libpathime`, printing the whole
-  `pathime_composition_t` after every key — everything in the comparison tables.
+Build the library first; the paths assume a build directory `$B` configured
+against this source tree, and `CLAUDE.md` explains why that should be under
+`/tmp` rather than beside the source.
+
+**Against the public API** — the most useful of the three, and the one to write
+first when touching an adapter. Drive `pathime_context_process_key()` and print
+the whole `pathime_composition_t` after every key: preedit, `preedit_settled`,
+candidate count, cursor, the first few candidates, and everything the
+`commit_text` callback has received so far.
+
+```
+gcc -std=c11 -o trace trace.c -I<source>/include -I$B/include \
+    -L$B/lib -lpathime -Wl,-rpath,$B/lib
+```
+
+Run it from `$B/lib`, so the default `resource_dir` — `pathime-data` beside the
+library — resolves. Map a few punctuation characters to the non-printable keys
+you need (`_` for Space, `=` for Return, `<` for Backspace) so a whole session
+is one command-line argument.
+
+**Against anthy directly**, for candidate order, record dependence,
+segmentation and timings. Link *both* libraries — `-lanthy-unicode` alone fails
+to resolve `anthy_set_logger`:
+
+```
+gcc -std=gnu11 -o probe probe.c -I<source>/anthy-unicode -I$B/cmake/ports/anthy-unicode \
+    -DPROBE_DIC='"'$B'/cmake/ports/anthy-unicode/dic/anthy.dic"' \
+    -L$B/lib -lanthy-unicode -lanthydic-unicode -Wl,-rpath,$B/lib
+```
+
+`gnu11` rather than `c11` if you time anything: `clock_gettime` needs it. Point
+anthy at the build tree with the same four `anthy_conf_override()` calls
+`tests/anthy/anthy_test_util.h` uses, and give each run a **scratch `HOME` that
+is wiped first** — §3 is why that is not optional.
+
+**Against pyzy directly**, for the four text surfaces:
+
+```
+g++ -std=c++17 -o pyprobe pyprobe.cc -I$B/src/include \
+    -DPROBE_DATA='"'$B'/lib/pathime-data"' -DPROBE_HOME='"<scratch>"' \
+    -L$B/lib -lpyzy-1.0 -Wl,-rpath,$B/lib
+```
+
+Three things the headers do not make obvious: the data directory is
+`pyzy_set_data_dir()` from `<PyZy/DataDir.h>`, *not* an argument to
+`InputContext::init()`, which takes only a cache and a config directory; there
+is no `candidates()` accessor, so enumerate with `hasCandidate(i)` and
+`getCandidate(i, out)`; and `Observer` is pure virtual, so all six methods need
+overriding even to print one.
 
 Any of these that becomes an assertion rather than an observation belongs under
 `tests/`; see `docs/testing.md` for which suite.

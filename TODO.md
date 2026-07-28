@@ -11,6 +11,16 @@ because there are none.
 
 ---
 
+## Next
+
+Nothing is mid-flight. The always-on candidate strip — the last piece that had
+a decision behind it and no code — landed 2026-07-28; §4c ends with the
+rulings and the semantics building it settled. The table engine (§4) is the
+one large unstarted piece, and §1's deferred round stays deferred until it has
+a consumer.
+
+---
+
 ## Where things stand
 
 Done:
@@ -27,7 +37,7 @@ Done:
   model and its projection (`composition.*`) — including `Output`, which is
   where a mutation's pending commit text and deletion range live until
   `refresh_composition()` dispatches them in the header's fixed order — the
-  eager candidate pump (`candidates.cc`), and the options machinery: a 32-row
+  eager candidate pump (`candidates.cc`), and the options machinery: a 31-row
   descriptor table, four-tier resolution, the two-level store, and the
   `struct_size` protocol.
   `docs/source-layout.md` maps which file owns what.
@@ -49,6 +59,12 @@ Done:
   typed produced one rule covering all four engines, and left the auxiliary
   text field with nothing in it. `docs/japanese-input-model.md` is the
   measurement behind it.
+- **The eager candidate strip** (2026-07-28). `PATHIME_OPT_PREDICTION` is
+  implemented on anthy as eager conversion, default **on**: candidates from
+  the first keystroke, the preedit staying kana, the cursor browsing until
+  Space adopts it. The end of §4c records the rulings — optional and why,
+  default, adoption, one option spanning anthy and table, the span gap
+  accepted — and the strip-selection semantics built with it.
 - **Tests: 31, all passing.** `tests/core/` compiles internal sources directly,
   because internal helpers carry no `PATHIME_API` and a shared build would not
   export them. `tests/api/` holds the ABI, lifecycle and options suites plus one
@@ -84,8 +100,8 @@ all, and is now **deliberately out of v1** rather than pending:
   treat it as a gap.
 
 **Engine options and negotiation are done** — the Options section of
-`include/pathime/pathime.h`. 32 options, 8 of them common to several engines and
-24 engine-specific, set through three kind-typed setters at two levels, with a
+`include/pathime/pathime.h`. 31 options, 8 of them common to several engines and
+23 engine-specific, set through three kind-typed setters at two levels, with a
 descriptor query so a client can present options it does not know by name, and
 `pathime_option_count()` so it can walk options its own header never named.
 `pathime_context_set_max_candidates()` is gone, folded in as
@@ -939,12 +955,8 @@ moving the cursor is browsing and settles nothing. Both keep the invariant a
 client depends on. Stated in the header at `candidate_cursor` and in
 `docs/CONCEPTS.md`'s *Candidate cursor*.
 
-**`PATHIME_OPT_PREDICTION` — direction decided (2026-07-28), not yet built.**
-It is declared `kAnthy | kTable` in `src/options.cc` and read nowhere, so a
-client can set it, get `PATHIME_OK`, and have nothing happen. It is the only
-option in the header a shipping engine claims and never consults.
-
-The decision: **an eager conversion strip**, not anthy's prediction API.
+**`PATHIME_OPT_PREDICTION` — decided and built (2026-07-28).** The option is
+the **eager conversion strip**, not anthy's prediction API.
 `docs/japanese-input-model.md` §4 and §5 are why. anthy's prediction is
 *history completion* — `anthy_traverse_record_for_prediction`, empty on a fresh
 profile and empty whenever `PATHIME_OPT_LEARNING` is off — whereas ordinary
@@ -953,8 +965,8 @@ first keystroke at 130 µs–1.7 ms per key, with no history at all.
 
 Keeping the name is deliberate: 予測入力 is what Japanese IMEs call exactly this
 strip, and MS-IME and Google Japanese Input merge history completions into it
-rather than separating them. So the option's documentation changes and its name
-does not, and anthy's real predictions can be merged in later without another
+rather than separating them. So the option's documentation changed and its name
+did not, and anthy's real predictions can be merged in later without another
 rename.
 
 **What made this buildable is §4c.** It was blocked before, because
@@ -965,24 +977,108 @@ conversion, and pyzy demonstrates candidates-with-no-preview in shipping code.
 The strip is the same shape — candidates from the first keystroke, preedit left
 as kana, cursor browsing without rewriting anything.
 
-**The one structural obstacle, so the next session does not rediscover it:**
-`AnthyContextBackend::converting_` conflates two facts — "anthy has run and
-segments exist" and "the preedit shows the conversion". The strip needs the
-first without the second. `materialize_candidates()` returns early on
-`!converting_`, and `show_kana()` versus `show_segments()` is chosen by the same
-flag. Splitting it is the bulk of the work; the rest follows:
+**The rulings, all made by the API owner (2026-07-28):**
 
-- after each key, `anthy_set_string()` on the current reading, list segment 0;
-- Space still converts, meaning it switches the preedit to the segments rather
-  than advancing a cursor that was never previewing;
-- selecting settles segment 0 exactly as it does today;
-- the cursor browses without calling `show_candidate()`;
-- any new key re-runs the conversion and drops the list.
+- **Optional.** The tempting criterion — optional only if a user can type
+  significant Japanese without meeting candidates — answers the wrong
+  question, because no option controls that: real Japanese needs kanji, kanji
+  needs conversion, and Space produces the list regardless. What the option
+  chooses between is two shipping paradigms — desktop convert-on-request
+  (every desktop Japanese IME) and the phone strip (Gboard, iOS). Nor does
+  pyzy's always-on bind anthy: it is structural rather than chosen — pyzy
+  converts unbidden and its Return commits the raw Latin, so candidates are
+  the only route to Chinese text — whereas anthy is fully usable without
+  eager candidates.
+- **Default true** (`src/options.cc`). Cross-engine uniformity — candidates
+  as you type wherever candidates exist — plus the phone-keyboard tiebreaker.
+  The desktop paradigm is one `pathime_context_set_option_bool()` away, and
+  the `open_classic_context()` tests in `api.engine_anthy` hold it still.
+- **Space adopts the browsed cursor**: conversion begins previewing the
+  hovered entry, not candidate 0. A moved highlight is the user's most recent
+  expression of interest — and on gamepad-style modalities moving it is
+  deliberate work, so discarding it would confuse exactly there. With an
+  untouched cursor the two rules are indistinguishable, which is why the
+  desktop habit is unaffected. pyzy's Space already selected the hover.
+  Stated in the header at `PATHIME_KEY_SPACE` and `candidate_cursor`, and in
+  `docs/CONCEPTS.md` *Candidate cursor*, which now carries the per-moment
+  browse/preview rule in place of the per-engine wording.
+- **One option covers table too**, reworded rather than split: it toggles
+  "offerings the user did not ask to convert" — pre-conversion on anthy,
+  post-commit suggestion mode on table (`docs/ibus-table-spec.md` §11.3) —
+  and a phone strip consumes both, which is why shipping IMEs give them one
+  name. Table's as-you-type candidates are structural (spec §7.2) and are not
+  what the option governs there. The user's settings flexibility was part of
+  the ruling: a client unhappy with the pairing can set it per context.
+- **The §8 active-span gap is accepted, no new field.** pyzy has shipped the
+  shape all along, and one pyzy list mixes candidates covering different
+  spans (你 vs 你好), so a composition-level span could not even be honest.
+  Additive later as a trailing `pathime_composition_t` member if a real
+  client needs one.
 
-Two costs measured and accepted: `anthy_set_string()` per keystroke, and the
-active span churning on long input because anthy re-splits (§5's
-きょうは → 今日は, きょうはい → 今日). Fine for phrase-at-a-time phone typing,
-ugly for a whole sentence.
+**What building it settled beyond the rulings** — the strip has no reference
+implementation (ibus-anthy has no such mode), so pyzy's unbidden list was the
+model throughout:
+
+- **A strip selection settles greedily and typing continues.** The chosen
+  text stays preedit — pyzy's partial `selectCandidate()` shape, not a
+  commit — the composer is re-seeded with the readings of the unconsumed
+  segments (`RomajiComposer::assign_kana()`), and the conversion re-runs on
+  the remainder; when nothing remains the composition commits whole. This is
+  the case the converting machinery cannot express, because a printable key
+  mid-conversion commits everything, and it is why the split of the old
+  `converting_` flag was the bulk of the work: `converting_` now means only
+  "the user asked", and the eager state — what feeds a client's strip — is
+  `segment_count_ > 0 && !converting_`.
+- **Un-settling exists.** Backspace deletes remainder kana first, then walks
+  the most recent selection back to the reading it consumed; Escape
+  un-settles them all at once, and a second press discards the buffer — the
+  same stairs the converting state's cancel descends.
+- **Learning re-stages each strip choice alone** (`learn_eager_choice()`):
+  convert just the consumed reading, commit the matching candidate as the
+  only — and therefore last — segment, which is what flushes anthy's record.
+  The in-context alternative cannot work: the flush needs every segment
+  committed before the remainder re-runs, so each partial selection's lesson
+  would be lost, and committing the leftovers at `NTH_UNCONVERTED_CANDIDATE`
+  to force it would teach anthy the user chose plain readings for text they
+  were still typing — the §3 poison, measured and durable. Cost stated
+  plainly: the solo commit loses anthy's view of the surrounding segments.
+- Eager conversion feeds `anthy_set_string()` from `composer_.reading()` —
+  the same resolved form the convert key always used — so the strip may show
+  candidates for にほん while the preedit reads にほn: the split Return has
+  always had, now visible before any key is finished.
+- `options_changed()` rebuilds only when the strip's *presence* is wrong
+  (`PATHIME_OPT_PREDICTION` toggled, effectively), so raising
+  `PATHIME_OPT_MAX_CANDIDATES` mid-browse appends to the strip without
+  resetting the hover — the append-only promise a converted list keeps.
+
+Two costs measured and accepted stand: `anthy_set_string()` per keystroke,
+and the active span churning on long input because anthy re-splits (§5's
+きょうは → 今日は, きょうはい → 今日). Fine for phrase-at-a-time phone
+typing, ugly for a whole sentence — which is the desktop paradigm's case, and
+it turns the option off.
+
+**Where it is pinned.** `test_prediction_strip()` in `api.engine_anthy`: the
+preedit stays kana under the strip, browsing moves no text, Space adopts the
+hover and then advances, any key regenerates the list, Return commits the
+kana and never candidate 0, the toggle works mid-composition in both
+directions, a cap raise keeps the hover, full and partial strip selections,
+un-settling by both routes, and learning on and off. The off state is held
+still by the `open_classic_context()` tests. Three guards were
+mutation-tested — browse-no-preview, cursor adoption, strip learning — and
+each mutation fails the suite.
+
+**Two traps from §4c that did recur here**, kept because they will recur
+again:
+
+- `pathime_context_composition()` is invalidated by option setters, not just by
+  key events. A test that reads the struct, sets the option, and re-reads
+  without re-fetching will look right and be wrong.
+- Candidate order is history-dependent (§3 of the model doc), and that holds
+  *within* a run, not just across runs: `api.engine_anthy.clean` wipes the
+  record per run, but a test that learns mid-suite reorders every later list.
+  `test_prediction_strip()` captures candidate text at runtime instead of
+  naming it, and puts the record back (re-selecting 漢字) before handing the
+  suite on.
 
 ## 5. Loose ends
 
