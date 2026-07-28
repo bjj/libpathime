@@ -19,6 +19,7 @@ include/pathime/         # Public C API
 docs/                    # Documentation and project design information
   CONCEPTS.md            # Detailed description of all IME concepts
   ibus-table-spec.md     # Clean-room behavioral spec for ibus-table (source format, DB schema, engine logic)
+  japanese-input-model.md # How anthy actually behaves, measured: the key model, candidate ordering, preedit vs aux
   testing.md             # The test suites: how to run them, and what is deliberate about them
   windows-port.md        # How the Windows port works, and its known limitations
   *-mapping.md           # Overview of how the submodule libraries relate to the concepts
@@ -72,6 +73,7 @@ The `refs/` directory contains IBus engine implementations and table data to stu
   which choices are settled versus deliberately open. Read it before adding or
   moving implementation code.
 - `docs/ibus-table-spec.md` — the specification for our own table engine, derived clean-room from ibus-table: source `.txt` file format, compiled SQLite schema, key-event state machine, candidate sorting, and implementation notes for the C++ port
+- `docs/japanese-input-model.md` — what anthy and ibus-anthy actually *do*, measured rather than reasoned: why Space is three disjoint commands and not one with exceptions, why anthy's candidate 0 is "what you chose last time" and no design may assume a fixed index, what prediction really is (history completion, empty on a fresh profile), and the preedit/auxiliary mirror image between anthy and pyzy. Read it before designing anything Japanese-facing, and before trusting a candidate-order observation taken against a real profile.
 - `docs/testing.md` — the test suites: how to run them, what each of the four kinds is for, how the engine tests reach their runtime data, and which registrations are conditional. Read it before concluding a missing test is a bug.
 - `BUILD.md` — how to build, and "Shipping the data": the `pathime-data/` directory that lives beside the libpathime binary and is what `pathime_init_params_t::resource_dir` finds by default.
 - `docs/windows-port.md` — how the Windows port works: the compat layer, the generated source variants, the build-time behaviour, and the known runtime limitations.

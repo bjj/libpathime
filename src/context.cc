@@ -677,19 +677,17 @@ void refresh_composition(pathime_context_t *ctx, bool force)
      * empty, which is exactly what a zero-length pathime_str_t must point at.
      *
      * Whether anything changed is decided here, by comparing what the
-     * projection produced against what was published last time. Two string
-     * comparisons per keystroke is the price of an exact answer, and it buys
+     * projection produced against what was published last time. One string
+     * comparison per keystroke is the price of an exact answer, and it buys
      * the header's promise that composition_changed means the composition
      * changed — a promise a client leans on to avoid redrawing.
      */
     const std::string previous_preedit = ctx->preedit;
-    const std::string previous_auxiliary = ctx->auxiliary;
     const size_t previous_settled = ctx->composition.preedit_settled;
     const size_t previous_candidates = ctx->composition.candidate_count;
     const size_t previous_cursor = ctx->composition.candidate_cursor;
 
-    pathime::project_composition(ctx->model, &ctx->preedit, &ctx->auxiliary,
-                                 &ctx->composition);
+    pathime::project_composition(ctx->model, &ctx->preedit, &ctx->composition);
     ctx->composition.candidate_count = ctx->model.candidates.size();
     ctx->composition.candidate_cursor = ctx->model.cursor;
 
@@ -705,7 +703,6 @@ void refresh_composition(pathime_context_t *ctx, bool force)
      */
     const bool changed = force ||
                          ctx->preedit != previous_preedit ||
-                         ctx->auxiliary != previous_auxiliary ||
                          ctx->composition.preedit_settled != previous_settled ||
                          ctx->composition.candidate_count != previous_candidates ||
                          ctx->composition.candidate_cursor != previous_cursor;

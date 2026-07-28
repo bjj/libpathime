@@ -19,7 +19,6 @@ namespace pathime {
 
 void project_composition(const Composition &model,
                          std::string *preedit_storage,
-                         std::string *aux_storage,
                          pathime_composition_t *out)
 {
     /*
@@ -32,8 +31,6 @@ void project_composition(const Composition &model,
     preedit_storage->assign(model.settled);
     preedit_storage->append(model.active);
     preedit_storage->append(model.tail);
-
-    aux_storage->assign(model.auxiliary);
 
     /* The library owns this struct, so it reports the size it wrote rather
      * than reading one the caller supplied. */
@@ -50,9 +47,6 @@ void project_composition(const Composition &model,
      * path that writes it copies through utf8.h.
      */
     out->preedit_settled = utf8_scalar_count(model.settled.data(), model.settled.size());
-
-    out->auxiliary.bytes = aux_storage->c_str();
-    out->auxiliary.len = aux_storage->size();
 
     /*
      * candidate_count is deliberately not written here. Materialization

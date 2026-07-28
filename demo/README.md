@@ -23,7 +23,7 @@ they learn. `F1` inside the program lists the keys.
 | Panel | What it shows |
 |---|---|
 | document | The client's own text, with the preedit drawn into it — settled text green, the still-changing tail yellow, exactly as `preedit_settled` divides them |
-| composition | The same thing as data: the preedit, how many of its scalars the engine considers settled, the auxiliary text, and the candidate list with the hovered entry highlighted |
+| composition | The same thing as data: the preedit, how many of its scalars the engine considers settled, and the candidate list with the hovered entry highlighted |
 | event log | Everything that crossed the API boundary, in order |
 | options | Every option the active engine implements, editable at either level |
 

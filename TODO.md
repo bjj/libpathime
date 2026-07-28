@@ -44,6 +44,11 @@ Done:
   found six places where a client has to work around the API's shape. Those
   were §4b, and **all six are now closed** — three by new API, three by saying
   in the header what was already true.
+- **The preedit rule, and the removal of auxiliary text.** §4c. Asking why the
+  Chinese and Japanese engines disagreed about which field held what the user
+  typed produced one rule covering all four engines, and left the auxiliary
+  text field with nothing in it. `docs/japanese-input-model.md` is the
+  measurement behind it.
 - **Tests: 31, all passing.** `tests/core/` compiles internal sources directly,
   because internal helpers carry no `PATHIME_API` and a shared build would not
   export them. `tests/api/` holds the ABI, lifecycle and options suites plus one
@@ -143,6 +148,59 @@ implementation. The surviving inventory is in the header, not here.
   convert, cancel, and candidate navigation, which are real composition
   operations. The general rule is now stated in the header — a key that changes
   a mode rather than the composition belongs to the client.
+
+  **That bullet examined the wrong handler, and the correction is the next
+  entry.** `Hiragana_Katakana` really is a mode switch. But ibus-anthy has a
+  *second*, unrelated family that converts the composition itself, reached
+  through a different handler, and this round never looked at it.
+- **Per-composition character-type conversion — considered and left out of
+  scope (2026-07-28).** ibus-anthy's F6–F10 family: convert what has already
+  been typed to hiragana (F6), katakana (F7), half-width katakana (F8), wide
+  latin (F9) or latin (F10), plus the `_all` variants. They run through
+  `__on_key_conv` (`engine/python3/engine.py:1590-1612`), which sets
+  `__convert_mode` and makes `__update_convert_chars` (`engine.py:1226-1228`)
+  re-render the preedit in the chosen script. Guarded `_chk_mode('12345')`, so
+  they are live while composing.
+
+  This is **not** `PATHIME_OPT_ANTHY_KANA_SCRIPT`, which chooses what typing
+  produces going forward; F7 converts what is already there. It is a real
+  composition operation and the bullet above should have caught it.
+
+  **Out of scope**, decided by the API owner: there are no F-keys on the
+  phone-keyboard target, and the ibus-based client this API was shaped against
+  never needed them. Two things soften it. Katakana is *partly* reachable
+  already, because conversion offers it as a candidate — にほんご gives
+  `[2] ニホンゴ`, わたし gives ワタシ — though the position varies with the
+  record and some readings do not offer one at all. And the operation would be
+  anthy-and-table-only, since pyzy has no equivalent, so it would be a concept
+  carried for one and a half engines.
+
+  What is genuinely lost, stated plainly: half-width katakana, wide latin and
+  latin are reachable by **no** route at all.
+
+  Cheap to add if a consumer appears. It is one additive operation, and
+  `RomajiComposer` already splits `display()` from `commit_text()`, which is the
+  whole of the F6 case.
+
+- **A misreading worth not repeating: no key resolves pending romaji without
+  committing or converting, and Tab is not an exception.** Typing `nihon` leaves
+  `にほn`, because one more key still decides between ん and な. It is tempting
+  to read ibus-anthy's `__cmd_predict` (Tab) as resolving it, since it calls
+  `get_hiragana(True)` — but `get_hiragana()` is a *pure read*, building from
+  `__segments` and never assigning back, so the resolved form goes only to
+  `set_prediction_string()` as a lookup key. The displayed preedit comes from
+  `__get_preedit()` with `commit` defaulting to false and still reads `にほn`;
+  with no predictions, `__cmd_predict` returns False and nothing changed at all.
+
+  F6 is the key that really does it (see above), and it is out of scope. So the
+  routes to `にほん` are: type the second `n`, press Return, or convert. That is
+  what ibus-anthy offers too, and typing `nn` is what Japanese typists do.
+
+  The confusion is easy to come by honestly: ibus-anthy binds Tab to *both*
+  `predict` (modes 1,4) and `select_next_candidate` (modes 2,3,5), so what Tab
+  appears to do depends on state. `docs/japanese-input-model.md` §2 has the
+  binding table.
+
 - The surrounding-text surface **stays**, and its justification changed hands:
   not hanja but `PATHIME_HANGUL_PREEDIT_NONE`, the no-preedit mode in which the
   syllable is built up inside the client's document by deleting the partial form
@@ -519,11 +577,16 @@ is implemented and tested end to end (`api.engine_hangul`, `api.engine_anthy`,
 
 Three smaller header/implementation divergences, all pinned down by tests:
 
-- `src/init.cc` rejects a non-NULL but *empty* `data_dir` as
-  `INVALID_ARGUMENT`. The behaviour is right — NULL and `""` must not both mean
-  "use the default" — but the header documents only what NULL does.
-- The descriptor reports `max-candidates`'s maximum as `INT64_MAX`. The header
-  states a minimum of 1 and no maximum, leaving the representation open.
+- ~~`src/init.cc` rejects a non-NULL but *empty* `data_dir` as
+  `INVALID_ARGUMENT`, and the header documents only what NULL does.~~
+  **Closed by the header (2026-07-28.)** Stated at `data_dir`, covering
+  `resource_dir` in the same breath, with the reason: a caller who built the
+  path and got nothing is told rather than silently writing to the default.
+- ~~The descriptor reports `max-candidates`'s maximum as `INT64_MAX` while the
+  header states no maximum, leaving the representation open.~~ **Closed by the
+  header (2026-07-28.)** `pathime_option_info_t::max_value` now says that an
+  option documented with no upper limit reports `INT64_MAX`, since the
+  descriptor has no way to spell "none".
 - ~~`Return` on pyzy commits the **raw** input.~~ **Done (2026-07-27.)** The
   behaviour is unchanged and matches ibus-pinyin; what was missing was the rule
   that makes it read as chosen. `pathime_context_process_key()` now states the
@@ -806,7 +869,111 @@ order — deletions, then commits, then `composition_changed` last — is why th
 document is never briefly wrong on screen, and is directly visible in the
 demo's event log.
 
+## 4c. The preedit rule, and the end of auxiliary text (2026-07-28)
+
+This round started as "is `PATHIME_OPT_PREDICTION` implemented?" and ended
+somewhere else entirely. The research that redirected it is
+`docs/japanese-input-model.md`, which is measurement rather than argument and
+should be read before anything here is reopened.
+
+**What was wrong.** anthy and pyzy were mirror images. anthy's preedit showed
+the reading (`にほn`) with an empty auxiliary; pyzy's showed a conversion the
+user had not asked for (`你好`) with the reading displaced into the auxiliary.
+The same two facts in opposite fields, so no client could render both with one
+path. Bopomofo was the worst of it: the zhuyin the user was *literally typing*
+was reachable only through the auxiliary text while the preedit showed Chinese.
+
+**The rule, now in `pathime_composition_t::preedit` and `docs/CONCEPTS.md`:**
+
+> The preedit is what the user has settled, followed by what they have typed
+> and not yet settled, rendered in the script they are composing in. No engine
+> rewrites it with a conversion the user has not chosen.
+
+The guarantee that falls out — *the preedit is what a commit would produce* —
+is what deleted the header's old warning that Return may commit something other
+than what was shown. That warning existed to describe pyzy's preview, and the
+preview is gone.
+
+**What changed in the adapter.** `model->active` is pyzy's `auxiliaryText()`,
+not its `conversionText()`; `conversionText()` is now read nowhere.
+`auxiliaryText()` renders from `m_phrase_editor.cursor()` — the input not yet
+consumed by a selection — so it shrinks as spans settle, and
+`selectedText() + auxiliaryText()` is exactly anthy's shape. Two things had to
+be handled that reasoning had not predicted, both found by tests rather than by
+reading, and both now pinned:
+
+- `commit(TYPE_CONVERTED)` disagrees with the preedit under **double pinyin**:
+  it commits `nihk`, the raw keystrokes, where the preedit reads `ni hao`. So
+  Return derives its text from the published preedit (`commit_preedit()`)
+  rather than delegating, and the guarantee is structural instead of
+  coincidental.
+- pyzy suppresses its auxiliary text entirely when it has no candidate
+  (`PinyinContext.cc:163-167`), leaving the input in `restText()`. Bopomofo
+  reaches this on the first key of most syllables — `,` is ㄝ — so without the
+  fallback a user typed a zhuyin symbol and saw an empty preedit.
+
+**Auxiliary text is gone from the API.** `pathime_composition_t::auxiliary`,
+the `Composition::auxiliary` member, the projection argument, the demo panel,
+and `docs/CONCEPTS.md`'s whole section. All four engines were checked first:
+hangul never had one; anthy's was always empty, and ibus-anthy's only content is
+`( 3 / 12 )`, which this API publishes as `candidate_cursor` and
+`candidate_count`; pyzy's turned out to be the preedit under another name; and
+the table engine's is `get_aux_strings()` — the key run, which
+`docs/ibus-table-spec.md` §6.2 *already* specified as preedit text, plus the
+same counter. Nothing was left in the field.
+
+`PATHIME_OPT_PINYIN_SHOW_RAW` went with it, since the auxiliary text was the
+only place it wrote. Option ids 23–31 shifted down by one; nothing has shipped.
+
+**The one thing that would bring it back**, so the decision reads as reversible
+rather than final: a table warranting a genuine composition-level hint with
+nowhere else to go. `pathime_composition_t` carries `struct_size` and the header
+already forbids reading past it, so the field returns as a *trailing* member
+without breaking a compiled client. Do not re-add it in the middle.
+
+**A consequence worth not rediscovering: the candidate cursor previews on anthy
+and not on pyzy.** That looks like an inconsistency and is the rule working. On
+anthy the user pressed Space, so the cursor is choosing *among conversions they
+asked for* and the preedit follows. On pyzy the candidates arrived unbidden, so
+moving the cursor is browsing and settles nothing. Both keep the invariant a
+client depends on. Stated in the header at `candidate_cursor` and in
+`docs/CONCEPTS.md`'s *Candidate cursor*.
+
+**Still open, and deliberately not decided here:** `PATHIME_OPT_PREDICTION`, the
+question that started the round. It is declared `kAnthy | kTable` in
+`src/options.cc` and read nowhere, so a client can set it, get `PATHIME_OK`, and
+have nothing happen — the only option in the header a shipping engine claims and
+never consults. `docs/japanese-input-model.md` §4 and §5 are the input to that
+decision: anthy's prediction API is real and unobstructed, but it is *history
+completion* — empty on a fresh profile, empty whenever `PATHIME_OPT_LEARNING` is
+off — and the always-on candidate strip a phone keyboard wants is ordinary
+conversion run eagerly (§5), not prediction at all. Decide it as: implement,
+report unsupported on anthy, or fold into an eager-conversion mode.
+
 ## 5. Loose ends
+
+- **Two pyzy bugs, found by comparing the engines side by side (2026-07-28).**
+  Both are ours, not pyzy's, and both are places the Chinese adapter is
+  gratuitously unlike the Japanese one. Neither is a design question; the
+  evidence is in `docs/japanese-input-model.md` §6.
+
+  1. **Space with nothing composing is handled by pyzy and unhandled by anthy.**
+     Traced through the public header: on Pinyin it commits `" "` and reports
+     the key handled; on Anthy it reports unhandled and commits nothing. One of
+     the two is wrong whichever way the rule goes, and a client binding Space
+     cannot behave consistently across engines. ibus-anthy's answer is a third
+     one again — `insert_space` at `_chk_mode('0')` commits a **full-width**
+     space by default for Japanese (`half-width-space` defaults false), which
+     is neither of ours. Decide the rule once and apply it to both adapters;
+     note that `PATHIME_OPT_LATIN_WIDTH` defaulting to half would give
+     half-width, so matching ibus-anthy's default needs a stated reason.
+
+  2. ~~**The `|` in pyzy's auxiliary text is dead weight.**~~ **Fixed
+     (2026-07-28)**, as part of §4c. `strip_input_cursor()` in
+     `pyzy_backend.cc`. It was pyzy's own input cursor, and this library never
+     sends a cursor movement — Left/Right are declined while composing
+     (§3 q3) — so `cursor()` equalled the input length at every step of every
+     run measured and the marker was always trailing.
 
 - **pyzy's user-database save is handled — do not go looking for a save call.**
   This used to read as an open obligation: `Database` schedules its save with

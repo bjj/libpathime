@@ -266,7 +266,6 @@ constexpr OptionDescriptor kOptions[] = {
     make_flags("pinyin-correction", kPinyin,
                static_cast<int64_t>(flags_mask(PATHIME_PINYIN_CORRECT_ON_ONG)),
                flags_mask(PATHIME_PINYIN_CORRECT_ON_ONG)),
-    make_bool("pinyin-show-raw", kPinyin, false),
 
     /* ---- Bopomofo ------------------------------------------------------ */
 

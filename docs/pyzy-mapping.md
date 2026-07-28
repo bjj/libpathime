@@ -52,9 +52,9 @@ are set per-context via `setProperty()` using the `PropertyName` enum and
 | **Key event** | No key-event type exists in pyzy. The caller decomposes key events itself and calls individual mutation methods (`insert(char)`, `removeCharBefore()`, `moveCursorLeft()`, etc.). |
 | **Handled / Unhandled** | Each mutation method returns `bool`: `true` if the operation changed state (approximately "handled"), `false` if it had no effect. For full pinyin, `insert(char)` returns `false` **only for an invalid character** (`!islower(ch) && ch != '\''`, `FullPinyinContext.cc:41-50`); when the buffer is full (`MAX_PINYIN_LEN == 64`) it returns `true` and **silently drops** the character. So the bool is not a clean "handled" signal. There is no concept of forwarding an unhandled event. |
 | **Forward key event** | Not present. pyzy never asks the caller to deliver a key event to a downstream recipient. |
-| **Composition data** | The combination of `selectedText()`, `conversionText()`, `restText()`, and `auxiliaryText()` accessors, plus the lazy candidate list. These are delivered via separate `Observer` callbacks rather than as a single composite value. |
+| **Composition data** | The combination of `selectedText()`, `conversionText()`, `restText()`, and `auxiliaryText()` accessors, plus the lazy candidate list. These are delivered via separate `Observer` callbacks rather than as a single composite value. The adapter projects `selectedText()` + `auxiliaryText()` and *not* `conversionText()` — see "Auxiliary text" below. |
 | **Preedit text** | Decomposed into three `std::string` segments returned by `selectedText()`, `conversionText()`, and `restText()`. The internal `Preedit` struct (`PhoneticContext.h:40-50`) holds fields `selected_text`, `candidate_text`, and `rest_text` — note the accessor `conversionText()` returns the `candidate_text` field (the accessor and struct-field names differ). The full preedit string must be assembled by concatenation. `preeditTextChanged(InputContext*)` is the notification callback. |
-| **Auxiliary text** | `auxiliaryText()` returns a `std::string`. `auxiliaryTextChanged(InputContext*)` is the notification callback. |
+| ~~Auxiliary text~~ | Not a concept in this model — `pathime_composition_t` has no such field. pyzy's `auxiliaryText()` is still read, but as the *preedit*; see below. |
 | **Candidate list** | Accessed via `hasCandidate(size_t index)` and `getCandidate(size_t index, Candidate& output)`. `Candidate` is a struct with `std::string text` and `CandidateType type` (`NORMAL_PHRASE`, `USER_PHRASE`, `SPECIAL_PHRASE`). The list is unbounded and lazily populated. **`hasCandidate(i)` is not a const query** — it loops calling `PhraseEditor::fillCandidates()` until index `i` is reachable, materializing candidates as a side effect (`PhoneticContext.cc:231-250`). The flat index space is `special_phrases` first, then phrase-editor candidates: indices `[0, m_special_phrases.size())` are special phrases; indices `>= m_special_phrases.size()` map into the phrase editor via `i -= m_special_phrases.size()` (`PhoneticContext.cc:166-277`). `candidatesChanged(InputContext*)` is the notification callback. `getPreparedCandidatesSize()` returns how many entries have been materialized. |
 | **Select candidate** | `selectCandidate(size_t index)` — 0-origin absolute index into the current candidate list. Returns `bool`. If selecting the candidate exhausts the remaining input, pyzy fires `commitText` automatically. Otherwise it updates the three preedit segments and fires `preeditTextChanged`. |
 | **Surrounding text** | Not present. pyzy has no API to accept or use surrounding text from the client. |
@@ -108,12 +108,30 @@ prefix is stable on commit), but `conversionText` beyond it is itself
 focus-navigates the candidate list. The single-position concept does not
 capture that focused-candidate substructure.
 
-**Auxiliary text.** For Bopomofo contexts the auxiliary text echoes the
-phonetic symbols being composed. For Pinyin contexts it is **structured**
-(`PinyinContext::updateAuxiliaryText`, `PinyinContext.cc:160-208`): the parsed
-pinyin syllables separated by spaces, a `|` marker at the cursor position, and
-any non-pinyin tail — effectively a rendering of cursor/segmentation state, not
-free-form text.
+**Auxiliary text is where the preedit comes from.** This is the one place the
+adapter departs most visibly from what the names suggest, so it is worth
+stating plainly: `model->active` is `auxiliaryText()`, and `conversionText()`
+is read nowhere.
+
+`PinyinContext::updateAuxiliaryText` (`PinyinContext.cc:160-208`) renders from
+`m_phrase_editor.cursor()` — the input **not yet consumed by a selection** —
+through `m_pinyin`, then appends `textAfterPinyin()`. For Bopomofo that is the
+zhuyin being composed; for Pinyin, the parsed syllables separated by spaces
+with any non-pinyin tail after them; and in both cases a `|` marker at the
+cursor. So it is exactly "the input the user has typed and not yet settled, in
+the script they are composing in", which is what `docs/CONCEPTS.md` requires a
+preedit to be. `conversionText()` is a conversion the user has not asked for,
+which that same rule excludes; it is candidate 0 instead.
+
+Two adjustments the adapter makes:
+
+- The `|` is stripped. It marks `m_cursor`, and this library never sends a
+  cursor movement, so it is always trailing and distinguishes nothing.
+- When `hasCandidate(0)` is false, `updateAuxiliaryText` returns early with an
+  **empty** string (`PinyinContext.cc:163-167`) and the typed input is in
+  `restText()` instead. Bopomofo reaches this on the first key of most
+  syllables. The adapter falls back to `restText()` there, which is also why it
+  never needs a separate tail.
 
 **Conversion options.** The bitmask `PROPERTY_CONVERSION_OPTION` (flags
 from `Const.h`) controls incomplete-pinyin matching, typo-correction rules
@@ -382,9 +400,8 @@ which pyzy is aware of.
 
 ### 2. Composition data as separate callbacks versus one composite value
 
-**Project concept:** Composition data is one value containing preedit text,
-auxiliary text, and a candidate list. It is emitted atomically after each
-operation.
+**Project concept:** Composition data is one value containing preedit text and
+a candidate list. It is emitted atomically after each operation.
 
 **pyzy provides:** Six independent callbacks (`inputTextChanged`,
 `cursorChanged`, `preeditTextChanged`, `auxiliaryTextChanged`,

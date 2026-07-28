@@ -35,10 +35,6 @@
  *     and full-width punctuation is ordinary Chinese orthography, not a
  *     nicety: an engine that cannot produce ，and 。is not one you could
  *     write Chinese with.
- *   - PATHIME_OPT_PINYIN_SHOW_RAW is implemented in harvest(), by appending
- *     the raw input to the auxiliary text under double pinyin — which is the
- *     only mode ibus-pinyin implements it for, and the only one where the two
- *     texts differ.
  *   - PATHIME_OPT_LEARNING is *not*, and reports itself unsupported for both
  *     pyzy ids rather than accepting a value it would ignore: pyzy has no
  *     public way to withhold the learning commit, and its learned data is
@@ -183,6 +179,27 @@ bool wants_simplified(const OptionReader &options)
     default:
         return true;
     }
+}
+
+/**
+ * pyzy's auxiliary text with its input-cursor marker removed.
+ *
+ * updateAuxiliaryText() writes a '|' at the input cursor
+ * (PinyinContext.cc:174-204). This library never moves that cursor — Left and
+ * Right are declined while composing, because routing them through made pyzy
+ * render the same marker inside conversionText() — so it is always the last
+ * character, and it is display state rather than content either way.
+ *
+ * The trailing position is asserted rather than assumed: anything other than a
+ * final '|' would mean the cursor had moved after all, and the honest response
+ * is to hand back the string untouched rather than cut it in the wrong place.
+ */
+std::string strip_input_cursor(const std::string &auxiliary)
+{
+    if (!auxiliary.empty() && auxiliary.back() == '|') {
+        return auxiliary.substr(0, auxiliary.size() - 1);
+    }
+    return auxiliary;
 }
 
 /** PATHIME_OPT_BOPOMOFO_LAYOUT as a pyzy BOPOMOFO_KEYBOARD_* value. */
@@ -385,51 +402,78 @@ void PyzyContext::harvest(const OptionReader &options, Composition *model, Outpu
      * (PhoneticContext.h:74-97), valid only until the next mutating call —
      * backend.h rule 1, and the reason nothing here is aliased.
      *
-     * The three-part preedit maps onto the model one-for-one, which is not a
-     * coincidence: composition.h was designed around it. No conversion is
-     * needed in either direction, and in particular cursor() is not consulted.
-     * It is a byte offset into the raw ASCII input (Finding 4) — a position in
-     * a different string from anything the API carries — and this slice has
-     * nothing to say about it, so it is read nowhere.
+     * The active span is pyzy's *auxiliary* text, not its conversionText(),
+     * and that is the whole of the preedit rule stated at
+     * pathime_composition_t::preedit: the preedit shows what the user typed in
+     * the script they are composing in, never a conversion they have not
+     * chosen. conversionText() is exactly such a conversion — typing "nihao"
+     * makes it 你好 before anything has been asked for — so it does not belong
+     * here. It is not lost: it is candidate 0, where the user can take it or
+     * ignore it.
+     *
+     * auxiliaryText() is the right source rather than a convenient one.
+     * updateAuxiliaryText() (PinyinContext.cc:160-208) renders from
+     * m_phrase_editor.cursor() — the input *not yet consumed by a selection* —
+     * through m_pinyin, then appends textAfterPinyin(). So it shrinks as
+     * selections settle, which inputText() does not: after selecting 你 out of
+     * "nihao" it reads "hao" while inputText() still reads "nihao". Measured,
+     * with commit(TYPE_CONVERTED) agreeing at every step:
+     *
+     *     typed "nihao"      selected ""   aux "ni hao|"   commit "nihao"
+     *     selectCandidate 你  selected "你"  aux "hao|"      commit "你hao"
+     *     bopomofo "su3cl3"  selected ""   aux "ㄋㄧˇ,ㄏㄠˇ|"  commit "ㄋㄧˇㄏㄠˇ"
+     *
+     * which is why the preedit and what Return commits now agree, and why the
+     * header no longer has to warn that they might not.
+     *
+     * Bopomofo is the case that makes the rule obviously right rather than
+     * merely consistent: the zhuyin the user is literally typing used to be
+     * reachable only through the auxiliary text, while the preedit showed 你好.
+     *
+     * tail stays empty. restText() is *already inside* what
+     * updateAuxiliaryText() renders — that is what its textAfterPinyin() call
+     * appends — so carrying it separately would duplicate it. That is also why
+     * the three-part model collapses to two parts here; restText() was never
+     * observed non-empty in ordinary use anyway.
+     *
+     * The trailing '|' is pyzy's own input cursor, stripped rather than shown.
+     * The marker sits at m_cursor, and this library never sends pyzy a cursor
+     * movement — Left and Right are declined while composing — so cursor()
+     * equals the input length at every step and the marker is always last.
+     * A position marker that can only ever occupy one position says nothing.
+     *
+     * The syllable separators pyzy writes between parsed syllables are kept:
+     * they tell a pinyin typist how their input parsed, which is the
+     * difference between "xian" and "xi'an". They come off at commit, the same
+     * way anthy's trailing romaji "n" resolves at commit — the departure the
+     * header names.
+     *
+     * cursor() itself is still read nowhere. It is a byte offset into the raw
+     * ASCII input (Finding 4), a position in a different string from anything
+     * the API carries.
      */
-    if (observer_.preedit) {
+    if (observer_.preedit || observer_.auxiliary) {
         model->settled = context_->selectedText();
-        model->active = context_->conversionText();
-        model->tail = context_->restText();
-    }
+        model->active = strip_input_cursor(context_->auxiliaryText());
 
-    /*
-     * The auxiliary text is passed through as pyzy renders it, including the
-     * '|' it puts at the cursor: "ni hao|" for pinyin, "ㄋㄧˇ,ㄏㄠˇ|" for
-     * bopomofo (PinyinContext.cc:160-208). That is supplemental text a client
-     * shows beside the preedit and never commits, which is exactly what a
-     * rendering of segmentation and cursor state is — so unlike the same
-     * marker appearing in the preedit, it belongs.
-     *
-     * PATHIME_OPT_PINYIN_SHOW_RAW appends the keys as typed, in the brackets
-     * ibus-pinyin uses (PYDoublePinyinEditor.cc:38-63) minus the run of spaces
-     * it pads them with, which is layout and belongs to the client.
-     *
-     * Only under double pinyin, which is the whole of ibus-pinyin's own
-     * implementation — its config key is literally "DoublePinyinShowRaw" and
-     * nothing but DoublePinyinEditor reads it. Under full pinyin the raw keys
-     * and the decoded syllables are the same characters, so the option would
-     * append a duplicate of what is already there; the header says it is
-     * meaningless in that mode, and this is what makes that true rather than
-     * merely stated. Bopomofo is out for the same reason it is out of the
-     * option's engine set in src/options.cc: its auxiliary text is zhuyin and
-     * its raw keys are Latin, but nobody typing zhuyin is checking a spelling
-     * against a scheme they are still learning.
-     */
-    if (observer_.auxiliary) {
-        model->auxiliary = context_->auxiliaryText();
-        if (type_ == PyZy::InputContext::DOUBLE_PINYIN &&
-            options.flag(PATHIME_OPT_PINYIN_SHOW_RAW) &&
-            !context_->inputText().empty()) {
-            model->auxiliary += " [ ";
-            model->auxiliary += context_->inputText();
-            model->auxiliary += " ]";
+        /*
+         * The one case where the auxiliary text is not the whole answer.
+         * updateAuxiliaryText() returns early with an empty string when
+         * hasCandidate(0) is false (PinyinContext.cc:163-167), so input that
+         * has not yet reached a complete syllable renders as nothing at all —
+         * and it is restText() that holds it. Bopomofo hits this on the first
+         * key of most syllables: ',' is ㄝ, which alone matches no phrase, so
+         * without this the user would type a zhuyin symbol and watch an empty
+         * preedit.
+         *
+         * This is the only path on which tail would have anything to carry, so
+         * carrying it in active instead costs nothing and keeps one rule: the
+         * preedit is what was typed.
+         */
+        if (model->active.empty()) {
+            model->active = context_->restText();
         }
+        model->tail.clear();
     }
 
     /*
@@ -522,14 +566,23 @@ bool PyzyContext::process_key(const KeyEvent &key,
 
         case PATHIME_KEY_RETURN:
             /*
-             * TYPE_CONVERTED commits the selected prefix plus the *raw* input
-             * for whatever is not yet selected — verified by probe: with
-             * "nihao" typed and nothing selected it commits "nihao", not the
-             * 你好 the preedit is showing. That is ibus-pinyin's Return
-             * behaviour too (PYPhoneticEditor.cc:98-101) and the convention:
-             * Return means "give me what I typed", Space means "convert it".
+             * Return means "give me what I typed", Space means "convert it" —
+             * ibus-pinyin's convention too (PYPhoneticEditor.cc:98-101). What
+             * is committed is the preedit the client was last shown, minus the
+             * separators, which is the guarantee stated at
+             * pathime_composition_t::preedit.
+             *
+             * Derived from the model rather than taken from
+             * commit(TYPE_CONVERTED), so that the guarantee holds by
+             * construction instead of by coincidence. It very nearly is a
+             * coincidence: TYPE_CONVERTED agrees for full pinyin ("nihao") and
+             * for bopomofo (the zhuyin), but under **double pinyin** it commits
+             * the raw keystrokes — "nihk" for what the preedit shows as
+             * "ni hao". Those keys are a shorthand for an IME that is no longer
+             * listening; nobody wants them in their document, and no client
+             * should have to know that one scheme behaves differently.
              */
-            context_->commit(PyZy::InputContext::TYPE_CONVERTED);
+            commit_preedit(*model, out);
             handled = true;
             break;
 
@@ -696,6 +749,30 @@ void PyzyContext::finish_composition(const Composition &model)
     punctuation_.note_commit(observer_.commit_text);
 }
 
+/**
+ * The separators pyzy writes between the syllables it has parsed: ' ' for
+ * pinyin (PinyinContext.cc:178-184), ',' for bopomofo. They are segmentation
+ * feedback — the difference between "xian" and "xi'an" — so they belong in the
+ * preedit and not in the document.
+ *
+ * Safe to strip unconditionally because pyzy accepts only [a-z] and the
+ * apostrophe as input (Finding 6) and renders zhuyin for bopomofo, so neither
+ * character can reach here as content.
+ */
+void PyzyContext::commit_preedit(const Composition &model, Output *out)
+{
+    std::string text = model.settled;
+    for (const char c : model.active) {
+        if (c != ' ' && c != ',') {
+            text.push_back(c);
+        }
+    }
+
+    out->commit += text;
+    context_->reset();
+    punctuation_.note_commit(text);
+}
+
 void PyzyContext::reset(Composition *model, Output *out)
 {
     /*
@@ -755,13 +832,13 @@ void PyzyContext::options_changed(const OptionReader &options,
     apply_options(options);
 
     /*
-     * Recompute the auxiliary text even though pyzy's own has not moved. It is
-     * the same problem the candidate drop below solves, one line earlier:
-     * PATHIME_OPT_PINYIN_SHOW_RAW is *ours*, so pyzy fires no auxiliaryChanged
-     * for it and harvest() would leave the old string in place until the next
-     * keystroke — which for an option toggled mid-composition may never come.
+     * Force the preedit to be re-read even where pyzy fired nothing. An option
+     * applied above may change what apply_options() pushed without pyzy
+     * announcing a text change, and harvest() is guarded on the observer flags;
+     * for an option toggled mid-composition the next keystroke that would clear
+     * that up may never come.
      */
-    observer_.auxiliary = true;
+    observer_.preedit = true;
     harvest(options, model, out);
 
     /*

@@ -163,11 +163,10 @@ Both frameworks additionally provide a *forward key event* operation, by which t
 
 **Composition data** is the current composition-related data produced by the engine for an input context.
 
-Composition data contains exactly three conceptual fields:
+Composition data contains exactly two conceptual fields:
 
 1. preedit text
-2. auxiliary text
-3. a candidate list, together with the *candidate cursor* into it
+2. a candidate list, together with the *candidate cursor* into it
 
 Composition data is plain data, not a user-interface component. The client chooses whether and how to display it.
 
@@ -184,7 +183,7 @@ The current composition data supersedes the previous composition data for that i
 
 Because the whole of it is replaced at once, a client redraws from what it was last given rather than from anything it remembers requesting. That matters most for the candidate cursor, which the engine moves as well as the client — see *Candidate cursor*.
 
-**IBus and Fcitx note:** IBus sends preedit text, auxiliary text, and its lookup table through separate update operations. Fcitx groups related values in an input-panel object containing preedit, upper and lower auxiliary text, and a candidate list. This model instead combines the three concepts into one neutral composition-data value and does not model the panel itself. ([Intelligent Input Bus][2])
+**IBus and Fcitx note:** IBus sends preedit text, auxiliary text, and its lookup table through separate update operations. Fcitx groups related values in an input-panel object containing preedit, upper and lower auxiliary text, and a candidate list. This model instead combines these into one neutral composition-data value and does not model the panel itself. It has **no auxiliary text at all**: see *Preedit text* for where the content both frameworks put there belongs instead. ([Intelligent Input Bus][2])
 
 ## Preedit text
 
@@ -199,6 +198,16 @@ Examples include:
 
 Preedit text is provisional. It may be replaced, extended, shortened, or removed as the user continues entering text.
 
+One rule fixes what it contains, for every engine:
+
+> Preedit text is what the user has settled, followed by what they have typed and not yet settled, rendered in the script they are composing in. An engine does not rewrite it with a conversion the user has not chosen.
+
+So a Japanese engine shows kana, a Pinyin engine shows syllables, a Bopomofo engine shows zhuyin, and a table-based engine shows its key run — each preceded by whatever the user has already chosen. An engine's guesses are the *candidate list*, which the user may take or ignore; they do not appear in the preedit unasked.
+
+The guarantee this gives a client: preedit text is what would be committed if the composition ended now. The only departures are normalizations an engine can only apply at the moment of commit — resolving a trailing romaji consonant that one more keystroke would still change, or dropping separators rendered between syllables. Neither changes which characters the user chose.
+
+This is also where the content other frameworks carry as *auxiliary text* belongs. What a user has typed is not supplemental to their composition; it is the composition. Auxiliary text as those frameworks use it in practice is either that same content displaced, or a candidate position indicator, which is presentation derived from the *candidate cursor* and the candidate count.
+
 Preedit text is accompanied by an internal display position which reflects the state of the engine. Text prior to this position is not expected to be changed on commit, while text beyond this position is still subject to change based on user input. For example, if a user has typed a pinyin string and then selected a partial candidate, the preedit display position would move forward to reflect the selected characters.
 
 Preedit text is a single plain-text string. It contains no:
@@ -212,27 +221,6 @@ Preedit text is a single plain-text string. It contains no:
 Empty preedit text means that no preedit text is currently present.
 
 **IBus and Fcitx note:** IBus models a pre-edit buffer with a visibility flag and a position within the buffer. Fcitx distinguishes panel preedit from client preedit and supports formatted text. This model has only one plain preedit string; the client decides where it is shown. ([Intelligent Input Bus][2])
-
-## Auxiliary text
-
-**Auxiliary text** is optional plain text that supplements the current composition.
-
-It may contain:
-
-* an input-mode indication
-* a conversion hint
-* a short explanation
-* an error or warning
-* additional information about the candidates
-* status associated with the current composition
-
-Auxiliary text is not committed to the client's editable text.
-
-There is one auxiliary-text string. Its placement relative to the preedit text or candidate list is entirely a client decision.
-
-Empty auxiliary text means that no auxiliary text is currently present.
-
-**IBus and Fcitx note:** IBus provides one auxiliary-text value associated with an auxiliary bar. Fcitx provides separate upper and lower auxiliary-text values. This model uses one placement-independent value. ([Intelligent Input Bus][2])
 
 ## Candidate list
 
@@ -275,11 +263,13 @@ IBus lookup table pagination is controlled by key press events rather than an AP
 
 ## Candidate cursor
 
-The **candidate cursor** is the position in the candidate list that the composition currently reflects: the entry a client draws highlighted, and the one whose text the unsettled span of the preedit is showing.
+The **candidate cursor** is the position in the candidate list that a client draws highlighted.
 
 It is **part of composition data**, not a separate query and not something the client tracks privately. It is a property of the list rather than of any candidate, it is always a position within the current list, and it is at the first position whenever the list is empty.
 
-The cursor exists in this model — where page size, labels and orientation do not — because it is not purely presentation. An engine may **preview** the candidate under the cursor: moving the cursor rewrites the unsettled span of the preedit to that candidate's text. The highlight and the preedit are then two views of one fact, and a model that let the client own the highlight privately would leave them unable to agree.
+The cursor exists in this model — where page size, labels and orientation do not — because it is not purely presentation. On some engines it **previews**: moving the cursor rewrites the unsettled span of the preedit to that candidate's text. The highlight and the preedit are then two views of one fact, and a model that let the client own the highlight privately would leave them unable to agree.
+
+Which engines preview follows from the rule in *Preedit text* rather than being a per-engine quirk. The preedit only ever shows a conversion the user asked for, so the cursor rewrites it exactly where the user has already asked. An engine that converts on request — where a key event asks for conversion and the candidates appear in response — is being told by the cursor *which* conversion, so its preedit follows. An engine that offers candidates from the first keystroke was never asked, so moving the cursor there is browsing rather than choosing, and its preedit does not move. Either way the invariant holds: ending the composition commits what is on screen.
 
 Moving the cursor settles nothing. It commits no text, it does not advance the preedit display position, and it can be undone by moving the cursor back. That is what distinguishes it from *Select candidate*, which is irrevocable.
 
@@ -536,7 +526,6 @@ Negotiation may define policies such as:
 All textual data in the core model is plain Unicode text:
 
 * preedit text
-* auxiliary text
 * candidate text
 * surrounding text
 * commit text
@@ -598,11 +587,10 @@ The canonical terms used by this documentation are:
 | **Key event**               | A key press offered to the engine.                                  |
 | **Handled**                 | The engine has accepted responsibility for the original key event.  |
 | **Unhandled**               | The client may process the original key event normally.             |
-| **Composition data**        | Preedit text, auxiliary text, and the candidate list.               |
-| **Preedit text**            | Provisional text that has not been committed.                       |
-| **Auxiliary text**          | Supplemental plain text associated with the composition.            |
+| **Composition data**        | Preedit text and the candidate list.                                |
+| **Preedit text**            | Provisional text that has not been committed: what the user settled, then what they typed. |
 | **Candidate list**          | The complete ordered list of selectable candidate texts.            |
-| **Candidate cursor**        | Composition data: the list position the composition reflects. Moving it settles nothing. |
+| **Candidate cursor**        | Composition data: the highlighted list position. Moving it settles nothing. |
 | **Select candidate**        | Choose a candidate by its absolute position in the current list.    |
 | **Surrounding text**        | Client text near the insertion position, supplied as context.       |
 | **Commit text**             | Insert finalized text into the client.                              |

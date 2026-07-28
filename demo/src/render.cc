@@ -123,9 +123,6 @@ void composition_lines(const App &app, std::vector<std::string> *out)
     const pathime_composition_t *comp = app.composition();
     const std::string preedit =
         comp != nullptr ? std::string(comp->preedit.bytes, comp->preedit.len) : "";
-    const std::string aux =
-        comp != nullptr ? std::string(comp->auxiliary.bytes, comp->auxiliary.len) : "";
-
     out->push_back("   preedit      " + (preedit.empty() ? dim("empty") : preedit));
 
     char buf[96];
@@ -133,8 +130,6 @@ void composition_lines(const App &app, std::vector<std::string> *out)
                   comp != nullptr ? comp->preedit_settled : 0,
                   scalar_count(preedit));
     out->push_back(buf);
-
-    out->push_back("   auxiliary    " + (aux.empty() ? dim("empty") : aux));
 }
 
 /* The candidate list: one page of it, numbered the way the digits are bound. */

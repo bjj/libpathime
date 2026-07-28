@@ -134,6 +134,18 @@ private:
      */
     void finish_composition(const Composition &model);
 
+    /**
+     * Commit exactly what the client was last shown as the preedit, with the
+     * separators pyzy renders between syllables removed, and discard the
+     * composition. This is PATHIME_KEY_RETURN.
+     *
+     * Derived from @a model rather than delegated to
+     * PyZy::InputContext::commit(), so that the header's guarantee — ending a
+     * composition commits the preedit — holds by construction. See the call
+     * site for the double-pinyin case that makes the distinction real.
+     */
+    void commit_preedit(const Composition &model, Output *out);
+
     PyzyObserver observer_;
     PyZy::InputContext *context_ = nullptr;
     PyZy::InputContext::InputType type_;

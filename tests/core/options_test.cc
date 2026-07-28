@@ -371,10 +371,6 @@ const Expected kExpected[] = {
      kP, false, static_cast<int64_t>(bits_upto(PATHIME_PINYIN_CORRECT_ON_ONG)), 0, 0,
      bits_upto(PATHIME_PINYIN_CORRECT_ON_ONG), ""},
 
-    /* "BOOL, default false." */
-    {PATHIME_OPT_PINYIN_SHOW_RAW, "pinyin-show-raw", PATHIME_OPTION_BOOL,
-     kP, false, 0, 0, 0, 0, ""},
-
     /* ---- Bopomofo ------------------------------------------------------ */
 
     /* "ENUM of pathime_bopomofo_layout_t, default

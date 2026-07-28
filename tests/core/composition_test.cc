@@ -30,16 +30,14 @@ const char kN[] = "\xE3\x82\x93";
 /* Project a model and hand back the flat value plus its backing storage. */
 struct Projected {
     std::string preedit_storage;
-    std::string aux_storage;
     pathime_composition_t flat{};
 
     explicit Projected(const pathime::Composition &model)
     {
-        pathime::project_composition(model, &preedit_storage, &aux_storage, &flat);
+        pathime::project_composition(model, &preedit_storage, &flat);
     }
 
     std::string preedit() const { return std::string(flat.preedit.bytes, flat.preedit.len); }
-    std::string auxiliary() const { return std::string(flat.auxiliary.bytes, flat.auxiliary.len); }
 };
 
 void test_empty()
@@ -56,11 +54,8 @@ void test_empty()
      * doing something the header allows.
      */
     PT_CHECK(p.flat.preedit.bytes != nullptr);
-    PT_CHECK(p.flat.auxiliary.bytes != nullptr);
     PT_CHECK(p.flat.preedit.bytes[0] == '\0');
-    PT_CHECK(p.flat.auxiliary.bytes[0] == '\0');
     PT_CHECK_SIZE(p.flat.preedit.len, 0);
-    PT_CHECK_SIZE(p.flat.auxiliary.len, 0);
     PT_CHECK_SIZE(p.flat.preedit_settled, 0);
 
     /* The library owns this struct, so it reports the size it wrote. */
@@ -141,18 +136,6 @@ void test_settled_never_exceeds_preedit()
     }
 }
 
-void test_auxiliary()
-{
-    pathime::Composition model;
-    model.auxiliary = "( 1 / 9 )";
-    PT_CHECK(!model.empty());  /* auxiliary alone is still "something to show" */
-
-    const Projected p(model);
-    PT_CHECK_STR(p.auxiliary(), "( 1 / 9 )");
-    PT_CHECK_STR(p.preedit(), "");
-    PT_CHECK_SIZE(p.flat.preedit_settled, 0);
-}
-
 void test_settle_active()
 {
     /*
@@ -186,7 +169,6 @@ void test_clear_and_empty()
     model.settled = kHan;
     model.active = kGeul;
     model.tail = kNi;
-    model.auxiliary = "aux";
     model.candidates = {"x"};
     model.cursor = 1;
     PT_CHECK(!model.empty());
@@ -246,29 +228,24 @@ void test_projection_is_wholesale()
      */
     pathime::Composition model;
     model.settled = std::string(kHan) + kGeul + kNi;
-    model.auxiliary = "a long auxiliary string";
 
     std::string preedit_storage;
-    std::string aux_storage;
     pathime_composition_t flat{};
-    pathime::project_composition(model, &preedit_storage, &aux_storage, &flat);
+    pathime::project_composition(model, &preedit_storage, &flat);
     PT_CHECK_SIZE(flat.preedit.len, 9);
     PT_CHECK_SIZE(flat.preedit_settled, 3);
 
     model.settled = kHan;
-    model.auxiliary = "x";
-    pathime::project_composition(model, &preedit_storage, &aux_storage, &flat);
+    pathime::project_composition(model, &preedit_storage, &flat);
     PT_CHECK_STR(std::string(flat.preedit.bytes, flat.preedit.len), kHan);
     PT_CHECK_SIZE(flat.preedit.len, 3);
     PT_CHECK_SIZE(flat.preedit_settled, 1);
-    PT_CHECK_STR(std::string(flat.auxiliary.bytes, flat.auxiliary.len), "x");
     /* NUL-terminated at the new length, not the old one. */
     PT_CHECK(flat.preedit.bytes[flat.preedit.len] == '\0');
-    PT_CHECK(flat.auxiliary.bytes[flat.auxiliary.len] == '\0');
 
     /* And back to empty. */
     model.clear();
-    pathime::project_composition(model, &preedit_storage, &aux_storage, &flat);
+    pathime::project_composition(model, &preedit_storage, &flat);
     PT_CHECK_SIZE(flat.preedit.len, 0);
     PT_CHECK_SIZE(flat.preedit_settled, 0);
     PT_CHECK(flat.preedit.bytes[0] == '\0');
@@ -281,7 +258,6 @@ int main()
     test_empty();
     test_concatenation_and_settled_boundary();
     test_settled_never_exceeds_preedit();
-    test_auxiliary();
     test_settle_active();
     test_clear_and_empty();
     test_output();

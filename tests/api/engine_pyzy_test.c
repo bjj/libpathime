@@ -81,10 +81,17 @@ int main(void)
 #define HAO_2 "\xE5\x8F\xB7"  /* 号 U+53F7 */
 #define HAO_3 "\xE6\xB5\xA9"  /* 浩 U+6D69 */
 
-/* The auxiliary text pyzy renders for a full-pinyin composition: the syllables
- * it decoded, with '|' at its own input cursor. Supplemental text a client
- * shows beside the preedit and never commits. */
-#define AUX_NI_HAO "ni hao|"
+/* The preedit for a full-pinyin composition: the syllables pyzy decoded, with
+ * the separators it writes between them kept and its input-cursor '|'
+ * stripped. This is what the user typed, in the script they are composing in —
+ * the rule at pathime_composition_t::preedit — and 你好 is candidate 0 rather
+ * than preedit text. */
+#define PINYIN_NI_HAO "ni hao"
+
+/* What remains in the preedit once 你 has been settled out of "nihao": the
+ * chosen character, then the input it did not cover. pyzy's auxiliary text
+ * shrinks to match, which is what makes this projection possible at all. */
+#define PINYIN_NI_HAO_SETTLED NI "hao"
 
 /* ---- What the width and punctuation layer emits ------------------------- */
 
@@ -286,16 +293,17 @@ static void test_pinyin_composition(pathime_engine_t *engine)
     type(ctx, "nihao");
 
     c = pathime_context_composition(ctx);
-    check_str("nihao preedit", c->preedit.bytes, NI_HAO);
+    /*
+     * The pinyin, not 你好. The engine's guess is candidate 0, checked just
+     * below; the preedit is what was typed. This is the assertion that pins
+     * the preedit rule for Chinese — before it, this read NI_HAO and Return
+     * committed "nihao", which is the divergence the rule removed.
+     */
+    check_str("nihao preedit", c->preedit.bytes, PINYIN_NI_HAO);
     PT_CHECK_SIZE(c->preedit.len, 6);
-    /* Nothing settled: the whole conversion is one active span until a
-     * selection settles part of it. */
+    /* Nothing settled: the whole input is one active span until a selection
+     * settles part of it. */
     PT_CHECK_SIZE(c->preedit_settled, 0);
-
-    /* pyzy's own rendering of what it decoded, cursor marker included. It is
-     * auxiliary text — shown beside the preedit, never committed — which is
-     * exactly what a rendering of segmentation state is. */
-    check_str("auxiliary text", c->auxiliary.bytes, AUX_NI_HAO);
 
     PT_CHECK(c->candidate_count > 0);
     check_str("candidate 0", candidate_of(ctx, 0), NI_HAO);
@@ -347,11 +355,12 @@ static void test_pinyin_composition(pathime_engine_t *engine)
 }
 
 /*
- * The three-part preedit, and the automatic commit.
+ * The settled boundary, and the automatic commit.
  *
  * Selecting 你 — candidate 2, the one covering only the first syllable —
- * settles it and leaves 好 active with a fresh list for the remaining input.
- * That is settled/active/tail with all the parts in play, and it is where
+ * settles it and leaves "hao" active with a fresh list for the remaining
+ * input. That is greedy resolution advancing across a Chinese composition
+ * exactly as it does across a Japanese one, and it is where
  * preedit_settled has to be a scalar count: 你 is one character and three
  * bytes, so a byte count would read 3 here and be indistinguishable from a
  * three-character prefix to any client that trusted it.
@@ -372,14 +381,17 @@ static void test_settled_boundary_and_auto_commit(pathime_engine_t *engine)
     PT_CHECK_STATUS(pathime_context_select_candidate(ctx, 2), PATHIME_OK);
 
     c = pathime_context_composition(ctx);
-    /* One scalar settled, six bytes of preedit. Not 3. */
+    /* One scalar settled. Not 3, which is what 你's byte length would give. */
     PT_CHECK_SIZE(c->preedit_settled, 1);
+    /* 你 is three bytes, "hao" is three more. */
     PT_CHECK_SIZE(c->preedit.len, 6);
-    /* The preedit still spans the whole input: settling is not committing. */
-    check_str("preedit after settling 你", c->preedit.bytes, NI_HAO);
-    /* The auxiliary text follows the boundary — only the unconsumed syllable
-     * is left to decode. */
-    check_str("auxiliary after settling", c->auxiliary.bytes, "hao|");
+    /*
+     * The chosen character, then the input it did not cover — settling is not
+     * committing, and what has not been settled is still shown as typed.
+     * This is the same shape anthy produces mid-sentence, which is the whole
+     * point of the preedit rule.
+     */
+    check_str("preedit after settling 你", c->preedit.bytes, PINYIN_NI_HAO_SETTLED);
 
     /* Nothing was committed, and the client was told once. */
     PT_CHECK(log.commit_count == 0);
@@ -398,6 +410,25 @@ static void test_settled_boundary_and_auto_commit(pathime_engine_t *engine)
     }
 
     /*
+     * Return here would commit "你hao" — the settled character plus the input
+     * it did not cover, which is exactly the preedit above. Checked on its own
+     * context so the automatic-commit case below still starts from here.
+     */
+    {
+        client_log_t end_log;
+        pathime_client_t end_client;
+        pathime_context_t *end_ctx = open_context(engine, &end_client, &end_log);
+        type(end_ctx, "nihao");
+        PT_CHECK_STATUS(pathime_context_select_candidate(end_ctx, 2), PATHIME_OK);
+        check_str("preedit before Return", preedit_of(end_ctx), PINYIN_NI_HAO_SETTLED);
+        PT_CHECK(press(end_ctx, PATHIME_KEY_RETURN));
+        PT_CHECK(end_log.commit_count == 1);
+        check_str("Return commits the half-settled preedit",
+                  end_log.commits, PINYIN_NI_HAO_SETTLED);
+        pathime_context_destroy(end_ctx);
+    }
+
+    /*
      * Selecting again exhausts the input, and pyzy commits by itself from
      * inside selectCandidate(). Nothing in the API asked for a commit here —
      * this is the engine deciding the composition is finished, and the case
@@ -413,7 +444,6 @@ static void test_settled_boundary_and_auto_commit(pathime_engine_t *engine)
     check_str("preedit after the automatic commit", c->preedit.bytes, "");
     PT_CHECK_SIZE(c->preedit_settled, 0);
     PT_CHECK_SIZE(c->candidate_count, 0);
-    check_str("auxiliary after the automatic commit", c->auxiliary.bytes, "");
 
     /* With nothing composing there is no span to select from. */
     PT_CHECK_STATUS(pathime_context_select_candidate(ctx, 0),
@@ -482,7 +512,7 @@ static void test_eager_materialization(pathime_engine_t *engine)
 
     /* The preedit is untouched throughout: changing the cap is not a
      * conversion event. */
-    check_str("preedit survives the cap changes", preedit_of(ctx), NI_HAO);
+    check_str("preedit survives the cap changes", preedit_of(ctx), PINYIN_NI_HAO);
 
     /* Zero is rejected rather than treated as "hide the list": an engine that
      * converts by selection cannot make progress without a candidate. */
@@ -493,18 +523,21 @@ static void test_eager_materialization(pathime_engine_t *engine)
 }
 
 /*
- * The candidate cursor, which on pyzy drives a call this library could not
- * previously reach.
+ * The candidate cursor on pyzy — and specifically that the preedit does *not*
+ * follow it.
  *
- * pyzy has always tracked a focused candidate and rewritten its preedit to
- * match — PhoneticContext::focusCandidate() sets the index and calls
- * updatePreeditText() — but nothing in the API could move it, so the active
- * span always showed candidate 0 however the client's highlight moved. This is
- * the test that it now follows.
+ * pyzy tracks a focused candidate and rewrites its conversionText() to match
+ * (PhoneticContext::focusCandidate()), and while that string was the preedit
+ * this test asserted the preedit followed the cursor. It no longer is: the
+ * preedit is what the user typed, and 你好 is candidate 0.
  *
- * Note what is *not* checked here: the auxiliary text. pyzy's own rendering of
- * the pinyin it decoded does not depend on which candidate is hovered, so it
- * stays put across the moves below, and that it stays put is itself checked.
+ * That difference from anthy is the preedit rule doing its job rather than an
+ * inconsistency. On anthy the cursor moves *within a conversion the user asked
+ * for* by pressing Space, so choosing among conversions rewrites the preedit.
+ * Here the candidates arrived unbidden from the first keystroke, so moving the
+ * cursor is browsing and settles nothing — and the invariant both engines keep
+ * is the one a client relies on: ending the composition commits what is shown.
+ * The Return check at the end is what pins that.
  */
 static void test_candidate_cursor(pathime_engine_t *engine)
 {
@@ -528,15 +561,16 @@ static void test_candidate_cursor(pathime_engine_t *engine)
     snprintf(second, sizeof(second), "%s", candidate_of(ctx, 1));
     PT_CHECK(strcmp(first, second) != 0);
 
-    /* The preedit previews the hovered candidate, and starts at the head. */
+    /* The cursor starts at the head, and the preedit is the pinyin. */
     PT_CHECK_SIZE(pathime_context_composition(ctx)->candidate_cursor, 0);
-    check_str("preedit at cursor 0", preedit_of(ctx), first);
+    check_str("preedit at cursor 0", preedit_of(ctx), PINYIN_NI_HAO);
 
-    /* Move it: focusCandidate() runs, the preedit follows, one callback. */
+    /* Move it: the cursor moves and the client is told once. */
     log_reset(&log);
     PT_CHECK_STATUS(pathime_context_set_candidate_cursor(ctx, 1), PATHIME_OK);
     PT_CHECK_SIZE(pathime_context_composition(ctx)->candidate_cursor, 1);
-    check_str("preedit follows cursor", preedit_of(ctx), second);
+    /* The preedit does not follow. Nothing has been chosen. */
+    check_str("preedit does not follow cursor", preedit_of(ctx), PINYIN_NI_HAO);
     PT_CHECK(log.changed_count == 1);
     /* Hovering settles and commits nothing. */
     PT_CHECK(log.commit_count == 0);
@@ -548,17 +582,16 @@ static void test_candidate_cursor(pathime_engine_t *engine)
     c = pathime_context_composition(ctx);
     check_str("candidate 0 unmoved", candidate_of(ctx, 0), first);
     check_str("candidate 1 unmoved", candidate_of(ctx, 1), second);
-    check_str("auxiliary unmoved", c->auxiliary.bytes, AUX_NI_HAO);
 
     /* Reversible, unlike selection. */
     PT_CHECK_STATUS(pathime_context_set_candidate_cursor(ctx, 0), PATHIME_OK);
-    check_str("cursor moves back", preedit_of(ctx), first);
+    PT_CHECK_SIZE(pathime_context_composition(ctx)->candidate_cursor, 0);
 
     /* Out of range leaves everything alone. */
     PT_CHECK_STATUS(pathime_context_set_candidate_cursor(ctx, c->candidate_count),
                     PATHIME_ERROR_INVALID_ARGUMENT);
     PT_CHECK_SIZE(pathime_context_composition(ctx)->candidate_cursor, 0);
-    check_str("failed move changes nothing", preedit_of(ctx), first);
+    check_str("failed move changes nothing", preedit_of(ctx), PINYIN_NI_HAO);
 
     /*
      * The cursor is always a position in the current list, so lowering the cap
@@ -591,6 +624,26 @@ static void test_candidate_cursor(pathime_engine_t *engine)
     PT_CHECK_STATUS(pathime_context_set_candidate_cursor(ctx, 1), PATHIME_OK);
     PT_CHECK_STATUS(pathime_context_select_candidate(ctx, 1), PATHIME_OK);
     PT_CHECK_SIZE(pathime_context_composition(ctx)->candidate_cursor, 0);
+
+    /*
+     * The invariant the whole preedit rule exists for, checked where it is
+     * most likely to break: hover a candidate, then end the composition, and
+     * what is committed is the preedit that was on screen — not the candidate
+     * under the cursor, which was never chosen.
+     *
+     * Mutation-tested: restoring conversionText() as the active span makes the
+     * preedit check above fail, and makes this commit disagree with the last
+     * preedit the client saw, which is exactly the divergence the header used
+     * to have to warn about.
+     */
+    PT_CHECK_STATUS(pathime_context_reset(ctx), PATHIME_OK);
+    type(ctx, "nihao");
+    PT_CHECK_STATUS(pathime_context_set_candidate_cursor(ctx, 1), PATHIME_OK);
+    check_str("preedit before Return", preedit_of(ctx), PINYIN_NI_HAO);
+    log_reset(&log);
+    PT_CHECK(press(ctx, PATHIME_KEY_RETURN));
+    PT_CHECK(log.commit_count == 1);
+    check_str("Return commits the preedit that was shown", log.commits, "nihao");
 
     pathime_context_destroy(ctx);
 }
@@ -665,13 +718,32 @@ static void test_bopomofo(pathime_engine_t *pinyin, pathime_engine_t *bopomofo)
 
     type(bopo_ctx, "su3cl3");
     bc = pathime_context_composition(bopo_ctx);
-    check_str("bopomofo preedit", bc->preedit.bytes, NI_HAO);
-    /* The auxiliary text is the zhuyin, not the latin keys — the one visible
-     * difference between the two engines at this point. */
-    check_str("bopomofo auxiliary",
-              bc->auxiliary.bytes,
-              /* ㄋㄧˇ,ㄏㄠˇ| — U+310B U+3127 U+02C7 , U+310F U+3120 U+02C7 */
-              "\xE3\x84\x8B\xE3\x84\xA7\xCB\x87,\xE3\x84\x8F\xE3\x84\xA0\xCB\x87|");
+    /*
+     * The zhuyin, not the latin keys and not 你好 — the case that makes the
+     * preedit rule obviously right rather than merely consistent. A zhuyin
+     * typist composes in zhuyin; before the rule this string was reachable
+     * only through the auxiliary text while the preedit showed 你好, which is
+     * the wrong way round. pyzy's own ',' between syllables is kept, the way
+     * full pinyin's ' ' is; its trailing '|' input cursor is stripped.
+     */
+    check_str("bopomofo preedit",
+              bc->preedit.bytes,
+              /* ㄋㄧˇ,ㄏㄠˇ — U+310B U+3127 U+02C7 , U+310F U+3120 U+02C7 */
+              "\xE3\x84\x8B\xE3\x84\xA7\xCB\x87,\xE3\x84\x8F\xE3\x84\xA0\xCB\x87");
+
+    /* And the preedit is what Return would commit, minus the separator. */
+    {
+        client_log_t end_log;
+        pathime_client_t end_client;
+        pathime_context_t *end_ctx = open_context(bopomofo, &end_client, &end_log);
+        type(end_ctx, "su3cl3");
+        PT_CHECK(press(end_ctx, PATHIME_KEY_RETURN));
+        check_str("bopomofo Return commits the zhuyin",
+                  end_log.commits,
+                  /* ㄋㄧˇㄏㄠˇ */
+                  "\xE3\x84\x8B\xE3\x84\xA7\xCB\x87\xE3\x84\x8F\xE3\x84\xA0\xCB\x87");
+        pathime_context_destroy(end_ctx);
+    }
 
     PT_CHECK_SIZE(bc->candidate_count, pc->candidate_count);
     for (i = 0; i < 12; i++) {
@@ -763,7 +835,7 @@ static void test_options(pathime_engine_t *pinyin, pathime_engine_t *bopomofo)
      * check has to reach the first entry that does, which is 离 / 離.
      */
     type(ctx, "nihao");
-    check_str("traditional preedit", preedit_of(ctx), NI_HAO);
+    check_str("traditional preedit", preedit_of(ctx), PINYIN_NI_HAO);
     check_str("traditional candidate 0", candidate_of(ctx, 0), NI_HAO);
     check_str("traditional candidate 5", candidate_of(ctx, 5), LI_3_T);
 
@@ -795,7 +867,7 @@ static void test_options(pathime_engine_t *pinyin, pathime_engine_t *bopomofo)
      * the list was genuinely regenerated and not merely reordered once. */
     PT_CHECK(press(ctx, PATHIME_KEY_BACKSPACE));
     PT_CHECK(press(ctx, 'o'));
-    check_str("simplified preedit", preedit_of(ctx), NI_HAO);
+    check_str("simplified preedit", preedit_of(ctx), PINYIN_NI_HAO);
     check_str("simplified candidate 5", candidate_of(ctx, 5), LI_3);
     pathime_context_destroy(ctx);
 
@@ -824,7 +896,7 @@ static void test_options(pathime_engine_t *pinyin, pathime_engine_t *bopomofo)
 
     ctx = open_context(pinyin, &client, &log);
     type(ctx, "nihao");
-    check_str("composition before the scheme change", preedit_of(ctx), NI_HAO);
+    check_str("composition before the scheme change", preedit_of(ctx), PINYIN_NI_HAO);
 
     log_reset(&log);
     PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_PINYIN_SCHEME,
@@ -833,8 +905,6 @@ static void test_options(pathime_engine_t *pinyin, pathime_engine_t *bopomofo)
     /* Really discarded — not preserved, and not committed either. */
     check_str("composition after the scheme change", preedit_of(ctx), "");
     PT_CHECK_SIZE(pathime_context_composition(ctx)->candidate_count, 0);
-    check_str("auxiliary after the scheme change",
-              pathime_context_composition(ctx)->auxiliary.bytes, "");
     PT_CHECK(log.commit_count == 0);
     PT_CHECK(log.changed_count == 1);
 
@@ -1064,7 +1134,7 @@ static void test_width_and_punctuation(pathime_engine_t *pinyin,
 
     ctx = open_context(pinyin, &client, &log);
     type(ctx, "nihao");
-    check_str("composition before the comma", preedit_of(ctx), NI_HAO);
+    check_str("composition before the comma", preedit_of(ctx), PINYIN_NI_HAO);
 
     log_reset(&log);
     PT_CHECK(press(ctx, ','));
@@ -1120,8 +1190,20 @@ static void test_width_and_punctuation(pathime_engine_t *pinyin,
      * symbol keys, so pyzy takes far more here than it does for pinyin — but
      * the fallback is the same one, reached when pyzy's own insert() declines.
      */
+    /*
+     * ',' is ㄝ on the standard zhuyin keyboard, and one vowel alone matches no
+     * phrase — so pyzy has no candidate and suppresses its auxiliary text
+     * entirely (PinyinContext.cc:163-167), leaving the symbol in restText().
+     * That is the one path where the auxiliary text is not the whole preedit,
+     * and without the fallback in harvest() the user would type a zhuyin symbol
+     * and watch nothing appear. Asserted exactly rather than as "something
+     * happened", which is what it used to say and what let this hide.
+     */
     PT_CHECK(press(ctx, ','));
-    PT_CHECK(log.commit_count + (int)strlen(preedit_of(ctx)) > 0);
+    PT_CHECK(log.commit_count == 0);
+    check_str("an incomplete zhuyin syllable is still shown",
+              preedit_of(ctx),
+              "\xE3\x84\x9D");  /* ㄝ U+311D */
     pathime_context_destroy(ctx);
 
     /* --- Non-printable keys are still the client's ----------------------- */
@@ -1139,76 +1221,41 @@ static void test_width_and_punctuation(pathime_engine_t *pinyin,
 }
 
 /*
- * PATHIME_OPT_PINYIN_SHOW_RAW: the keys as typed, beside the syllables they
- * decoded to.
+ * Double pinyin, where the preedit and the keys that produced it genuinely
+ * differ — the one mode in which the preedit rule says something a full-pinyin
+ * test cannot.
+ *
+ * "nihk" is four keys; "ni hao" is the two syllables they decode to. The
+ * preedit shows the syllables, because those are what the user is composing;
+ * the keys are an encoding of them and the client already knows which ones it
+ * sent. PATHIME_OPT_PINYIN_SHOW_RAW used to put those keys in the auxiliary
+ * text, and went when the auxiliary text did.
  */
-static void test_show_raw(pathime_engine_t *pinyin, pathime_engine_t *bopomofo)
+static void test_double_pinyin_preedit(pathime_engine_t *pinyin)
 {
     client_log_t log;
     pathime_client_t client;
-    pathime_context_t *ctx;
+    pathime_context_t *ctx = open_context(pinyin, &client, &log);
 
-    /*
-     * Under full pinyin it has no effect, which is what the header means by
-     * calling it meaningless there: the raw keys and the decoded syllables are
-     * the same characters, so appending them would show a duplicate.
-     */
-    ctx = open_context(pinyin, &client, &log);
-    type(ctx, "nihao");
-    PT_CHECK_STATUS(pathime_context_set_option_bool(ctx, PATHIME_OPT_PINYIN_SHOW_RAW,
-                                                    true),
-                    PATHIME_OK);
-    check_str("show-raw under full pinyin",
-              pathime_context_composition(ctx)->auxiliary.bytes, AUX_NI_HAO);
-    pathime_context_destroy(ctx);
-
-    /*
-     * Under double pinyin the two differ, which is the whole point: "nihk" is
-     * four keys and "ni hao" is what they decoded to. ibus-pinyin implements
-     * the option for this mode alone — its config key is literally
-     * "DoublePinyinShowRaw".
-     */
-    ctx = open_context(pinyin, &client, &log);
     PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_PINYIN_SCHEME,
                                                    PATHIME_PINYIN_SCHEME_DOUBLE_MSPY),
                     PATHIME_OK);
     type(ctx, "nihk");
-    check_str("double pinyin, show-raw off",
-              pathime_context_composition(ctx)->auxiliary.bytes, AUX_NI_HAO);
+    check_str("double pinyin preedit is the decoded syllables",
+              preedit_of(ctx), PINYIN_NI_HAO);
 
-    /*
-     * Set mid-composition and visible at once. This is the options_changed()
-     * hook doing its job for an option pyzy has never heard of: pyzy fires no
-     * auxiliaryChanged for it, so without the forced refresh the old string
-     * would sit there until the next keystroke — which may never come.
-     */
+    /* Same candidates as the four-key spelling reached, so the scheme really
+     * decoded rather than merely echoing. */
+    check_str("double pinyin candidate 0", candidate_of(ctx, 0), NI_HAO);
+
+    /* And Return still commits what is shown, separators dropped — the same
+     * guarantee full pinyin gives, on a spelling where the raw keys would have
+     * given something else entirely. */
     log_reset(&log);
-    PT_CHECK_STATUS(pathime_context_set_option_bool(ctx, PATHIME_OPT_PINYIN_SHOW_RAW,
-                                                    true),
-                    PATHIME_OK);
-    check_str("double pinyin, show-raw on",
-              pathime_context_composition(ctx)->auxiliary.bytes,
-              AUX_NI_HAO " [ nihk ]");
-    PT_CHECK(log.changed_count == 1);
+    PT_CHECK(press(ctx, PATHIME_KEY_RETURN));
+    PT_CHECK(log.commit_count == 1);
+    check_str("double pinyin Return commits the preedit", log.commits, "nihao");
 
-    /* And off again, by the same route. */
-    PT_CHECK_STATUS(pathime_context_set_option_bool(ctx, PATHIME_OPT_PINYIN_SHOW_RAW,
-                                                    false),
-                    PATHIME_OK);
-    check_str("double pinyin, show-raw off again",
-              pathime_context_composition(ctx)->auxiliary.bytes, AUX_NI_HAO);
-    pathime_context_destroy(ctx);
-
-    /*
-     * Not a Bopomofo option. Its auxiliary text is zhuyin and its raw keys are
-     * Latin, so the two do differ — but nobody typing zhuyin is checking a
-     * spelling against a scheme they are still learning, which is what the
-     * option is for. The descriptor says so and the setter refuses.
-     */
-    ctx = open_context(bopomofo, &client, &log);
-    PT_CHECK_STATUS(pathime_context_set_option_bool(ctx, PATHIME_OPT_PINYIN_SHOW_RAW,
-                                                    true),
-                    PATHIME_ERROR_UNSUPPORTED);
     pathime_context_destroy(ctx);
 }
 
@@ -1292,7 +1339,7 @@ int main(void)
         test_bopomofo(pinyin, bopomofo);
         test_options(pinyin, bopomofo);
         test_width_and_punctuation(pinyin, bopomofo);
-        test_show_raw(pinyin, bopomofo);
+        test_double_pinyin_preedit(pinyin);
         test_fuzzy_is_not_a_hangul_option();
     }
 

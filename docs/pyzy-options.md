@@ -220,6 +220,7 @@ behavior) — flagged rather than classified.
 |---|---|---|---|
 | `DoublePinyin` | `doublePinyin()` | Selects whether `PinyinEngine`'s `MODE_INIT` editor is a `DoublePinyinEditor` or `FullPinyinEditor` — i.e., which pyzy `InputType` backs the live context | `FALSE` | `PYConfig.cc:117`, `PYPinyinEngine.cc:48-51, 182-191` |
 | `DoublePinyinShowRaw` | `doublePinyinShowRaw()` | Whether the raw double-pinyin keystrokes are shown alongside the decoded full-pinyin form in the preedit/auxiliary text | `FALSE` | `PYConfig.cc:108, 419` |
+| | | *Was `PATHIME_OPT_PINYIN_SHOW_RAW`; **cut** with the auxiliary text field, which was the only place it had to write. The decoded syllables are the preedit now, which is the half a user actually reads; the raw keys are an encoding of them the client already knows it sent.* | | |
 
 `DoublePinyin` is the wrapper's concrete resolution of the tension flagged in §1.2: pyzy's
 `InputType` is creation-time-only, so `PinyinEngine::updateProperty()` handles a live toggle of

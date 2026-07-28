@@ -315,6 +315,11 @@ typedef struct pathime_init_params {
      * file rather than carrying text, and no caller has a reason to pass a
      * slice of one. NULL selects a platform-appropriate default beneath the
      * user's configuration directory. Borrowed for the duration of the call.
+     *
+     * The empty string is PATHIME_ERROR_INVALID_ARGUMENT rather than a second
+     * spelling of NULL, so that a caller who built the path and got nothing is
+     * told, instead of silently writing to the default. The same holds for
+     * @a resource_dir.
      */
     const char *data_dir;
 
@@ -623,14 +628,14 @@ typedef struct pathime_key_event {
 
 /**
  * The complete composition state of an input context, as defined in
- * docs/CONCEPTS.md: preedit text, auxiliary text, and a candidate list.
+ * docs/CONCEPTS.md: preedit text and a candidate list.
  *
  * This is a snapshot owned by the input context, with the ordinary lifetime:
  * it and everything it reaches stay valid until the next call that mutates
  * that context. Copy anything that must outlive that.
  *
- * Empty preedit, empty auxiliary text, and a zero candidate count each mean
- * "not currently present".
+ * An empty preedit and a zero candidate count each mean "not currently
+ * present".
  */
 typedef struct pathime_composition {
     /**
@@ -640,7 +645,29 @@ typedef struct pathime_composition {
      */
     size_t struct_size;
 
-    /** Provisional, uncommitted text. Plain UTF-8, no attributes. */
+    /**
+     * Provisional, uncommitted text. Plain UTF-8, no attributes.
+     *
+     * One rule fixes what this contains, for every engine:
+     *
+     *   The preedit is what the user has settled, followed by what they have
+     *   typed and not yet settled, rendered in the script they are composing
+     *   in. No engine rewrites it with a conversion the user has not chosen.
+     *
+     * So Japanese shows kana, Pinyin shows syllables, Bopomofo shows zhuyin,
+     * and a table method shows its key run — each with whatever the user has
+     * already chosen standing in front of it, up to @a preedit_settled. An
+     * engine's guesses live in the candidate list, where the user can take one
+     * or ignore it; they never appear here unasked.
+     *
+     * The practical guarantee a client gets from that: this is the text that
+     * would be committed if the composition ended right now. The only
+     * departures are normalizations an engine applies at the moment of commit
+     * and cannot apply earlier — Japanese displays a trailing romaji "n" as
+     * "n", because one more key still decides whether it becomes ん or な, and
+     * commits it as ん; Pinyin and Bopomofo drop the separators they render
+     * between syllables. Neither changes which characters the user chose.
+     */
     pathime_str_t preedit;
 
     /**
@@ -654,9 +681,6 @@ typedef struct pathime_composition {
      * just before the engine commits, not a resting one.
      */
     size_t preedit_settled;
-
-    /** Supplemental text; never committed. May be empty. */
-    pathime_str_t auxiliary;
 
     /**
      * Number of candidates, at absolute positions [0, candidate_count).
@@ -687,16 +711,24 @@ typedef struct pathime_composition {
     size_t candidate_count;
 
     /**
-     * Which candidate this composition currently reflects: the entry a client
-     * draws highlighted, and the one whose text the unsettled span of
-     * @a preedit is showing. Always < @a candidate_count, and 0 when the list
-     * is empty.
+     * The candidate a client draws highlighted. Always < @a candidate_count,
+     * and 0 when the list is empty.
      *
-     * Highlighting is not decoration. An engine may *preview* the candidate
-     * under the cursor, so moving the cursor rewrites the unsettled span of
-     * the preedit — the highlight and the text the user is looking at are two
-     * views of one fact, which is why the cursor is composition data rather
-     * than something the client tracks privately.
+     * Highlighting is not decoration, because on some engines moving the
+     * cursor also rewrites the unsettled span of @a preedit — the highlight
+     * and the text the user is looking at are then two views of one fact,
+     * which is why the cursor is composition data rather than something the
+     * client tracks privately.
+     *
+     * Which engines do that follows from the rule at @a preedit rather than
+     * being a per-engine quirk: the preedit only ever shows a conversion the
+     * user asked for, so the cursor rewrites it exactly where the user has
+     * already asked. On Japanese, PATHIME_KEY_SPACE is that request, and after
+     * it the cursor chooses *among* conversions, so the preedit follows.
+     * Pinyin and Bopomofo offer candidates from the first keystroke, unasked,
+     * so moving the cursor there is browsing rather than choosing and the
+     * preedit does not move. Either way the invariant a client depends on
+     * holds: ending the composition commits what is on screen.
      *
      * It follows that a client must draw its highlight from this field, and
      * must not assume the value it last set is still here. The cursor moves
@@ -919,13 +951,11 @@ PATHIME_API uint32_t pathime_context_requirements(const pathime_context_t *ctx);
  *   typed. Return is therefore the way out of a composition the engine is
  *   converting wrongly, without backspacing through it.
  *
- * The consequence worth stating plainly, because it looks like a bug and is
- * not: Return may commit text that differs from the preedit the client was
- * last shown. An engine is free to *preview* a conversion in the preedit
- * before the user has chosen it, and Pinyin and Bopomofo do exactly that —
- * typing "nihao" shows a preedit reading 你好, and Return commits "nihao". The
- * preview is a suggestion; Return declines it. Use Space, or select a
- * candidate, to accept it.
+ *   Because no engine previews an unchosen conversion, Return commits the
+ *   preedit the client was last shown, subject only to the commit-time
+ *   normalizations named at pathime_composition_t::preedit. A client never has
+ *   to warn a user that Return will produce something other than what is on
+ *   screen.
  *
  * A key that starts no composition may still be handled. An engine that emits
  * punctuation or full-width text of its own — see PATHIME_OPT_LATIN_WIDTH and
@@ -1576,19 +1606,6 @@ typedef enum pathime_option {
      */
     PATHIME_OPT_PINYIN_CORRECTION = 21,
 
-    /**
-     * BOOL, default false.
-     *
-     * Whether the auxiliary text shows the keys as typed alongside the syllables
-     * they decoded to. Useful while learning a double-pinyin scheme.
-     *
-     * It has no effect under PATHIME_PINYIN_SCHEME_FULL, where the raw keys and
-     * the decoded syllables are the same characters and showing both would show
-     * a duplicate. Setting it there succeeds and reads back — it is supported,
-     * it simply has nothing to add.
-     */
-    PATHIME_OPT_PINYIN_SHOW_RAW = 22,
-
     /* =====================================================================
      * Bopomofo
      * ===================================================================== */
@@ -1602,7 +1619,7 @@ typedef enum pathime_option {
      * already typed, so a composition spanning the change would be decoded half
      * one way and half the other.
      */
-    PATHIME_OPT_BOPOMOFO_LAYOUT = 23,
+    PATHIME_OPT_BOPOMOFO_LAYOUT = 22,
 
     /* =====================================================================
      * Table
@@ -1626,7 +1643,7 @@ typedef enum pathime_option {
      * is how "no table" is spelled: there is no tier-4 default to fall back to,
      * and no distinction between unset and empty.
      */
-    PATHIME_OPT_TABLE_FILE = 24,
+    PATHIME_OPT_TABLE_FILE = 23,
 
     /**
      * BOOL, default false.
@@ -1636,7 +1653,7 @@ typedef enum pathime_option {
      * treat this and PATHIME_OPT_TABLE_AUTO_SELECT as one behavioural profile
      * and set them together, so a client changing one will usually want both.
      */
-    PATHIME_OPT_TABLE_AUTO_COMMIT = 25,
+    PATHIME_OPT_TABLE_AUTO_COMMIT = 24,
 
     /**
      * BOOL, default false.
@@ -1645,7 +1662,7 @@ typedef enum pathime_option {
      * reaches its maximum length, so that typing continues into the next
      * character without an explicit selection.
      */
-    PATHIME_OPT_TABLE_AUTO_SELECT = 26,
+    PATHIME_OPT_TABLE_AUTO_SELECT = 25,
 
     /**
      * STRING, default empty. One character, or empty to disable.
@@ -1657,7 +1674,7 @@ typedef enum pathime_option {
      * "One character" means one Unicode scalar value. A string holding more
      * than one is PATHIME_ERROR_INVALID_ARGUMENT and changes nothing.
      */
-    PATHIME_OPT_TABLE_SINGLE_WILDCARD = 27,
+    PATHIME_OPT_TABLE_SINGLE_WILDCARD = 26,
 
     /**
      * STRING, default empty. One character, or empty to disable.
@@ -1666,7 +1683,7 @@ typedef enum pathime_option {
      * asterisk. One Unicode scalar value, on the same terms as
      * PATHIME_OPT_TABLE_SINGLE_WILDCARD.
      */
-    PATHIME_OPT_TABLE_MULTI_WILDCARD = 28,
+    PATHIME_OPT_TABLE_MULTI_WILDCARD = 27,
 
     /**
      * BOOL, default false.
@@ -1674,7 +1691,7 @@ typedef enum pathime_option {
      * Whether the candidate list is restricted to single characters, excluding
      * the multi-character phrases the table also holds.
      */
-    PATHIME_OPT_TABLE_SINGLE_CHAR_ONLY = 29,
+    PATHIME_OPT_TABLE_SINGLE_CHAR_ONLY = 28,
 
     /**
      * ENUM of pathime_table_invalid_t, default
@@ -1685,7 +1702,7 @@ typedef enum pathime_option {
      * keys the user typed. The choice matters most to users who mix table input
      * with Latin text.
      */
-    PATHIME_OPT_TABLE_INVALID_INPUT = 30,
+    PATHIME_OPT_TABLE_INVALID_INPUT = 29,
 
     /**
      * BOOL, default false.
@@ -1695,7 +1712,7 @@ typedef enum pathime_option {
      * been compiled with pinyin data; where it was not, setting it true is
      * PATHIME_ERROR_UNSUPPORTED.
      */
-    PATHIME_OPT_TABLE_PINYIN_FALLBACK = 31
+    PATHIME_OPT_TABLE_PINYIN_FALLBACK = 30
 } pathime_option_t;
 
 /** Values of PATHIME_OPT_LATIN_WIDTH and PATHIME_OPT_PUNCTUATION_WIDTH. */
@@ -1886,7 +1903,11 @@ typedef struct pathime_option_info {
     /** BOOL, INT, ENUM, FLAGS: the tier-4 library default. */
     int64_t default_value;
 
-    /** INT only: inclusive bounds. */
+    /**
+     * INT only: inclusive bounds. An option documented with no upper limit
+     * reports INT64_MAX here, since the descriptor has no way to say "none"
+     * and a client comparing against it should still get the right answer.
+     */
     int64_t min_value;
     int64_t max_value;
 

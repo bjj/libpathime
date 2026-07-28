@@ -7,7 +7,7 @@
  * The shape, and why it is this one
  * ---------------------------------------------------------------------------
  *
- * Every backend keeps state the flat {preedit, preedit_settled, auxiliary,
+ * Every backend keeps state the flat {preedit, preedit_settled,
  * candidates} value cannot hold (TODO.md §2, Finding 1). Laid side by side,
  * though, the three describe the same three-part picture:
  *
@@ -98,9 +98,6 @@ struct Composition {
      */
     std::string tail;
 
-    /** Supplemental text; never committed. May be empty. */
-    std::string auxiliary;
-
     /**
      * Alternatives for `active`, in the order the client sees them.
      * Materialized eagerly up to PATHIME_OPT_MAX_CANDIDATES before any
@@ -116,10 +113,10 @@ struct Composition {
      */
     size_t cursor = 0;
 
-    /** True if the context has nothing to show: no preedit, no auxiliary. */
+    /** True if the context has nothing to show: no preedit at all. */
     bool empty() const
     {
-        return settled.empty() && active.empty() && tail.empty() && auxiliary.empty();
+        return settled.empty() && active.empty() && tail.empty();
     }
 
     /** Discard everything. Does not commit; that is the caller's decision. */
@@ -128,7 +125,6 @@ struct Composition {
         settled.clear();
         active.clear();
         tail.clear();
-        auxiliary.clear();
         candidates.clear();
         cursor = 0;
     }
@@ -201,9 +197,9 @@ struct Output {
 };
 
 /**
- * Write @a model's flat projection into @a out, with the preedit and auxiliary
- * text copied into @a preedit_storage and @a aux_storage so the returned
- * pathime_str_t members point at storage the context owns.
+ * Write @a model's flat projection into @a out, with the preedit text copied
+ * into @a preedit_storage so the returned pathime_str_t points at storage the
+ * context owns.
  *
  * Recomputed wholesale on every change rather than patched, which is what
  * keeps the flat value and the model from drifting: there is exactly one place
@@ -214,7 +210,6 @@ struct Output {
  */
 void project_composition(const Composition &model,
                          std::string *preedit_storage,
-                         std::string *aux_storage,
                          pathime_composition_t *out);
 
 }  // namespace pathime

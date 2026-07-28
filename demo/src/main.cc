@@ -4,7 +4,7 @@
  *
  * What it is for: watching the library work. Type Korean, Japanese or Chinese
  * into a text field this program owns, and see beside it the preedit, how much
- * of it the engine considers settled, the auxiliary text, the candidate list,
+ * of it the engine considers settled, the candidate list,
  * every callback the library made and in what order, and the whole option
  * inventory with everything the current engine implements editable at either
  * level. Nothing here is a test — tests/ does that — and nothing here is

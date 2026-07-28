@@ -80,9 +80,8 @@ struct pathime_context {
      */
     pathime_composition_t composition{};
 
-    /** Backing storage for composition.preedit and .auxiliary. */
+    /** Backing storage for composition.preedit. */
     std::string preedit;
-    std::string auxiliary;
 
     /**
      * The structured composition state (composition.h) — the model of record.

@@ -66,10 +66,10 @@ in a later section.
 | **Input context** | One independent set of composition state per client destination: the current key run, any pre-committed segments, and the negotiated modes (§6.1). | §6 |
 | **Key event** | Offered to the engine's input/editing state machine (§7). Only keys that build or edit the composition are consumed; the rest are reported unhandled. | §7 |
 | **Handled / Unhandled** | Handled = the key changed composition state (input char, backspace, boundary commit). Unhandled = the engine does not use the key; the client processes it normally. | §7 |
-| **Composition data** | Preedit text + auxiliary text + candidate list, recomputed after each handled key (§6, §8). | §6, §8 |
+| **Composition data** | Preedit text + candidate list, recomputed after each handled key (§6, §8). | §6, §8 |
 | **Preedit text** | Concatenation of pre-committed segment phrases and the current key run, with optional per-key prompt substitution (§6.2). | §6.2 |
 | **Preedit display position** | The end of the confirmed left segments — text before it is stable on commit; the current key run and any right segments after it are still provisional (§6.3). | §6.3 |
-| **Auxiliary text** | ibus-table used this only for a "position / total" candidate indicator, which is client UI. In this model auxiliary text is normally empty (§6.4). | §6.4 |
+| ~~Auxiliary text~~ | Not in the model. ibus-table's only auxiliary content was a "position / total" candidate indicator, which is client UI (§6.4). | §6.4 |
 | **Candidate list** | The full sorted result of the lookup query, capped at 100 (§8). Complete and unpaged. | §8 |
 | **Select candidate** | Commit the phrase at an absolute index, apply learning, and continue or clear composition (§9). Paging and selection keys are client policy. | §9 |
 | **Commit text** | A committed phrase, a literal key run committed verbatim, or an optionally full-width-converted character (§9, §11.4). | §9, §11 |
@@ -379,12 +379,26 @@ and edit in the middle. `CONCEPTS.md` models only a single display position and 
 that mid-preedit caret is flattened away; a libpathime engine may keep the internal cursor to
 reproduce editing behavior but exposes only the single display position.
 
-### 6.4 Auxiliary text
+### 6.4 Auxiliary text — not in the model
 
-ibus-table's only auxiliary content is a `current / total` candidate-position indicator, which is
-derived from client-side paging and is therefore client UI. In this model **auxiliary text is
-normally empty**. It remains available for genuine composition-level hints (e.g. an active-mode
-indicator) if a table warrants one, but no ibus-table table requires it.
+`libpathime` has **no auxiliary text field**. `pathime_composition_t` carries a preedit and a
+candidate list, and nothing else. This section stays to record that the table engine was checked
+before the field was removed, and needs nothing from it.
+
+ibus-table's auxiliary content is `get_aux_strings()` (`refs/ibus-table/engine/table.py:1732`),
+which is the raw input characters mapped through `char_prompts` (§3.4), plus a `current / total`
+candidate-position indicator. Both are already accounted for elsewhere:
+
+- The key run **is preedit text**, with its prompt substitution, exactly as §6.2 already specifies.
+  That is the general rule `docs/CONCEPTS.md` now states for every engine — the preedit is what the
+  user typed in the script they are composing in — and a table method's prompt characters are that
+  script, the same way zhuyin is Bopomofo's.
+- The position indicator is client UI, derived from the candidate cursor and the candidate count,
+  both of which are published as numbers.
+
+Should a table ever warrant a genuine composition-level hint with nowhere else to go,
+`pathime_composition_t` carries a `struct_size` and the field can return as a trailing member
+without breaking a compiled client.
 
 ---
 
@@ -654,7 +668,7 @@ Relative to `CONCEPTS.md`, ibus-table exercises only part of the interface:
   does not synthesize forwarded events.
 - **Focus / Activation** — lifecycle hooks with no intrinsic commit or reset. Commit-on-focus-out is
   a negotiated policy, not implied by focus.
-- **Auxiliary text** — normally empty (§6.4).
+- **Auxiliary text** — not in the model at all; the table engine needs nothing from it (§6.4).
 
 Excluded as client/UI policy (parsed where they appear in data, never acted on): candidate selection
 keys, commit keys, page keys, candidate orientation, "always show lookup", icon/symbol/status prompt,
