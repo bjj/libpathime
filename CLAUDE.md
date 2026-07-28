@@ -73,12 +73,12 @@ The `refs/` directory contains IBus engine implementations and table data to stu
   moving implementation code.
 - `docs/ibus-table-spec.md` — the specification for our own table engine, derived clean-room from ibus-table: source `.txt` file format, compiled SQLite schema, key-event state machine, candidate sorting, and implementation notes for the C++ port
 - `docs/testing.md` — the test suites: how to run them, what each of the four kinds is for, how the engine tests reach their runtime data, and which registrations are conditional. Read it before concluding a missing test is a bug.
+- `BUILD.md` — how to build, and "Shipping the data": the `pathime-data/` directory that lives beside the libpathime binary and is what `pathime_init_params_t::resource_dir` finds by default.
 - `docs/windows-port.md` — how the Windows port works: the compat layer, the generated source variants, the build-time behaviour, and the known runtime limitations.
 - `demo/README.md` — the interactive terminal demo: what each panel shows, what
-  to try in it, what it deliberately does not do, and how it reaches the
-  backends' data out of a build tree. The demo is a client of the public header
-  and nothing else — it links no backend library, for the same reason
-  `tests/api/` does not.
+  to try in it, and what it deliberately does not do. The demo is a client of
+  the public header and nothing else — it links no backend library, for the
+  same reason `tests/api/` does not.
 - `docs/*-mapping.md` — per-library notes mapping each submodule's API to the concepts. Verified against the actual submodule source (see cited file/line references throughout); each ends with an "Impedance mismatches" section. `anthy-mapping.md` also carries the rationale for anthy being built static on Windows and the one-anthy-per-module rule that follows from it.
 - `docs/*-options.md` — per-library inventories of configurable options, gathered for the not-yet-held negotiation/options design round.
 

@@ -121,10 +121,12 @@ from `Const.h`) controls incomplete-pinyin matching, typo-correction rules
 a rule), and fuzzy-pinyin pairs (**14** consonant-pair bits plus **6** vowel-pair
 bits, `Const.h:49-73`). These can be changed at any time via `setProperty()`.
 
-**Special phrases.** A user-editable phrase table (`phrases.txt` under the
-configured config directory) supports date/time macros and other special
-expansions. Enabled by `PROPERTY_SPECIAL_PHRASE`. Their candidates occupy the
-front of the flat candidate list (indices `[0, special_phrases.size())`).
+**Special phrases.** A phrase table (`phrases.txt`) supports date/time macros
+and other special expansions. Enabled by `PROPERTY_SPECIAL_PHRASE`. Their
+candidates occupy the front of the flat candidate list (indices
+`[0, special_phrases.size())`). A client's own copy under
+`<data_dir>/pyzy/config/` wins over the one libpathime ships in its resource
+directory, so overriding the table means dropping a file there.
 
 **Simplified/Traditional selection.** `PROPERTY_MODE_SIMP` (bool)
 switches the output character repertoire between simplified and traditional

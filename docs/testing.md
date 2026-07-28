@@ -56,54 +56,41 @@ Tests written for libpathime against a backend directly. These exist to make the
 Windows build prove it behaves like the Linux one, so all of them must build and
 pass on both.
 
-## Runtime data: a test-environment problem, not a library one
+## Runtime data
 
-Read this before "fixing" anything in `src/` because a test would not otherwise
-run. In a real installation both backends find their own data and none of the
-following is needed; in a build tree neither backend's data is at its installed
-location. The three end-to-end engine tests are therefore the only ones under
-`tests/api/` gated on a `LIBPATHIME_WITH_*` option, and the library must not
-grow code to hunt for data files itself.
+Every test finds its data the way a client does, and nothing in `tests/` sets an
+environment variable or a working directory to arrange it.
 
-Each test reaches its data the way an installation would:
+- **Under `tests/api/`**, the engines read the `pathime-data/` that
+  `src/CMakeLists.txt` stages beside the built library, which is where
+  `pathime_init_params_t::resource_dir` looks by default. Those tests link
+  libpathime and nothing else, so there is nothing else they could do.
+- **Under `tests/anthy/` and `tests/pyzy/`**, which drive a backend directly,
+  each program names its data itself: `anthy_conf_override("DIC_FILE", …)` and
+  `pyzy_set_data_dir(…)`, both with absolute paths the build supplied as
+  compile definitions.
 
-- **anthy** reads `CONFFILE` at `anthy_init()` time and takes `DIC_FILE` from
-  it. `tests/api/CMakeLists.txt` writes a second, build-tree conf file and names
-  it through the `CONFFILE` environment variable. It cannot instead call
-  `anthy_conf_override()` the way `tests/anthy/` does, because those calls would
-  have to reach the copy of anthy *inside* libpathime and on Windows there is no
-  route to it: anthy is static there, so a test executable that also linked it
-  would get a second copy with its own conf database. On ELF the two resolve to
-  a single definition, which is why the same code passed on Linux and could not
-  work on Windows. See `docs/anthy-mapping.md`, "Why the anthy family is built
-  static on Windows".
-- **pyzy**'s `Database::open()` searches its compiled-in `PKGDATADIR` and then
-  `main.db` relative to the working directory. There is no API to point it
-  elsewhere, so `android.db` is staged into a per-test run directory that the
-  test is given as its `WORKING_DIRECTORY`. A run without it does not fail
-  loudly — pyzy warns on stderr, reports success anyway, and produces zero
-  candidates — so a test that skipped this would pass vacuously. That is why the
-  engine tests name several expected candidates rather than one.
+The three end-to-end engine tests under `tests/api/` are the only ones there
+gated on a `LIBPATHIME_WITH_*` option, because they are the only ones whose data
+has to exist.
 
-Both tests are additionally confined to their own `data_dir` under the build
+Each engine test is additionally confined to its own `data_dir` under the build
 tree, so a run never touches the developer's real `~/.config/anthy` or pyzy user
 database. Both backends learn on commit, so each has a `.clean` fixture test
 that wipes that directory before the run — without it a run would be graded
 against whatever the previous run taught it.
 
+One rule holds for `tests/api/`: **nothing there may link a backend library.**
+These are API-surface tests, so the public header is the whole interface they
+are entitled to — and it is also the only linkage that works, since anthy is
+static on Windows and a test that linked it would get a second, independent copy
+of anthy's process-global state. See `docs/anthy-mapping.md`, "Why the anthy
+family is built static on Windows".
+
 ## Conditional registrations
 
 Before reading anything into a test's absence:
 
-- **`api.engine_pyzy_nodb`** is the only test whose *registration* depends on
-  the machine rather than the build. It asserts that a pyzy which cannot find a
-  database reports itself absent through `pathime_has_engine()` instead of
-  pretending to work — which is only a true statement when no database is
-  reachable. The working directory is one this build creates and never stages a
-  `main.db` into, but `PKGDATADIR` is not ours to control, so it is probed at
-  configure time and the test is not registered when a system-wide pyzy is
-  installed. CMake says so at `STATUS`. Do not "fix" its absence on such a
-  machine.
 - **`hangul.vendored.unittest`** needs the Check framework *and* a 32-bit
   `wchar_t`, so in practice it runs on Linux and not on Windows. Upstream's
   `test.c` compares UCS-4 output with `wcscmp((const wchar_t *) …)`, which on

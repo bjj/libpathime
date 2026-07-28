@@ -661,14 +661,18 @@ public:
  * and src/engine.cc already say this at their own call sites; this is the same
  * finding stated where the function is.
  *
- * data_dir is unused for the same reason: the only path libhangul would ever
- * want is the user keyboard directory, and that is exactly what
- * ENABLE_EXTERNAL_KEYBOARDS gates.
+ * Both directories are unused for the same reason. libhangul ships no data
+ * files at all — the layouts and the character tables are compiled into the
+ * library — so there is nothing under resource_dir for it to find, and the
+ * only path it would ever want beneath data_dir is the user keyboard
+ * directory, which is exactly what ENABLE_EXTERNAL_KEYBOARDS gates. Hangul is
+ * therefore the one engine that is available wherever the library is.
  */
 
-bool hangul_global_init(const char *data_dir)
+bool hangul_global_init(const char *data_dir, const char *resource_dir)
 {
     (void)data_dir;
+    (void)resource_dir;
     return true;
 }
 

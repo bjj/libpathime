@@ -49,10 +49,11 @@ endif()
 # filesystem, so pyzy's source directory must never appear in an -I. Two ways
 # around that, one per kind of header:
 #
-#   * the three *public* headers get staged into the layout `cmake --install`
+#   * the *public* headers get staged into the layout `cmake --install`
 #     produces, so tests include them exactly as an outside consumer would:
 #     <PyZy/InputContext.h>. The staging directory holds nothing else, so
-#     there is nothing for a system header to collide with.
+#     there is nothing for a system header to collide with. DataDir.h is among
+#     them: the port adds it, and it is how a program says where the data is.
 #   * the *private* headers are reached through generated forwarding headers
 #     that #include them by absolute path. Their own quoted includes then
 #     resolve relative to themselves, as they do when pyzy compiles itself.
@@ -63,6 +64,7 @@ endif()
 # the one inside the DLL.
 file(COPY
   "${PYZY_EFFECTIVE_SRC_DIR}/Const.h"
+  "${PYZY_EFFECTIVE_SRC_DIR}/DataDir.h"
   "${PYZY_EFFECTIVE_SRC_DIR}/InputContext.h"
   "${PYZY_EFFECTIVE_SRC_DIR}/Variant.h"
   DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/include/PyZy")
@@ -76,24 +78,35 @@ get_target_property(_pyzy_port_bindir pyzy BINARY_DIR)
 
 # --- runtime data -----------------------------------------------------------
 #
-# PyZy::Database::open() searches PKGDATADIR (an install path that does not
-# exist in a build tree) and then "main.db" relative to the process's working
-# directory; SpecialPhraseTable looks for "phrases.txt" in the working
-# directory before anywhere else. So a conversion test needs a working
-# directory with both staged into it, and gets its own so that a run with
-# `ctest -j` does not have several processes fighting over one SQLite file
-# opened with PRAGMA locking_mode=EXCLUSIVE.
-set(_pyzy_phrases "${CMAKE_SOURCE_DIR}/pyzy/src/phrases.txt")
+# The conversion tests need the database pyzy reads, under the name
+# Database::open() asks for. One staged copy serves all of them: they name it
+# through pyzy_set_data_dir() and only ever read it, so there is nothing for
+# processes under `ctest -j` to contend over. What each test does *write* — the
+# user cache and config pyzy keeps — goes in a directory of its own.
+if(PYZY_ANDROID_DB)
+  set(_pyzy_data "${CMAKE_CURRENT_BINARY_DIR}/data")
+  add_custom_command(
+    OUTPUT "${_pyzy_data}/main.db" "${_pyzy_data}/phrases.txt"
+    COMMAND ${CMAKE_COMMAND} -E copy "${PYZY_ANDROID_DB}" "${_pyzy_data}/main.db"
+    COMMAND ${CMAKE_COMMAND} -E copy
+            "${PYZY_PHRASES_FILE}" "${_pyzy_data}/phrases.txt"
+    DEPENDS "${PYZY_ANDROID_DB}" "${PYZY_PHRASES_FILE}"
+    COMMENT "tests/pyzy: staging android.db and phrases.txt"
+    VERBATIM)
+  add_custom_target(pyzy-test-data
+    DEPENDS "${_pyzy_data}/main.db" "${_pyzy_data}/phrases.txt")
+  add_dependencies(pyzy-test-data pyzy-db)
+endif()
 
 # pyzy_add_test(<name> [NEEDS_DB] <source>...)
 #
-# Registers ctest name `pyzy.<name>` built from <source>. NEEDS_DB stages
-# android.db and phrases.txt into the test's working directory and makes the
-# target depend on the database being built.
+# Registers ctest name `pyzy.<name>` built from <source>. Every test gets
+# PYZY_TEST_HOME, the directory it may write to; NEEDS_DB additionally gives it
+# PYZY_TEST_DATA_DIR, the staged database, and makes it wait for that staging.
 function(pyzy_add_test name)
   cmake_parse_arguments(ARG "NEEDS_DB" "" "" ${ARGN})
   set(_target "pyzy_${name}_test")
-  set(_rundir "${CMAKE_CURRENT_BINARY_DIR}/run/${name}")
+  set(_home "${CMAKE_CURRENT_BINARY_DIR}/home/${name}")
 
   add_executable(${_target} ${ARG_UNPARSED_ARGUMENTS})
 
@@ -127,21 +140,18 @@ function(pyzy_add_test name)
     target_link_libraries(${_target} PRIVATE PkgConfig::UUID)
   endif()
 
-  file(MAKE_DIRECTORY "${_rundir}")
+  file(MAKE_DIRECTORY "${_home}")
+  target_compile_definitions(${_target} PRIVATE "PYZY_TEST_HOME=\"${_home}\"")
+
   if(ARG_NEEDS_DB)
-    add_dependencies(${_target} pyzy-db)
-    add_custom_command(TARGET ${_target} POST_BUILD
-      COMMAND ${CMAKE_COMMAND} -E copy_if_different
-              "${PYZY_ANDROID_DB}" "${_rundir}/main.db"
-      COMMAND ${CMAKE_COMMAND} -E copy_if_different
-              "${_pyzy_phrases}" "${_rundir}/phrases.txt"
-      COMMENT "pyzy.${name}: staging android.db and phrases.txt"
-      VERBATIM)
+    add_dependencies(${_target} pyzy-test-data)
+    target_compile_definitions(${_target} PRIVATE
+      "PYZY_TEST_DATA_DIR=\"${_pyzy_data}\"")
   endif()
 
-  add_test(NAME "pyzy.${name}"
-           COMMAND ${_target}
-           WORKING_DIRECTORY "${_rundir}")
+  # No WORKING_DIRECTORY: every path these tests use is absolute and passed to
+  # pyzy explicitly, so where ctest starts them makes no difference.
+  add_test(NAME "pyzy.${name}" COMMAND ${_target})
 endfunction()
 
 # --- tests that need no data ------------------------------------------------

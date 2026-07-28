@@ -11,6 +11,7 @@
 #ifndef LIBPATHIME_TESTS_PYZY_CONTEXT_H
 #define LIBPATHIME_TESTS_PYZY_CONTEXT_H
 
+#include <PyZy/DataDir.h>
 #include <PyZy/InputContext.h>
 
 #include <string>
@@ -48,17 +49,19 @@ inline void insertKeys (PyZy::InputContext *context, const char *keys)
         context->insert (*p);
 }
 
-/* Directories for the user cache (input history) and user config
- * (an override phrases.txt). Relative, so they land inside the per-test working
- * directory that CMake sets — the tests must not touch the real user profile.
- *
- * The *system* database is found separately: PyZy::Database only searches
- * PKGDATADIR, which points into an install prefix that does not exist in a
- * build tree, and then "main.db" relative to the working directory. The build
- * stages android.db there under that name. Same for phrases.txt, which
- * SpecialPhraseTable looks for in the working directory first. */
-inline const char * userCacheDir  () { return "user-cache"; }
-inline const char * userConfigDir () { return "user-config"; }
+/* Directories for the user cache (input history) and user config (an override
+ * phrases.txt). Absolute, beneath the directory this test owns — the tests must
+ * not touch the real user profile — so nothing depends on where they are run
+ * from. */
+inline std::string userCacheDir  () { return std::string (PYZY_TEST_HOME) + "/user-cache"; }
+inline std::string userConfigDir () { return std::string (PYZY_TEST_HOME) + "/user-config"; }
+
+#ifdef PYZY_TEST_DATA_DIR
+/* Where the shipped data is: the main.db and phrases.txt this build staged.
+ * Call before PyZy::InputContext::init(), which is where the database is
+ * opened. Only defined for the tests that were given a database. */
+inline void useStagedDatabase () { pyzy_set_data_dir (PYZY_TEST_DATA_DIR); }
+#endif
 
 }  // namespace pyzy_test
 

@@ -119,8 +119,9 @@ answers false for a backend whose runtime data is missing as well.
   `include/pathime/config.h`.
 - **Vendored libraries**: `libhangul`, `libanthy-unicode` (+
   `libanthydic-unicode`, `libanthyinput-unicode`), `libpyzy-1.0`.
-- **Data**: `anthy.dic` (built by anthy's four-stage codegen, ~20 MB) and
-  `android.db` (pyzy, ~3.4 MB / 16 tables).
+- **Data**: `pathime-data/`, holding `anthy/anthy.dic` (built by anthy's
+  four-stage codegen, ~20 MB) and `pyzy/main.db` (~3.4 MB / 16 tables) plus
+  `pyzy/phrases.txt`. See below.
 - **With `LIBPATHIME_BUILD_DEMO=ON`**: `bin/pathime-demo`, plus the
   `cpp-terminal` library it draws with. Neither is installed.
 
@@ -130,7 +131,28 @@ an absolute path baked in during configure, so `cmake --install --prefix`
 cannot relocate it afterwards.
 
 `cmake --install` lays out headers under `include/pathime/`, libraries under
-`lib/`, DLLs under `bin/`, and data under `share/`.
+`lib/`, and DLLs under `bin/`.
+
+## Shipping the data
+
+The engines' read-only data lives in a directory named `pathime-data`, **beside
+the libpathime binary** — next to `libpathime.so`, next to `pathime.dll`, or
+next to the program itself when the library is linked statically. That is where
+`pathime_init()` looks unless a client says otherwise, and it is resolved from
+the loaded module's own path at runtime, so it holds wherever the pair is
+installed and whatever the process's working directory is. `cmake --install`
+puts it there, and the build stages the same layout beside the built library so
+that the demo and the tests find it identically.
+
+Shipping libpathime with an application therefore means copying `pathime-data/`
+along with the library and keeping the two together. Nothing needs configuring,
+no environment variable is involved, and the path may contain anything the
+platform permits — spaces, non-ASCII, `${`.
+
+A client whose layout separates code from data sets
+`pathime_init_params_t::resource_dir` instead. Either way an engine whose data
+is absent is reported unavailable by `pathime_has_engine()` and costs the other
+engines nothing.
 
 ## Consuming the library
 

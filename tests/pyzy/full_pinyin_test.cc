@@ -181,6 +181,8 @@ void checkEditing ()
 
 int main ()
 {
+    /* Before init(): this is where the database is opened. */
+    pyzy_test::useStagedDatabase ();
     InputContext::init (pyzy_test::userCacheDir (), pyzy_test::userConfigDir ());
 
     checkConversion ();

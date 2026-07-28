@@ -1,13 +1,13 @@
 /*
  * Library lifetime — the process-global layer of the two-layer lifetime
  * (TODO.md §2, Finding 3). This file owns pathime_init() and
- * pathime_shutdown(): validating the init params, resolving data_dir, and
- * running each compiled-in backend's one-time global initialization — anthy's
- * dictionaries, pyzy's shared Database and SpecialPhraseTable — through the
- * lifetime hooks backend.h declares. It is documented as the one slow call, so
- * eager global work belongs here and nowhere else. libhangul needs nothing at
- * this layer in our build; the note in pathime_init() says why, and corrects
- * TODO.md §2 Finding 3 on the point.
+ * pathime_shutdown(): validating the init params, resolving the two
+ * directories, and running each compiled-in backend's one-time global
+ * initialization — anthy's dictionaries, pyzy's shared Database and
+ * SpecialPhraseTable — through the lifetime hooks backend.h declares. It is
+ * documented as the one slow call, so eager global work belongs here and
+ * nowhere else. libhangul needs nothing at this layer in our build; the note
+ * in pathime_init() says why, and corrects TODO.md §2 Finding 3 on the point.
  *
  * The pre-init introspection — version and status strings — is implemented
  * already rather than stubbed: the answers are ABI-fixed statics, and
@@ -28,12 +28,18 @@
 
 #include "backend.h"
 #include "init.h"
+#include "module_path.h"
+
+#if defined(_WIN32)
+#  include "win32_utf.h"
+#endif
 
 namespace {
 
 /*
- * The whole of the library's process-global state. Two values, because
- * everything else a backend would need at this layer lives behind backend.h.
+ * The whole of the library's process-global state: the initialized flag and
+ * the two directories, because everything else a backend would need at this
+ * layer lives behind backend.h.
  *
  * No locking: the header requires that calls into libpathime never overlap,
  * which is a requirement about concurrency rather than thread identity, and
@@ -41,6 +47,7 @@ namespace {
  */
 bool g_initialized = false;
 std::string g_data_dir;
+std::string g_resource_dir;
 
 /*
  * Which backends brought their process-global prerequisites up.
@@ -57,11 +64,27 @@ bool g_hangul_ready = false;
 bool g_anthy_ready = false;
 bool g_pyzy_ready = false;
 
-/** An environment variable's value, or nullptr when unset *or* empty. */
-const char *env_or_null(const char *name)
+/*
+ * An environment variable's value as UTF-8, or "" when unset *or* empty.
+ *
+ * Windows reads it wide. std::getenv there decodes in the active code page, and
+ * a profile directory holding any character outside it would come back mangled
+ * — which is the one place a default could produce a path the platform will not
+ * accept, since every path libpathime is *given* is already UTF-8.
+ */
+std::string env_or_empty(const char *name)
 {
+#if defined(_WIN32)
+    const std::wstring wide_name = pathime::utf8_to_utf16(name);
+    const wchar_t *value = _wgetenv(wide_name.c_str());
+    if (value == nullptr || value[0] == L'\0') {
+        return std::string();
+    }
+    return pathime::utf16_to_utf8(value);
+#else
     const char *value = std::getenv(name);
-    return (value != nullptr && value[0] != '\0') ? value : nullptr;
+    return (value != nullptr) ? std::string(value) : std::string();
+#endif
 }
 
 /*
@@ -85,34 +108,60 @@ const char *env_or_null(const char *name)
  * system with no HOME and no XDG_CONFIG_HOME (or no APPDATA), where any
  * absolute guess would be a worse fiction. A client that cares — and an
  * embedded or phone-keyboard client always should — passes data_dir itself.
- *
- * Windows note: std::getenv reads the environment in the active code page,
- * while this string is promised to be UTF-8. A profile path outside that code
- * page therefore needs _wgetenv plus a conversion; that is a compat-layer
- * concern (docs/windows-port.md) and is left until an adapter forces the
- * question, since nothing yet opens the path.
  */
 std::string default_data_dir()
 {
 #if defined(_WIN32)
-    const char *base = env_or_null("APPDATA");
-    if (base == nullptr) {
-        base = env_or_null("LOCALAPPDATA");
+    std::string base = env_or_empty("APPDATA");
+    if (base.empty()) {
+        base = env_or_empty("LOCALAPPDATA");
     }
-    if (base == nullptr) {
+    if (base.empty()) {
         return "libpathime";
     }
-    return std::string(base) + "\\libpathime";
+    return base + "\\libpathime";
 #else
-    const char *config_home = env_or_null("XDG_CONFIG_HOME");
-    if (config_home != nullptr) {
-        return std::string(config_home) + "/libpathime";
+    const std::string config_home = env_or_empty("XDG_CONFIG_HOME");
+    if (!config_home.empty()) {
+        return config_home + "/libpathime";
     }
-    const char *home = env_or_null("HOME");
-    if (home != nullptr) {
-        return std::string(home) + "/.config/libpathime";
+    const std::string home = env_or_empty("HOME");
+    if (!home.empty()) {
+        return home + "/.config/libpathime";
     }
     return "libpathime";
+#endif
+}
+
+/*
+ * The directory pathime_init_params_t::resource_dir selects by being NULL:
+ * `pathime-data` beside the libpathime binary.
+ *
+ * The rule is deliberately one rule rather than a search. A client that can
+ * load the library can, by construction, reach anything sitting next to it —
+ * which is true of an installed package, a portable directory the user is free
+ * to move, and an application bundle alike, and true regardless of the
+ * process's working directory. Adding fallbacks would buy nothing that the
+ * explicit resource_dir does not already buy, and would cost the property that
+ * makes this predictable: there is exactly one place the data can be, so a
+ * client that gets it wrong finds out immediately rather than on the one
+ * machine where a stale copy shadowed the right one.
+ *
+ * Empty when module_dir() cannot answer, which leaves the path below relative
+ * and, in all but the accidental case, unopenable — so the engines that need a
+ * data file report themselves unavailable. That is the same outcome as a
+ * missing file and reaches the client through the same channel.
+ */
+std::string default_resource_dir()
+{
+    const std::string base = pathime::module_dir();
+    if (base.empty()) {
+        return "pathime-data";
+    }
+#if defined(_WIN32)
+    return base + "\\pathime-data";
+#else
+    return base + "/pathime-data";
 #endif
 }
 
@@ -150,6 +199,11 @@ const char *data_dir()
      * pathime_init() it is "", which no caller sees: every path that reads it
      * has already rejected the uninitialized case. */
     return g_data_dir.c_str();
+}
+
+const char *resource_dir()
+{
+    return g_resource_dir.c_str();
 }
 
 }  // namespace pathime
@@ -213,30 +267,42 @@ pathime_status_t pathime_init(const pathime_init_params_t *params)
         if (params->data_dir != nullptr && params->data_dir[0] == '\0') {
             return PATHIME_ERROR_INVALID_ARGUMENT;
         }
+        if (params->resource_dir != nullptr && params->resource_dir[0] == '\0') {
+            return PATHIME_ERROR_INVALID_ARGUMENT;
+        }
     }
 
     if (g_initialized) {
         return PATHIME_ERROR_ALREADY_INITIALIZED;
     }
 
-    /* Resolve into a local first: nothing global is touched until every step
+    /* Resolve into locals first: nothing global is touched until every step
      * that can fail has succeeded, which is what makes a failed init leave the
      * library uninitialized and retryable. */
     std::string resolved;
+    std::string resolved_resources;
     try {
         if (params != nullptr && params->data_dir != nullptr) {
             resolved = params->data_dir;
         } else {
             resolved = default_data_dir();
         }
+        if (params != nullptr && params->resource_dir != nullptr) {
+            resolved_resources = params->resource_dir;
+        } else {
+            resolved_resources = default_resource_dir();
+        }
     } catch (const std::bad_alloc &) {
         return PATHIME_ERROR_OUT_OF_MEMORY;
     }
 
     /*
-     * Each compiled-in backend's one-time global init, pointed at `resolved`
-     * rather than at the location it would pick from the environment itself —
-     * which is the whole purpose of pathime_init_params_t::data_dir.
+     * Each compiled-in backend's one-time global init, given both directories
+     * rather than the locations it would pick from the environment and its own
+     * compiled-in prefix — which is the whole purpose of
+     * pathime_init_params_t::data_dir and ::resource_dir. Every path either
+     * one becomes is handed to the backend verbatim, so a client is free to
+     * install wherever it likes.
      *
      * A hook failure is *not* fatal. It marks that backend unavailable and
      * pathime_init() still succeeds, because the alternative — one missing
@@ -246,10 +312,6 @@ pathime_status_t pathime_init(const pathime_init_params_t *params)
      * an engine "whose runtime prerequisites, such as its dictionaries, are
      * unavailable". PATHIME_ERROR_BACKEND from this function would mean the
      * library itself is unusable, which is a different and much rarer claim.
-     *
-     * This was found by running the three adapters together for the first
-     * time: anthy cannot locate its dictionary in an uninstalled build tree,
-     * and the first wiring let that take the whole library down with it.
      *
      * libhangul is deliberately absent, against what TODO.md §2 Finding 3 used
      * to say. hangul_init() and hangul_fini() exist only under
@@ -263,19 +325,23 @@ pathime_status_t pathime_init(const pathime_init_params_t *params)
      * would be rooted at `resolved`.
      */
 #if PATHIME_WITH_HANGUL
-    g_hangul_ready = pathime::hangul_global_init(resolved.c_str());
+    g_hangul_ready = pathime::hangul_global_init(resolved.c_str(),
+                                                 resolved_resources.c_str());
 #endif
 #if PATHIME_WITH_ANTHY
-    g_anthy_ready = pathime::anthy_global_init(resolved.c_str());
+    g_anthy_ready = pathime::anthy_global_init(resolved.c_str(),
+                                               resolved_resources.c_str());
 #endif
 #if PATHIME_WITH_PYZY
-    g_pyzy_ready = pathime::pyzy_global_init(resolved.c_str());
+    g_pyzy_ready = pathime::pyzy_global_init(resolved.c_str(),
+                                             resolved_resources.c_str());
 #endif
 
-    /* swap, not assign: it cannot throw, so the two globals move to their new
+    /* swap, not assign: it cannot throw, so the globals move to their new
      * values together and there is no state in which one has been updated and
-     * the other has not. */
+     * the others have not. */
     g_data_dir.swap(resolved);
+    g_resource_dir.swap(resolved_resources);
     g_initialized = true;
     return PATHIME_OK;
 }
@@ -321,5 +387,6 @@ void pathime_shutdown(void)
     g_pyzy_ready = false;
 
     g_data_dir.clear();
+    g_resource_dir.clear();
     g_initialized = false;
 }

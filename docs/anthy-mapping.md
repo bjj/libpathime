@@ -394,15 +394,14 @@ also links anthy gets a **second, independent anthy**: its
 `anthy_init()` runs twice against two sets of state.
 
 ELF hides this by resolving both to a single definition, so the same code can
-pass on Linux and fail on Windows with no source difference at all — which is
-exactly how it was found, in `api.engine_anthy`.
+pass on Linux and fail on Windows with no source difference at all.
 
-**Nothing that links `libpathime` may therefore also link anthy.** Where such
-code needs to point anthy at data, it must do so the way an installation would:
-through anthy's own conf file, named by the `CONFFILE` environment variable.
-`docs/testing.md` describes how the API tests do it. Programs that link anthy
-and *not* libpathime — everything under `tests/anthy/` — have exactly one copy
-and may keep calling `anthy_conf_override()`.
+**Nothing that links `libpathime` may therefore also link anthy.** Such code has
+no need to: libpathime configures its own copy of anthy from
+`pathime_init_params_t`, so a program that wants the dictionary somewhere
+particular says so there. Programs that link anthy and *not* libpathime —
+everything under `tests/anthy/` — have exactly one copy and configure it
+directly with `anthy_conf_override()`.
 
 `pathime_init_params_t::data_dir` is unaffected. It reaches anthy as
 `anthy_conf_override("XDG_CONFIG_HOME", data_dir)` *inside* the library, so it

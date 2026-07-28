@@ -24,6 +24,7 @@ list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(LibpathimeOptions)       # build-wide preamble + LIBPATHIME_WITH_* options
 include(LibpathimeCompat)        # libpathime_add_win32_compat() + win32 shim lib
 include(LibpathimeDependencies)  # probe deps, gate backends, print the summary
+include(LibpathimeRuntimeData)   # the pathime-data/ the library reads at runtime
 
 # --- Korean: libhangul ships modern, target-based CMake for its `hangul`
 # library. We descend straight into that library directory rather than the

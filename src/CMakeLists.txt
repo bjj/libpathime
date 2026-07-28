@@ -16,6 +16,8 @@ add_library(pathime
   candidates.cc
   options.cc
   keys.cc
+  module_path.cc
+  paths.cc
   utf8.cc
 )
 add_library(libpathime::pathime ALIAS pathime)
@@ -44,6 +46,13 @@ target_include_directories(pathime PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 target_compile_definitions(pathime PRIVATE PATHIME_BUILD)
 if(NOT BUILD_SHARED_LIBS)
   target_compile_definitions(pathime PUBLIC PATHIME_STATIC)
+endif()
+
+# module_path.cc asks the loader which file it is in, so that the resource
+# directory can default to one beside it. That is dladdr() everywhere but
+# Windows, which glibc kept in libdl until 2.34.
+if(NOT WIN32)
+  target_link_libraries(pathime PRIVATE ${CMAKE_DL_LIBS})
 endif()
 
 # --- Engine adapters: one directory per backend, gated on the same
@@ -100,23 +109,15 @@ if(LIBPATHIME_WITH_PYZY)
       "src: PYZY_EFFECTIVE_SRC_DIR is not set. It is published by "
       "cmake/ports/pyzy/CMakeLists.txt, which must be processed first.")
   endif()
+  # DataDir.h joins them: it is the port's, not upstream's, and it is how the
+  # adapter tells pyzy where the database is.
   file(COPY
     "${PYZY_EFFECTIVE_SRC_DIR}/Const.h"
+    "${PYZY_EFFECTIVE_SRC_DIR}/DataDir.h"
     "${PYZY_EFFECTIVE_SRC_DIR}/InputContext.h"
     "${PYZY_EFFECTIVE_SRC_DIR}/Variant.h"
     DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/include/PyZy")
   target_include_directories(pathime PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/include")
-
-  # pyzy cannot report whether it found a database: InputContext::init() returns
-  # void and Database::init() builds the singleton either way, so the adapter
-  # tests for the file itself before calling in (TODO.md §4a). That test has to
-  # look where Database::open() looks, and three of its four candidates are
-  # rooted at pyzy's compiled-in PKGDATADIR — so the adapter needs the same
-  # value pyzy itself was built with. Derived from the same expression as
-  # cmake/ports/pyzy/CMakeLists.txt rather than copied, so the two cannot drift;
-  # named distinctly because it is our mirror of pyzy's macro, not pyzy's own.
-  target_compile_definitions(pathime PRIVATE
-    "PATHIME_PYZY_PKGDATADIR=\"${CMAKE_INSTALL_FULL_DATADIR}/pyzy\"")
 endif()
 
 # engines/table/ holds only a README until the engine described by
@@ -127,3 +128,14 @@ install(TARGETS pathime
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
+
+# The read-only data the engines open, into the pathime-data/ beside the
+# installed library that pathime_init_params_t::resource_dir finds by default.
+libpathime_install_runtime_data()
+
+# The same files in the build tree, so that the demo and the tests reach them
+# exactly as a client does. Only needed when there is something here to run
+# them: an embedder gets its copy from `cmake --install`.
+if(LIBPATHIME_BUILD_TESTS OR LIBPATHIME_BUILD_DEMO)
+  libpathime_stage_runtime_data()
+endif()

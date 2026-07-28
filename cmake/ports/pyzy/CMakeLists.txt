@@ -12,14 +12,20 @@ set(PYZY_SRC "${CMAKE_SOURCE_DIR}/pyzy")
 set(HAVE_LIBUUID 1)   # libuuid on Unix; the Rpcrt4 shim on Windows
 configure_file(config.h.in "${CMAKE_CURRENT_BINARY_DIR}/config.h" @ONLY)
 
-# --- source directory (mirrored and fixed up on Windows) --------------------
-# Four things in pyzy's sources assume GCC and/or LP64. Three of them no
-# MSVC-style compiler will accept at all; the fourth compiles and then
-# misbehaves at runtime. Rather than edit the submodule, mirror src/ into the
-# build tree and fix the copies. Everything in src/ is included with quotes from
+# --- source directory (mirrored and fixed up) -------------------------------
+# pyzy's sources are mirrored into the build tree and the copies are edited,
+# rather than the submodule. Everything in src/ is included with quotes from
 # co-located files, so the mirror resolves against itself and src/ still never
 # has to go on the -I path (which would shadow <string.h> with pyzy's String.h
 # on a case-insensitive filesystem).
+#
+# One edit is made everywhere: teaching pyzy to take its data directory from
+# the embedding program (DataDir.h, and the rewrites of Database.cc and
+# SpecialPhraseTable.cc below).
+#
+# Four more are Windows-only, because they assume GCC and/or LP64. Three of
+# them no MSVC-style compiler will accept at all; the fourth compiles and then
+# misbehaves at runtime.
 #
 #   1. PinyinParserTable.h initialises its ~400-entry table with GNU labelled
 #      fields (`text : "a",`) — an obsolete GCC extension. The labels appear in
@@ -47,13 +53,97 @@ configure_file(config.h.in "${CMAKE_CURRENT_BINARY_DIR}/config.h" @ONLY)
 #
 # The mirror is produced at configure time: editing pyzy/src needs a re-run of
 # cmake to take effect.
-set(_pyzy_dir "${PYZY_SRC}/src")
+set(_pyzy_dir "${CMAKE_CURRENT_BINARY_DIR}/src")
+file(GLOB _pyzy_mirror_files "${PYZY_SRC}/src/*.h" "${PYZY_SRC}/src/*.cc")
+file(COPY ${_pyzy_mirror_files} DESTINATION "${_pyzy_dir}")
+
+# DataDir.{h,cc} are ours, not upstream's. They sit in the mirror so that
+# pyzy's sources can include them with quotes exactly as they include each
+# other, and so that the one -I this library needs stays the one holding the
+# generated <config.h>.
+file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/DataDir.h"
+          "${CMAKE_CURRENT_SOURCE_DIR}/DataDir.cc"
+     DESTINATION "${_pyzy_dir}")
+
+# Database::open() picks the first of four candidates that exists: three
+# beneath the PKGDATADIR compiled into it, then "main.db" relative to the
+# process's working directory. An embedded library has no business with either
+# — the first is an install prefix chosen when *this* was built, the second
+# belongs to whatever program is doing the embedding — so both give way to the
+# single path the program names through pyzy_set_data_dir().
+#
+# The g_file_test() in front of sqlite3_open_v2() is upstream's and stays:
+# without it, SQLITE_OPEN_CREATE would answer a missing database by making an
+# empty one, and an empty database produces no candidates and no complaint.
+file(READ "${_pyzy_dir}/Database.cc" _db_cc)
+string(REPLACE
+[[        static const char * maindb [] = {
+            PKGDATADIR"/db/local.db",
+            PKGDATADIR"/db/open-phrase.db",
+            PKGDATADIR"/db/android.db",
+            "main.db",
+        };
+
+        size_t i;
+        for (i = 0; i < G_N_ELEMENTS (maindb); i++) {
+            if (!g_file_test(maindb[i], G_FILE_TEST_IS_REGULAR))
+                continue;
+            if (sqlite3_open_v2 (maindb[i], &m_db,
+                SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, NULL) == SQLITE_OK) {
+                break;
+            }
+        }
+
+        if (i == G_N_ELEMENTS (maindb)) {
+            g_warning ("can not open main database");
+            break;
+        }]]
+[[        /* Rewritten by libpathime's pyzy port; see cmake/ports/pyzy. */
+        const std::string maindb = dataPath ("main.db");
+
+        if (maindb.empty () ||
+            !g_file_test (maindb.c_str (), G_FILE_TEST_IS_REGULAR) ||
+            sqlite3_open_v2 (maindb.c_str (), &m_db,
+                SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, NULL) != SQLITE_OK) {
+            g_warning ("can not open main database");
+            break;
+        }]]
+  _db_cc_patched "${_db_cc}")
+if(_db_cc_patched STREQUAL _db_cc)
+  message(FATAL_ERROR
+    "pyzy: could not find Database::open()'s PKGDATADIR candidate list to "
+    "replace — the vendored source has changed shape.")
+endif()
+string(REPLACE "#include \"Config.h\""
+               "#include \"Config.h\"\n#include \"DataDir.h\""
+  _db_cc_patched "${_db_cc_patched}")
+file(WRITE "${_pyzy_dir}/Database.cc" "${_db_cc_patched}")
+
+# SpecialPhraseTable's constructor probes "phrases.txt" in the working
+# directory, then the config directory it was given, then PKGDATADIR. The first
+# and last go for the same reasons as Database's; the config directory stays,
+# because that is where a client's own phrases.txt lives and it must keep
+# winning over the one we ship.
+file(READ "${_pyzy_dir}/SpecialPhraseTable.cc" _spt_cc)
+string(REPLACE
+[[    load ("phrases.txt") ||
+    load (path) ||
+    load (PKGDATADIR G_DIR_SEPARATOR_S "phrases.txt");]]
+[[    /* Rewritten by libpathime's pyzy port; see cmake/ports/pyzy. */
+    load (path) ||
+    load (dataPath ("phrases.txt").c_str ());]]
+  _spt_cc_patched "${_spt_cc}")
+if(_spt_cc_patched STREQUAL _spt_cc)
+  message(FATAL_ERROR
+    "pyzy: could not find SpecialPhraseTable's phrases.txt lookup chain to "
+    "replace — the vendored source has changed shape.")
+endif()
+string(REPLACE "#include \"DynamicSpecialPhrase.h\""
+               "#include \"DataDir.h\"\n#include \"DynamicSpecialPhrase.h\""
+  _spt_cc_patched "${_spt_cc_patched}")
+file(WRITE "${_pyzy_dir}/SpecialPhraseTable.cc" "${_spt_cc_patched}")
 
 if(WIN32)
-  set(_pyzy_dir "${CMAKE_CURRENT_BINARY_DIR}/src-win32")
-  file(GLOB _pyzy_mirror_files "${PYZY_SRC}/src/*.h" "${PYZY_SRC}/src/*.cc")
-  file(COPY ${_pyzy_mirror_files} DESTINATION "${_pyzy_dir}")
-
   file(READ "${_pyzy_dir}/PinyinParserTable.h" _tbl)
   string(REGEX REPLACE
     "\n([ \t]+)(text|bopomofo|sheng|yun|pinyin_id|len|flags)[ \t]*:[ \t]*"
@@ -136,19 +226,18 @@ if(WIN32)
 endif()
 
 # Anything that compiles against pyzy's *private* headers has to use the same
-# copies this library was built from, or it gets a String with a different
-# overload set and a PinyinParserTable that no compiler here accepts. tests/pyzy
-# does exactly that, so publish the choice rather than let the test tree
-# re-derive the `if(WIN32)` rule above and silently drift from it.
+# copies this library was built from — the mirror, never the submodule, since
+# the two differ. tests/pyzy does exactly that, so publish the directory rather
+# than let the test tree work it out again.
 set(PYZY_EFFECTIVE_SRC_DIR "${_pyzy_dir}" CACHE INTERNAL
-  "The pyzy source directory this build compiles: pyzy/src, or its rewritten Windows mirror")
+  "The rewritten pyzy source directory this build compiles")
 
-# --- library (source list from src/Makefile.am:libpyzy_c_sources) -----------
+# --- library (source list from src/Makefile.am:libpyzy_c_sources, plus ours) -
 set(_pyzy_srcs
-  BopomofoContext.cc Database.cc DoublePinyinContext.cc DynamicSpecialPhrase.cc
-  FullPinyinContext.cc InputContext.cc PhoneticContext.cc PhraseEditor.cc
-  PinyinContext.cc PinyinParser.cc SimpTradConverter.cc SpecialPhraseTable.cc
-  Variant.cc)
+  BopomofoContext.cc Database.cc DataDir.cc DoublePinyinContext.cc
+  DynamicSpecialPhrase.cc FullPinyinContext.cc InputContext.cc
+  PhoneticContext.cc PhraseEditor.cc PinyinContext.cc PinyinParser.cc
+  SimpTradConverter.cc SpecialPhraseTable.cc Variant.cc)
 list(TRANSFORM _pyzy_srcs PREPEND "${_pyzy_dir}/")
 
 add_library(pyzy ${_pyzy_srcs})
@@ -164,9 +253,7 @@ set_target_properties(pyzy PROPERTIES
 # pyzy's src/String.h on case-insensitive filesystems (Windows, macOS).
 target_include_directories(pyzy PRIVATE
   "${CMAKE_CURRENT_BINARY_DIR}")      # for our generated <config.h> only
-target_compile_definitions(pyzy PRIVATE
-  HAVE_CONFIG_H
-  "PKGDATADIR=\"${CMAKE_INSTALL_FULL_DATADIR}/pyzy\"")
+target_compile_definitions(pyzy PRIVATE HAVE_CONFIG_H)
 # Util.h takes the std::shared_ptr path only when __GXX_EXPERIMENTAL_CXX0X__ is
 # defined, otherwise it falls back to boost. GCC and Clang's GNU driver
 # predefine it in C++11 mode; neither MSVC nor clang-cl does, and we require
@@ -242,12 +329,10 @@ if(PYZY_BUILD_DB_ANDROID)
       COMMENT "pyzy: building android.db"
       VERBATIM)
     add_custom_target(pyzy-db ALL DEPENDS "${_db}/android.db")
-    install(FILES "${_db}/android.db"
-      DESTINATION "${CMAKE_INSTALL_DATADIR}/pyzy/db")
-    # Published for tests/pyzy: Database::open() only looks in PKGDATADIR (an
-    # install path that does not exist in a build tree) and then at "main.db"
-    # in the process's working directory, so the conversion tests have to stage
-    # this file themselves. Empty when there is no database to stage.
+    # Published for cmake/LibpathimeRuntimeData.cmake, which installs it as
+    # main.db under pathime-data/pyzy, and for tests/pyzy. Empty when there is
+    # no database, which is a supported configuration: pyzy still builds and
+    # the Chinese engines report themselves unavailable.
     set(PYZY_ANDROID_DB "${_db}/android.db" CACHE INTERNAL
       "Path to the android.db this build produces, or empty if it was skipped")
   else()
@@ -269,6 +354,10 @@ install(TARGETS pyzy
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
 install(FILES
   "${PYZY_SRC}/src/Const.h" "${PYZY_SRC}/src/InputContext.h" "${PYZY_SRC}/src/Variant.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/DataDir.h"
   DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pyzy-1.0/PyZy")
-install(FILES "${PYZY_SRC}/src/phrases.txt"
-  DESTINATION "${CMAKE_INSTALL_DATADIR}/pyzy")
+# phrases.txt is not installed here, for the same reason android.db is not:
+# libpathime tells pyzy where to look, so the copy that matters is the one
+# under pathime-data/ that cmake/LibpathimeRuntimeData.cmake installs.
+set(PYZY_PHRASES_FILE "${PYZY_SRC}/src/phrases.txt" CACHE INTERNAL
+  "pyzy's stock special-phrase table")

@@ -15,8 +15,8 @@ src/
                         interface target is folded in and retired)
   init.h/.cc            process-global layer: pathime_init/shutdown, init params,
                         version + status introspection; the header answers the
-                        two questions every other file asks — initialized(),
-                        data_dir()
+                        questions every other file asks — initialized(),
+                        data_dir(), resource_dir()
   engine.h/.cc          pathime_engine_*: registry, handles, requirements. The
                         header defines struct pathime_engine
   context.h/.cc         pathime_context_*: lifecycle, process_key entry, focus /
@@ -31,6 +31,12 @@ src/
   keys.h/.cc            engine-agnostic key layer: validation, routing,
                         handled/unhandled
   utf8.h/.cc            encoding boundaries; copy-on-return helpers
+  module_path.h/.cc     which file this library is, so that the resource
+                        directory can default to one beside it
+  paths.h/.cc           path_join and is_regular_file, for the adapters that
+                        reach into the resource directory
+  win32_utf.h           UTF-8 <-> UTF-16 for the Windows entry points that
+                        name a file; Windows-only, header-only
   backend.h             the internal engine interface — the load-bearing seam
   engines/
     hangul/             hangul_backend.h/.cc

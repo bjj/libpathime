@@ -36,9 +36,7 @@
  * not open() succeeded, so the warning goes to stderr and the engine reports
  * success — it simply produces nothing. A test that only checked "some
  * candidates came back" would pass vacuously against a broken build tree;
- * naming five of them cannot. tests/api/CMakeLists.txt is where the database is
- * staged, and explains why that is a test-environment problem rather than a
- * library one.
+ * naming five of them cannot.
  */
 
 #include <string.h>
@@ -1155,9 +1153,9 @@ int main(void)
      * pyzy_global_init() roots its cache and config directories here, so the
      * learned-phrase database this run writes cannot be the developer's.
      *
-     * It is *not* how the main database is found. That one is located relative
-     * to the process's working directory, which only CTest can set — see
-     * tests/api/CMakeLists.txt.
+     * It is *not* how the main database is found. That one lives under
+     * resource_dir, left at its default here so this test opens the database
+     * staged beside the library exactly as a client would.
      */
     memset(&params, 0, sizeof(params));
     params.struct_size = sizeof(params);

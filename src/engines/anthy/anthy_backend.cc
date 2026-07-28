@@ -63,6 +63,7 @@
 
 #include "engines/anthy/romaji.h"
 #include "keys.h"
+#include "paths.h"
 
 namespace pathime {
 namespace {
@@ -656,41 +657,69 @@ public:
  * ------------------------------------------------------------------------- */
 
 /*
- * data_dir, and the personality trap it was designed around.
+ * Both directories, and the personality trap data_dir was designed around.
  *
- * anthy keeps its per-user state — the record file learning writes, and the
- * private dictionary — under a directory computed by anthy_get_user_dir()
- * (src-worddic/priv_dic.c:76): $XDG_CONFIG_HOME/anthy when that variable has a
- * value, otherwise $HOME/.config/anthy. Both names are read through
- * anthy_conf_get_str(), which consults the conf database first and falls back
- * to getenv() only for names nothing has overridden — so one public
- * anthy_conf_override("XDG_CONFIG_HOME", data_dir) moves all of it, and the
- * library creates the directory itself (anthy_check_user_dir, priv_dic.c:114).
+ * Everything anthy reads or writes is decided by four entries in its conf
+ * database, and all four are set here before anthy_init() ever runs. That is
+ * the whole configuration surface: anthy_conf_get_str() consults the database
+ * first and falls back to getenv() only for names nothing has overridden, so a
+ * name that is set here cannot be reached by the environment, by a conf file,
+ * or by whatever a system-wide anthy installation left lying around.
  *
- * anthy_set_personality() is what this avoids. It is public, but it is
- * process-global and write-once, which is precisely why pathime_init() has a
- * data_dir at all: making the *directory* the identity means a client wanting
- * a second profile passes a second path, and nothing in this library ever
- * contends for the one personality slot. That decision is the header's, at
- * pathime_init_params_t::data_dir; this is the code that honours it.
+ *  - CONFFILE is set empty, which means "there is no conf file". Without it
+ *    anthy reads its compiled-in one, so a machine with anthy installed and a
+ *    machine without it would configure this library differently.
+ *  - DIC_FILE is the dictionary, beneath resource_dir. This is the value that
+ *    would otherwise come out of that conf file, and passing it directly is
+ *    also what lets it be any path at all: a conf file's values are split on
+ *    whitespace, so a dictionary reached through one could never live under a
+ *    directory with a space in its name.
+ *  - XDG_CONFIG_HOME is data_dir. anthy computes its per-user directory —
+ *    the record file learning writes, and the private dictionary — in
+ *    anthy_get_user_dir() (src-worddic/priv_dic.c:76) as $XDG_CONFIG_HOME/anthy
+ *    when that name has a value and $HOME/.config/anthy otherwise, and it
+ *    creates the directory itself (anthy_check_user_dir, priv_dic.c:114).
+ *  - HOME is data_dir too, as the belt to that brace: it is what
+ *    anthy_get_user_dir() falls back to, and leaving it to the environment
+ *    would put one stray write in the developer's real home directory.
  *
- * Two residual limits, stated rather than papered over:
+ * anthy_set_personality() is what the data_dir arrangement avoids. It is
+ * public, but it is process-global and write-once, which is precisely why
+ * pathime_init() has a data_dir at all: making the *directory* the identity
+ * means a client wanting a second profile passes a second path, and nothing in
+ * this library ever contends for the one personality slot. That decision is
+ * the header's, at pathime_init_params_t::data_dir; this is the code that
+ * honours it.
  *
- *  - The conf database expands ${NAME} references in the values it stores
- *    (src-diclib/conf.c:130), so a data_dir containing "${" is mangled. Every
- *    other backend takes the path verbatim.
- *  - anthy_get_user_dir(1) — the legacy ~/.anthy location, consulted once when
- *    migrating an old private dictionary (src-worddic/textdict.c:129) — is
- *    computed from HOME and is not redirected. It is read-only and is only
- *    reached if that old directory exists.
- *
- * Not redirected on purpose: the *system* dictionary. That is read-only data
- * installed alongside anthy, found through CONFFILE, and is not per-user state.
+ * One residual limit, stated rather than papered over: anthy_get_user_dir(1) —
+ * the legacy ~/.anthy location, consulted once when migrating an old private
+ * dictionary (src-worddic/textdict.c:129) — is computed from the HOME set
+ * above rather than from the user's real one, so a client that changes
+ * data_dir between runs does not carry an old private dictionary across. It is
+ * read-only and is only reached if such a directory exists.
  */
-bool anthy_global_init(const char *data_dir)
+bool anthy_global_init(const char *data_dir, const char *resource_dir)
 {
+    const std::string dic =
+        path_join(path_join(resource_dir, "anthy"), "anthy.dic");
+
+    /*
+     * Checked in front of anthy_init() rather than left to it. anthy reports a
+     * missing dictionary the same way it reports a corrupt one — -1, plus two
+     * lines on its logger — and a build that simply does not ship Japanese is
+     * not an error worth printing to a client's stderr. Testing for the file
+     * first turns the ordinary case into a quiet false, and leaves anthy's
+     * complaint to mean what it says: the dictionary is there and unusable.
+     */
+    if (!is_regular_file(dic)) {
+        return false;
+    }
+
+    anthy_conf_override("CONFFILE", "");
+    anthy_conf_override("DIC_FILE", dic.c_str());
     if (data_dir && data_dir[0] != '\0') {
         anthy_conf_override("XDG_CONFIG_HOME", data_dir);
+        anthy_conf_override("HOME", data_dir);
     }
 
     /* Nonzero is failure — the one anthy entry point that reports that way

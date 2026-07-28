@@ -56,10 +56,8 @@ libpathime_add_core_test(utf8 SOURCES "${PROJECT_SOURCE_DIR}/src/utf8.cc")
 #
 # The vendor include, link and compile-definition wiring is inherited from the
 # pathime target rather than restated. Copying it would mean duplicating the
-# pyzy header staging, the anthy include dir and pyzy's PKGDATADIR mirror, and
-# the copy would drift the first time any of them changes — which is exactly
-# what happened when PATHIME_PYZY_PKGDATADIR was added to src/CMakeLists.txt
-# alone and this test stopped compiling.
+# pyzy header staging and the anthy include dir, and the copy would drift the
+# first time either of them changes.
 set(_lpi_options_sources
   "${PROJECT_SOURCE_DIR}/src/init.cc"
   "${PROJECT_SOURCE_DIR}/src/engine.cc"
@@ -68,6 +66,8 @@ set(_lpi_options_sources
   "${PROJECT_SOURCE_DIR}/src/candidates.cc"
   "${PROJECT_SOURCE_DIR}/src/options.cc"
   "${PROJECT_SOURCE_DIR}/src/keys.cc"
+  "${PROJECT_SOURCE_DIR}/src/module_path.cc"
+  "${PROJECT_SOURCE_DIR}/src/paths.cc"
   "${PROJECT_SOURCE_DIR}/src/utf8.cc")
 if(LIBPATHIME_WITH_HANGUL)
   list(APPEND _lpi_options_sources

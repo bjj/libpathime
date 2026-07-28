@@ -438,23 +438,16 @@ is implemented and tested end to end (`api.engine_hangul`, `api.engine_anthy`,
   descriptor cross-check and as an explicit setter refusal on each pyzy id with
   anthy as the contrast case.
 - ~~**pyzy's availability cannot be detected.**~~ **Done (2026-07-27.)**
-  `pyzy_database_present()` in `src/engines/pyzy/pyzy_backend.cc` runs in front
-  of `PyZy::InputContext::init()` and mirrors `Database::open()`'s four
-  candidates (`Database.cc:247-252`) with the same `stat`/`S_ISREG` predicate
-  glib's `G_FILE_TEST_IS_REGULAR` uses; `PKGDATADIR` reaches the adapter as
-  `PATHIME_PYZY_PKGDATADIR`, derived in `src/CMakeLists.txt` from the same
-  expression the pyzy port uses so the two cannot drift. Returning false leaves
-  `PyZy::InputContext::init()` uncalled, which keeps `finalize()` balanced.
-  Covered by `api.engine_pyzy_nodb`, which is registered only when the
-  configure-time probe finds no system-wide pyzy database — its premise is a
-  property of the machine, not of the build.
+  `pyzy_global_init()` in `src/engines/pyzy/pyzy_backend.cc` tests for
+  `<resource_dir>/pyzy/main.db` in front of `PyZy::InputContext::init()`, using
+  the same `stat`/`S_ISREG` predicate glib's `G_FILE_TEST_IS_REGULAR` uses —
+  which is the test pyzy itself applies, so the two cannot disagree. Returning
+  false leaves `PyZy::InputContext::init()` uncalled, which keeps `finalize()`
+  balanced. Covered by `api.engine_pyzy_nodb`.
 
-  Two things worth keeping: the conversion probe is still *not* the answer (with
-  no database open `m_db` is NULL and the query path dereferences it, so the
-  probe meant to detect the broken install is what crashes on it), and the
-  mirrored candidate list is now duplicated in `tests/api/CMakeLists.txt`'s
-  probe as well — three places if pyzy's list ever changes, in a vendored tree
-  we do not edit.
+  Worth keeping: the conversion probe is still *not* the answer. With no
+  database open `m_db` is NULL and the query path dereferences it, so the probe
+  meant to detect the broken install is what crashes on it.
 - **`ContextBackend::options_changed()` closed a real gap, and there may be
   more of its kind.** A mid-composition option change reached the store and the
   getters but not the engine: pyzy had already converted, and "options are
@@ -738,25 +731,15 @@ demo's event log.
   detects overlapping calls. If that proves to be a common client bug, a debug
   build could catch it cheaply with a non-recursive in-call flag per context.
 
-- **A backend's global init failing is per-engine, not fatal — and that was a
-  bug first.** The first wiring of `pathime_init()` returned
-  `PATHIME_ERROR_BACKEND` if any compiled-in backend's hook failed. Running the
-  three adapters together for the first time showed what that costs: anthy
-  cannot find its dictionary in an uninstalled build tree, and one missing data
-  file took down hangul and pyzy with it. The header already had the right
-  channel — `pathime_has_engine()` is documented false for an engine "whose
-  runtime prerequisites, such as its dictionaries, are unavailable" — so
-  `init.cc` now records per-backend readiness and `engine_available()` consults
-  it, and `pathime_init()` succeeds. `PATHIME_ERROR_BACKEND` from
-  `pathime_init()` would mean the library itself is unusable, which is a
-  different and much rarer claim.
-
-- **Neither anthy nor pyzy can find its data in an uninstalled build tree.**
-  This is a test-environment fact, not a library bug: both find their own data
-  once installed. `tests/api/CMakeLists.txt` solves it the way the vendored
-  suites do — `anthy_conf_override()` with build-tree paths for anthy, a staged
-  `main.db` plus a per-test working directory for pyzy. Worth knowing before
-  anyone "fixes" the library to hunt for data files itself.
+- **A backend's global init failing is per-engine, not fatal.** A hook that
+  returns false marks that backend unavailable and `pathime_init()` still
+  succeeds, because the header already has the right channel for it:
+  `pathime_has_engine()` is documented false for an engine "whose runtime
+  prerequisites, such as its dictionaries, are unavailable". `init.cc` records
+  per-backend readiness and `engine_available()` consults it.
+  `PATHIME_ERROR_BACKEND` from `pathime_init()` would mean the library itself is
+  unusable, which is a different and much rarer claim — and one missing
+  dictionary must not cost a client the engines that would have worked.
 
 - **Two header sentences the stub-out had to interpret.** Both were decided in
   code with the reasoning written at the decision point; both are cheap to flip

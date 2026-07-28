@@ -30,6 +30,17 @@ bool initialized();
 const char *data_dir();
 
 /**
+ * The resolved resource directory: pathime_init_params_t::resource_dir as
+ * given, or `pathime-data` beside the libpathime binary, which is what NULL
+ * selects. Never NULL while initialized(); same ownership as data_dir().
+ *
+ * This is where every read-only file the library ships lives — the anthy
+ * dictionary, the pyzy database — and it is the counterpart of data_dir():
+ * one directory the library only reads, one it only writes.
+ */
+const char *resource_dir();
+
+/**
  * True if the backend behind @a id brought its process-global prerequisites up
  * successfully during pathime_init().
  *

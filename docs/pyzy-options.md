@@ -32,10 +32,13 @@ cycle.
 Both directories are consumed to construct the process-global singletons: `Database::init()`
 (shared SQLite phrase database + user-phrase history) and `SpecialPhraseTable::init()` (loads
 `phrases.txt` from the config dir) — `InputContext.cc:57-58`, `Database.h:66,80-86`,
-`SpecialPhraseTable.h:48-49`. There is no API to reconfigure these paths, swap the phrase
-database, or point at a different bundled dictionary at runtime; the only "dictionary selection"
-pyzy offers is *which* directory holds the user's own `phrases.txt` and cache. `Database::instance()`
-hard-errors (`g_error`) if queried before `init()` — this is a lifecycle contract, not an option.
+`SpecialPhraseTable.h:48-49`. There is no API to reconfigure these paths after `init()`, swap the
+phrase database, or point at a different bundled dictionary at runtime; the only "dictionary
+selection" pyzy offers is *which* directory holds the user's own `phrases.txt` and cache. Where
+the *shipped* data is read from is `pyzy_set_data_dir()`, which the port adds (`DataDir.h`) and
+libpathime calls from `pyzy_global_init()`; that too is set once, before `init()`.
+`Database::instance()` hard-errors (`g_error`) if queried before `init()` — this is a lifecycle
+contract, not an option.
 
 **Classification:** **Could be either**, but leans **user preference / deployment configuration**.
 The paths themselves are the kind of thing a host application decides once at install/profile

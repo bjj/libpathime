@@ -45,13 +45,12 @@
 
 /*
  * No backend header, and deliberately so. This test drives anthy through
- * <pathime/pathime.h> alone; the dictionary it needs is found by pointing
- * anthy's CONFFILE at a build-tree conf file from the environment, which
- * tests/api/CMakeLists.txt sets. Calling anthy_conf_override() from here
- * instead would need this program to link anthy — and on Windows that is not
- * merely inelegant but broken, because anthy is a *static* library absorbed
- * into pathime.dll, so a second copy linked into the test executable has its
- * own conf database and the library never sees the override. See
+ * <pathime/pathime.h> alone, and the dictionary it needs is the one staged
+ * beside the library, which the default resource_dir finds — the same route a
+ * client takes. Linking anthy to configure it directly would not merely be
+ * inelegant: on Windows anthy is a *static* library absorbed into pathime.dll,
+ * so a second copy linked into the test executable would have its own conf
+ * database and the library would never see the override. See
  * tests/api/CMakeLists.txt and cmake/ports/anthy-unicode/CMakeLists.txt.
  */
 
@@ -927,10 +926,9 @@ int main(void)
 
     /*
      * Not a conditional skip. Unlike libhangul, anthy has a runtime
-     * prerequisite that can fail — but the CONFFILE this test is run with is
-     * exactly what makes it succeed, so a false here means the wiring in
-     * tests/api/CMakeLists.txt is broken and the right response is a failure,
-     * not a quietly green run.
+     * prerequisite that can fail — but this build stages the dictionary beside
+     * the library, so a false here means that staging is broken and the right
+     * response is a failure, not a quietly green run.
      */
     PT_CHECK(pathime_has_engine(PATHIME_ENGINE_ANTHY));
     PT_CHECK_STATUS(pathime_engine_create(PATHIME_ENGINE_ANTHY, &engine), PATHIME_OK);

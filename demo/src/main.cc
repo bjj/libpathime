@@ -10,17 +10,15 @@
  * level. Nothing here is a test — tests/ does that — and nothing here is
  * required to build the library.
  *
- * This file is the bootstrap: process arguments, put the backends' runtime
- * data within reach, initialize, run the event loop, shut down. Everything
- * else is app.cc (the client), render.cc (the screen) and keymap.cc (the one
- * piece of platform glue a terminal makes necessary).
+ * This file is the bootstrap: process arguments, initialize, run the event
+ * loop, shut down. Everything else is app.cc (the client), render.cc (the
+ * screen) and keymap.cc (the one piece of platform glue a terminal makes
+ * necessary).
  */
 
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
 #include <exception>
-#include <filesystem>
 #include <string>
 
 #include <cpp-terminal/event.hpp>
@@ -48,46 +46,6 @@ void usage(const char *argv0)
         "  --list          print which engines this build can supply, and exit\n"
         "  --help          this\n",
         argv0);
-}
-
-/** Set an environment variable, leaving an existing value alone. */
-void set_env_default(const char *name, const char *value)
-{
-    if (std::getenv(name) != nullptr) return;
-#ifdef _WIN32
-    _putenv_s(name, value);
-#else
-    setenv(name, value, 0);
-#endif
-}
-
-/*
- * Put the backends' data within reach, for a demo run out of the build tree.
- *
- * Neither anthy nor pyzy can find its data in an uninstalled build: anthy takes
- * DIC_FILE from the conf file named by CONFFILE, and pyzy's Database::open()
- * falls back to "main.db" relative to the working directory. Both are reached
- * the way an installation reaches them — through the environment and the
- * backend's own search path — because the library deliberately does not hunt
- * for data files itself, and a client should not have to either.
- *
- * All of this is compiled in only when demo/CMakeLists.txt supplied the paths,
- * so an installed copy of this program does none of it and each backend finds
- * its own data. See tests/api/CMakeLists.txt, which solves the same problem for
- * the same reason at greater length.
- */
-void locate_backend_data()
-{
-#ifdef PATHIME_DEMO_ANTHY_CONF
-    set_env_default("CONFFILE", PATHIME_DEMO_ANTHY_CONF);
-#endif
-#ifdef PATHIME_DEMO_PYZY_DIR
-    /* pyzy has no API for this: the database is staged next to us and we move
-     * to it. Nothing else in this program touches the filesystem, so changing
-     * the working directory costs nothing. */
-    std::error_code ec;
-    std::filesystem::current_path(PATHIME_DEMO_PYZY_DIR, ec);
-#endif
 }
 
 const char *engine_name(pathime_engine_id_t id)
@@ -178,8 +136,6 @@ int main(int argc, char **argv)
             return 2;
         }
     }
-
-    locate_backend_data();
 
 #ifdef PATHIME_DEMO_DATA_DIR
     if (data_dir.empty()) data_dir = PATHIME_DEMO_DATA_DIR;

@@ -305,6 +305,32 @@ typedef struct pathime_init_params {
      * user's configuration directory. Borrowed for the duration of the call.
      */
     const char *data_dir;
+
+    /**
+     * The directory holding the read-only data files this library ships with:
+     * the Japanese dictionary, the Chinese phrase database, and whatever a
+     * future engine adds. The library only reads from it, and never writes
+     * there — everything an engine learns goes under @a data_dir.
+     *
+     * NULL selects the directory named `pathime-data`, beside the libpathime
+     * binary itself: next to the shared library that is executing, or next to
+     * the program when the library is linked statically. So a client that
+     * keeps `pathime-data/` alongside the library it already ships needs to
+     * set nothing here, wherever that pair is installed and whatever the
+     * process's working directory happens to be. Supplying a path is for a
+     * client whose layout separates the two — a system package with the code
+     * in a library directory and the data under a shared one, say.
+     *
+     * A NUL-terminated filesystem path in UTF-8, with the same conventions as
+     * @a data_dir. Any path the platform accepts works: spaces, non-ASCII
+     * characters and shell metacharacters are all carried through to the
+     * backends verbatim.
+     *
+     * An engine whose data is not found is reported unavailable by
+     * pathime_has_engine(); it does not fail pathime_init() or affect the
+     * other engines.
+     */
+    const char *resource_dir;
 } pathime_init_params_t;
 
 /**

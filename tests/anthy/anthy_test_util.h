@@ -15,12 +15,12 @@
 
 #include <anthy/anthy.h>
 
-/* The build system must tell us where the freshly built dictionary and its
- * conf file are, and give us a scratch HOME. Without them a test would
- * silently fall back to whatever anthy is installed on the machine — which is
- * exactly the failure mode these tests exist to rule out. */
-#if !defined(ANTHY_TEST_CONF) || !defined(ANTHY_TEST_DIC) || !defined(ANTHY_TEST_HOME)
-# error "ANTHY_TEST_CONF, ANTHY_TEST_DIC and ANTHY_TEST_HOME must be defined"
+/* The build system must tell us where the freshly built dictionary is and give
+ * us a scratch HOME. Without them a test would silently fall back to whatever
+ * anthy is installed on the machine — which is exactly the failure mode these
+ * tests exist to rule out. */
+#if !defined(ANTHY_TEST_DIC) || !defined(ANTHY_TEST_HOME)
+# error "ANTHY_TEST_DIC and ANTHY_TEST_HOME must be defined"
 #endif
 
 static int at_failures;
@@ -64,22 +64,25 @@ at_log(int level, const char *msg)
 
 /*
  * Point anthy at the build tree. This has to happen before anthy_init(): the
- * first conf lookup triggers anthy_do_conf_init(), which reads CONFFILE and
- * then refuses to run again.
+ * first conf lookup triggers anthy_do_conf_init(), which then refuses to run
+ * again.
  *
- * XDG_CONFIG_HOME is cleared explicitly. anthy_get_user_dir() prefers it over
- * HOME, and anthy_conf_get_str() falls back to getenv() for any name it has
- * no value for — so on a Linux desktop, overriding HOME alone still leaves the
- * private dictionary being written to the real ~/.config/anthy.
+ * An empty CONFFILE says there is no conf file to read, so every value anthy
+ * uses is one of the three below and none can come from an installation on
+ * this machine. XDG_CONFIG_HOME is given an explicit empty value for the same
+ * reason: anthy_get_user_dir() prefers it over HOME and falls through to HOME
+ * when it is empty, but a name with no value at all falls back to getenv() —
+ * so on a Linux desktop, setting HOME alone would still leave the private
+ * dictionary being written to the real ~/.config/anthy.
  */
 static void
 at_point_at_build_tree(void)
 {
   anthy_set_logger(at_log, 0);
-  anthy_conf_override("CONFFILE", ANTHY_TEST_CONF);
+  anthy_conf_override("CONFFILE", "");
+  anthy_conf_override("DIC_FILE", ANTHY_TEST_DIC);
   anthy_conf_override("HOME", ANTHY_TEST_HOME);
   anthy_conf_override("XDG_CONFIG_HOME", "");
-  anthy_conf_override("DIC_FILE", ANTHY_TEST_DIC);
 }
 
 /*

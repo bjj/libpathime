@@ -51,6 +51,12 @@ via `anthy_conf_override` or the conf file, `anthy_conf_get_str` falls back to `
 variable, and `anthy_conf_override` is a program-level way to set the same variable without
 touching the process environment.
 
+Two of those behaviours differ in the copy of `conf.c` libpathime compiles (see
+`docs/windows-port.md`, "Generated source variants"): values passed to `anthy_conf_override` are
+stored verbatim rather than `${VAR}`-substituted, so a caller can name any path; and an empty
+`CONFFILE` means there is no conf file to read, rather than falling back to the compiled-in one.
+Conf-file parsing is untouched, substitution included.
+
 Known variables actually consumed elsewhere in the codebase (found by grepping
 `anthy_conf_get_str` call sites):
 

@@ -276,6 +276,14 @@ public:
  * defined by the adapter directory for its backend and declared here so that
  * init.cc can call it without naming a vendor type; the gating on
  * PATHIME_WITH_* lives at the call site.
+ *
+ * Every init hook takes the same pair, both absolute and both NUL-terminated
+ * UTF-8: @a data_dir, which that backend may read and write, and
+ * @a resource_dir, which holds the read-only files the library ships and which
+ * it must only read. A backend needing neither still takes both, so that the
+ * hook is one shape rather than three. Returning false means the backend's
+ * prerequisites are not there and reaches the client as pathime_has_engine()
+ * answering false; it never fails pathime_init().
  * ------------------------------------------------------------------------- */
 
 #if PATHIME_WITH_HANGUL
@@ -286,7 +294,7 @@ public:
  * which the top-level CMakeLists turns off, and the nine built-in layouts are
  * static tables. It exists so that init.cc's shape does not have a hole in it.
  */
-bool hangul_global_init(const char *data_dir);
+bool hangul_global_init(const char *data_dir, const char *resource_dir);
 void hangul_global_shutdown();
 
 /** A new engine for PATHIME_ENGINE_HANGUL. */
@@ -294,13 +302,13 @@ std::unique_ptr<EngineBackend> hangul_create_engine();
 #endif
 
 #if PATHIME_WITH_ANTHY
-bool anthy_global_init(const char *data_dir);
+bool anthy_global_init(const char *data_dir, const char *resource_dir);
 void anthy_global_shutdown();
 std::unique_ptr<EngineBackend> anthy_create_engine();
 #endif
 
 #if PATHIME_WITH_PYZY
-bool pyzy_global_init(const char *data_dir);
+bool pyzy_global_init(const char *data_dir, const char *resource_dir);
 void pyzy_global_shutdown();
 
 /**

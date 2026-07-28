@@ -94,17 +94,11 @@ two engines that read key position — Hangul, and Japanese under
 a real windowing system reports the true key and has no such problem. CapsLock,
 NumLock and Super are likewise not knowable here and are never reported.
 
-## Running out of a build tree
-
-There is code in `main.cc` to enable this demo to run from the build tree and
-still have the backends find their (uninstalled) data files. This shouldn't be
-necessary for a real application using an installed `libpathime`.
-
 ## Layout
 
 | File | What it owns |
 |---|---|
-| `src/main.cc` | Arguments, runtime data, `pathime_init()`, the event loop |
+| `src/main.cc` | Arguments, `pathime_init()`, the event loop |
 | `src/app.cc` | The client: engines, contexts, the document, the callbacks, what an unhandled key means |
 | `src/keymap.cc` | Terminal key press → `pathime_key_event_t` |
 | `src/options_view.cc` | Walking the option inventory, formatting a value, changing one |

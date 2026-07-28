@@ -11,13 +11,12 @@
 # The awkward part is pointing the programs at the dictionary this build just
 # produced rather than at an installed anthy. anthy finds its data through the
 # conf database in src-diclib/conf.c: anthy_conf_override() sets a value, and
-# anything not set falls back to getenv() of the same name, with CONFFILE read
-# once during anthy_init(). Upstream's tests hard-code build-tree-relative
-# paths ("../anthy-unicode.conf", "../mkanthydic/anthy.dic") into those
-# overrides, so they can only be steered by choosing their working directory —
-# which is why the port lays its dictionary tree out exactly like meson's and
-# publishes ANTHY_TEST_RUNDIR. Our own tests take absolute paths as -D defines
-# instead.
+# anything not set falls back to getenv() of the same name. Upstream's tests
+# hard-code build-tree-relative paths ("../anthy-unicode.conf",
+# "../mkanthydic/anthy.dic") into those overrides, so they can only be steered
+# by choosing their working directory — which is why the port lays its
+# dictionary tree out exactly like meson's and publishes ANTHY_TEST_RUNDIR. Our
+# own tests take absolute paths as -D defines instead.
 
 if(NOT TARGET anthy-dic)
   message(FATAL_ERROR
@@ -169,19 +168,17 @@ set_property(TEST anthy.vendor.main APPEND PROPERTY
 # libpathime's own tests
 # ---------------------------------------------------------------------------
 #
-# Absolute paths, no working-directory games, no reliance on a system temp
-# directory, and a runtime check that the compiler read the source as UTF-8 —
-# see anthy_test_util.h.
+# Absolute paths, no working-directory games, no environment, no reliance on a
+# system temp directory, and a runtime check that the compiler read the source
+# as UTF-8 — see anthy_test_util.h.
 
 function(_anthy_own_test name source)
   set(_target "anthy_test_${name}")
   _anthy_test_exe(${_target} "${CMAKE_CURRENT_SOURCE_DIR}/${source}")
   target_compile_definitions(${_target} PRIVATE
-    "ANTHY_TEST_CONF=\"${ANTHY_TEST_CONF_FILE}\""
-    "ANTHY_TEST_DIC=\"${ANTHY_TEST_DIC_FILE}\""
+    "ANTHY_TEST_DIC=\"${ANTHY_DIC_FILE}\""
     "ANTHY_TEST_HOME=\"${_test_home}\"")
   add_test(NAME anthy.${name} COMMAND ${_target})
-  set_tests_properties(anthy.${name} PROPERTIES ENVIRONMENT "XDG_CONFIG_HOME=")
 endfunction()
 
 _anthy_own_test(convert test_convert.c)

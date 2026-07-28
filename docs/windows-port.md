@@ -34,9 +34,24 @@ This is also where pyzy's UUID provider comes from: the shim forwards to
 
 ## 2. Generated source variants
 
-Where a vendored file is not valid on an MSVC-style compiler, the port compiles
-a fixed *copy* produced at configure time. Editing a submodule therefore needs a
-re-run of CMake for the change to reach the copy.
+Where a vendored file is not valid on an MSVC-style compiler, or cannot be told
+something libpathime needs to tell it, the port compiles a fixed *copy* produced
+at configure time. Editing a submodule therefore needs a re-run of CMake for the
+change to reach the copy.
+
+Two of them are not Windows-specific and are generated on every platform:
+
+- `anthy-unicode/src-diclib/conf.c` expands `${NAME}` references inside every
+  value stored, and reads its compiled-in conf file unconditionally. The copy
+  stores `anthy_conf_override()` values verbatim and treats an empty `CONFFILE`
+  as "there is no conf file", which together make the override API an exact and
+  complete way to configure anthy.
+- `pyzy/src/Database.cc` and `SpecialPhraseTable.cc` name their data by a
+  compiled-in `PKGDATADIR` and by the process's working directory. The copies
+  take it from `pyzy_set_data_dir()` instead — `DataDir.h`, which the port adds
+  to pyzy.
+
+The Windows-only ones:
 
 - `anthy-unicode/src-diclib/alloc.c` casts heap pointers through `unsigned
   long`, which is 32-bit under LLP64; the copy uses `uintptr_t`.
@@ -44,17 +59,21 @@ re-run of CMake for the change to reach the copy.
   create `%USERPROFILE%\.config\anthy`; the copy teaches it drive letters and
   `\`. This is what lets `pathime_init_params_t::data_dir` name a multi-level
   Windows path that does not exist yet.
-- `pyzy/src/` is mirrored whole, into `PYZY_EFFECTIVE_SRC_DIR`.
-  `PinyinParserTable.h` uses GNU labelled-field initialisers; `String.h` is
-  missing `operator<<` overloads that only LP64 made unnecessary;
+- `anthy-unicode/src-diclib/filemap.c` opens the dictionary with the narrow
+  `open()`, which decodes its argument in the active code page; the copy
+  converts from UTF-8 and calls `_wopen`, so an install path outside that code
+  page still works.
+- `pyzy/src/`'s Windows fixes ride on the same mirror as the data-directory
+  change above. `PinyinParserTable.h` uses GNU labelled-field initialisers;
+  `String.h` is missing `operator<<` overloads that only LP64 made unnecessary;
   `PhraseEditor.h` forward-declares `class Config` where it is a `struct`,
   which MSVC's mangling notices; and `BopomofoContext.cc` casts a
   `const wchar_t *` to UCS-4, which is only correct where `wchar_t` is 32 bits.
 
 Consumers of pyzy's headers must use `PYZY_EFFECTIVE_SRC_DIR` rather than
-`pyzy/src`, since on Windows the mirror is what the library was actually built
-from. `src/CMakeLists.txt` does this when it stages the public headers for the
-adapter.
+`pyzy/src`: the mirror is what the library was actually built from, on every
+platform. `src/CMakeLists.txt` does this when it stages the public headers for
+the adapter.
 
 ## 3. Build-time behaviour
 
@@ -70,9 +89,8 @@ On Windows the anthy family is built **static** regardless of
 `BUILD_SHARED_LIBS`. The reason is anthy's own — cross-library global data — and
 is set out in `docs/anthy-mapping.md`, "Why the anthy family is built static on
 Windows", along with the constraint it imposes: **nothing that links
-`libpathime` may also link anthy.** That constraint is the reason
-`tests/api/` reaches anthy's build-tree data through the `CONFFILE` environment
-variable instead of `anthy_conf_override()`; see `docs/testing.md`.
+`libpathime` may also link anthy.** That constraint is why nothing under
+`tests/api/` links a backend library; see `docs/testing.md`.
 
 libhangul and pyzy still produce DLLs under a shared build.
 
