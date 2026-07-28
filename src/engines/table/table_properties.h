@@ -190,6 +190,21 @@ struct TableProperties {
     bool is_wildcard(char32_t scalar) const;
 
     /**
+     * True if @a scalar acts as a wildcard at this position — where @a first_key
+     * says whether it is the first key of the run.
+     *
+     * The distinction exists because a wildcard may also be one of the table's
+     * own input characters, which is how Cangjie gets `z` (see
+     * derive_single_wildcard() in table_source.h). Such a wildcard is literal at
+     * position 0 and a wildcard everywhere after, so cangjie5's `z`-prefixed
+     * punctuation codes keep working while `hz` still searches.
+     *
+     * A wildcard outside the table's alphabet is unambiguous and behaves the
+     * same in both positions; is_wildcard() answers for that case directly.
+     */
+    bool is_wildcard_at(char32_t scalar, bool first_key) const;
+
+    /**
      * Tier 3 (backend.h EngineBackend::declared_number): the value this table
      * declares for @a option, if it declares one.
      *

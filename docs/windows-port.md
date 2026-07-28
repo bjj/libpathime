@@ -115,3 +115,29 @@ produces.
   by vcpkg's applocal step; deploying an install needs them copied alongside.
 - `hangul.vendored.unittest` does not run on Windows; `docs/testing.md`
   explains why, and what covers the same ground instead.
+
+## Unfinished: the table engine on Windows
+
+The table engine was written and tested on Linux only. Nothing structurally
+blocks it — it needs SQLite from vcpkg, which pyzy already requires, and
+`tools/table-compile` is an ordinary host tool — but no Windows build of it has
+been run, and this document has not been revisited against it.
+
+One piece is genuinely missing rather than merely unverified: **the glyph
+coverage map has no Windows generator.** Compiled tables are trimmed to a font's
+character coverage (see BUILD.md, "Glyph coverage"), and the map is generated
+data checked into the tree rather than a font read at build time. The generator,
+`tools/generate-coverage.py`, is platform-neutral except for one function,
+`read_charset()`, which currently only knows how to ask fontconfig.
+
+That function's docstring is the brief: it names `GetFontUnicodeRanges` as the
+equivalent call, sketches the `AddFontResourceEx` → memory DC → `GLYPHSET`
+sequence, and flags the trap — `WCRANGE` is in UTF-16 code *units*, so anything
+above the BMP arrives as surrogate halves and has to be recombined or that
+coverage is silently lost. The shipped tables do reach past the BMP.
+
+The instruction that matters most: **ship a second generated header and select
+between them, rather than overwriting the Linux one.** Each platform wants a map
+from its own font, and a single map generated on whichever machine ran last is
+exactly the non-reproducibility this design exists to avoid. Choosing which
+Windows font counts as "deliberately inclusive" is a decision, not a lookup.

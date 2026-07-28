@@ -109,6 +109,8 @@ developer command prompt, and remember to re-set `VCPKG_ROOT` afterwards.
 | `LIBPATHIME_WITH_HANGUL` / `_ANTHY` / `_PYZY` | `ON` | Enable each backend, both the vendored library and its adapter. A backend whose dependencies are missing is warned about and skipped. |
 | `LIBPATHIME_WITH_TABLE` | `ON` | The table-driven backend. Needs `sqlite3`; skipped with a warning (or a hard error under `LIBPATHIME_REQUIRE_BACKENDS`) without it. |
 | `LIBPATHIME_TABLES` | five tables | Which tables to compile into `pathime-data/table/`, as `<name>\|<source>\|<freq source>` entries. Default: `cangjie5`, `quick5`, `wubi-jidian86`, `stroke5`, `zhuyin` — about 9 MB compiled. All thirteen families in the submodule are available; adding one is a line. |
+| `LIBPATHIME_TABLE_REGENERATE_COVERAGE` | `OFF` | Offer a `pathime-table-coverage` target that rewrites `src/engines/table/coverage_data.h` from a font. Needs Python 3 and fontconfig. See "Glyph coverage" below — the ordinary build never reads a font. |
+| `LIBPATHIME_TABLE_COVERAGE_FONT` | Noto Sans CJK | The font that target reads. Only consulted when the option above is `ON`. |
 | `LIBPATHIME_REQUIRE_BACKENDS` | `OFF` | Turn "missing dependency ⇒ skip" into a hard error (for CI). |
 | `LIBPATHIME_BUILD_TESTS` | `OFF` | Build the test suites — see `docs/testing.md`. |
 | `LIBPATHIME_BUILD_DEMO` | `OFF` | Build the interactive terminal demo — see `demo/README.md`. Needs the `demo/cpp-terminal` submodule. |
@@ -164,6 +166,32 @@ A client whose layout separates code from data sets
 `pathime_init_params_t::resource_dir` instead. Either way an engine whose data
 is absent is reported unavailable by `pathime_has_engine()` and costs the other
 engines nothing.
+
+### Glyph coverage
+
+Compiled tables are trimmed to the characters a deliberately inclusive CJK font
+can render. A stock Cangjie table holds roughly twice as many characters as the
+most capable font, so without the trim a slightly mistyped code fills the
+candidate list with tofu; about half of `cangjie5` and `quick5` is removed.
+
+**The build never reads a font.** The coverage map is generated data checked in
+at `src/engines/table/coverage_data.h` — the same arrangement
+`variants_data.h` has with Unicode data, and for the same reason: reading an
+installed font at build time would make a compiled `.db` a function of the build
+machine, so two builds of the same commit would ship different tables.
+
+Regenerating is a deliberate act, not a build step:
+
+```bash
+cmake -S . -B build -DLIBPATHIME_TABLE_REGENERATE_COVERAGE=ON \
+      -DLIBPATHIME_TABLE_COVERAGE_FONT=/path/to/font.ttc
+cmake --build build --target pathime-table-coverage
+```
+
+It writes into the source tree, because the output is a checked-in file meant to
+be reviewed in a diff. `tools/generate-coverage.py --help` and its module
+docstring carry the rest, including what a Windows implementation has to do
+differently. Per-table opt-out is `pathime-table-compile --no-glyph-filter`.
 
 ## Consuming the library
 

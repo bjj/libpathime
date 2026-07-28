@@ -54,10 +54,17 @@ C++17, covering `utf8.*`, `composition.*`, the options machinery, and the table
 engine's data layer at seams the public API cannot reach.
 
 `core.table` is also a structural assertion, not only a functional one. Its
-source list is five files from `engines/table/` plus `utf8.cc` — no core, no
-adapter — because everything below `table_backend.cc` is meant to be usable
-without the engine. A link error there would be the first sign that something in
-the parser, the database or the ranking had reached back across the seam.
+source list is six files from `engines/table/` plus `paths.cc` and `utf8.cc` —
+no core, no adapter — because everything below `table_backend.cc` is meant to be
+usable without the engine. A link error there would be the first sign that
+something in the parser, the database or the ranking had reached back across the
+seam.
+
+The mirror-image assertion sits in `core.options`, which compiles the *library's*
+table sources: `coverage.cc` is deliberately absent from that list, because the
+library does not link it. Glyph filtering runs once in `tools/table-compile`, and
+if `coverage.cc` ever became reachable from the library the two lists would stop
+agreeing and one of them would fail to link.
 
 ### `tests/<backend>/` — `<backend>.vendor*`
 

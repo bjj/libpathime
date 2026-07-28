@@ -19,6 +19,7 @@
 #include <string>
 #include <vector>
 
+#include "engines/table/coverage.h"
 #include "engines/table/ranking.h"
 #include "engines/table/table_db.h"
 #include "engines/table/table_properties.h"
@@ -476,6 +477,60 @@ void test_declared_options()
     PT_CHECK(properties.declared_text(PATHIME_OPT_TABLE_FILE) == nullptr);
 }
 
+/*
+ * The glyph-coverage map and the filter built on it.
+ *
+ * The specific code points asserted below are chosen to be structural rather
+ * than incidental: ASCII and the common Han characters any CJK font has, against
+ * a plane-2 code point that Noto Sans CJK does not reach. Regenerating the map
+ * from a newer Noto should not move any of them.
+ */
+void test_coverage()
+{
+    /* Covered: ASCII, common Han, and the CJK punctuation the tables emit. */
+    PT_CHECK(is_covered(0x0041));  /* A */
+    PT_CHECK(is_covered(0x6211));  /* 我 */
+    PT_CHECK(is_covered(0x7684));  /* 的 */
+    PT_CHECK(is_covered(0x3002));  /* 。 */
+
+    /*
+     * Not covered: a CJK Extension B code point outside Noto's repertoire. This
+     * is the class of character the filter exists for — a table carries it, no
+     * font can draw it, and it would otherwise sit in a candidate list as tofu.
+     */
+    PT_CHECK(!is_covered(0x2A6D6));
+
+    /* Every character counts, not just the first: one bad one condemns a phrase. */
+    PT_CHECK(phrase_is_covered("我的"));
+    PT_CHECK(!phrase_is_covered("我\xF0\xAA\x9B\x96"));  /* 我 + U+2A6D6 */
+
+    /* An empty phrase has nothing that could fail to render. */
+    PT_CHECK(phrase_is_covered(""));
+
+    /*
+     * The filter drops rows and reports how many, leaving the survivors in their
+     * original order — the compiled row order is contract (§4.2), so a filter
+     * that reordered would be a data-format bug rather than a cosmetic one.
+     */
+    TableSource source = parse(
+        "BEGIN_DEFINITION\nNAME = C\nEND_DEFINITION\n"
+        "BEGIN_TABLE\n"
+        "a\t\xE6\x88\x91\t1000\n"                  /* 我 */
+        "b\t\xF0\xAA\x9B\x96\t900\n"               /* U+2A6D6, dropped */
+        "c\t\xE7\x9A\x84\t800\n"                   /* 的 */
+        "d\t\xE6\x88\x91\xF0\xAA\x9B\x96\t700\n"   /* 我 + U+2A6D6, dropped */
+        "END_TABLE\n");
+
+    PT_CHECK(apply_coverage_filter(&source) == 2);
+    PT_CHECK(source.phrases.size() == 2);
+    PT_CHECK(source.phrases[0].phrase == "\xE6\x88\x91");
+    PT_CHECK(source.phrases[1].phrase == "\xE7\x9A\x84");
+
+    /* Filtering an already-clean table changes nothing and reports nothing. */
+    PT_CHECK(apply_coverage_filter(&source) == 0);
+    PT_CHECK(source.phrases.size() == 2);
+}
+
 }  // namespace
 
 int main(void)
@@ -493,5 +548,6 @@ int main(void)
     test_ranking();
     test_frequency_transfer();
     test_declared_options();
+    test_coverage();
     return pt_report("core.table");
 }

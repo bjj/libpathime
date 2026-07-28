@@ -292,6 +292,32 @@ void derive_goucima(TableSource *source)
     }
 }
 
+bool derive_single_wildcard(TableSource *source, char key)
+{
+    /* A table that chose its own wildcards keeps them: this is a default, not
+     * an override. */
+    if (!source->properties.single_wildcard.empty() ||
+        !source->properties.multi_wildcard.empty()) {
+        return false;
+    }
+
+    for (const PhraseRow &row : source->phrases) {
+        /*
+         * Position 0 is exempt. A leading occurrence stays literal at lookup
+         * time (TableProperties::is_wildcard_at), so it is not a conflict — and
+         * exempting it is what lets Cangjie keep its `z`-prefixed punctuation
+         * codes while gaining the wildcard everywhere else.
+         */
+        if (row.tabkeys.find(key, 1) != std::string::npos) {
+            return false;
+        }
+    }
+
+    source->properties.set("SINGLE_WILDCARD_CHAR", std::string(1, key));
+    source->properties.attrs["single_wildcard_char"] = std::string(1, key);
+    return true;
+}
+
 void apply_frequency_transfer(TableSource *target,
                               const TableSource &source,
                               int64_t threshold)

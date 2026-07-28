@@ -376,6 +376,12 @@ bool TableProperties::is_start_char(char32_t scalar) const
     if (start_chars.empty()) {
         return is_input_char(scalar);
     }
+    /*
+     * is_wildcard() rather than is_wildcard_at(scalar, true): the question here
+     * is whether the key may *begin a run*, not how it will be interpreted once
+     * it has. A leading `z` in cangjie5 is literal, and it still starts a run —
+     * it reaches the `z`-prefixed punctuation codes.
+     */
     return start_chars.count(scalar) != 0 || is_wildcard(scalar);
 }
 
@@ -387,6 +393,30 @@ bool TableProperties::is_wildcard(char32_t scalar) const
     }
     return (!single_wildcard.empty() && encoded == single_wildcard) ||
            (!multi_wildcard.empty() && encoded == multi_wildcard);
+}
+
+bool TableProperties::is_wildcard_at(char32_t scalar, bool first_key) const
+{
+    if (!is_wildcard(scalar)) {
+        return false;
+    }
+    if (!first_key) {
+        return true;
+    }
+
+    /*
+     * At position 0 a wildcard that is *also* one of the table's own input
+     * characters stays literal. Nothing else can distinguish the two readings,
+     * and the literal one is the one that loses data: in cangjie5 the 496
+     * `z`-prefixed rows are the punctuation codes, and they are reachable no
+     * other way, whereas a search beginning with a wildcard is a search for
+     * everything.
+     *
+     * A wildcard the table's alphabet does not contain is unambiguous
+     * everywhere, so it keeps working at position 0 — stroke5's `?` against
+     * VALID_INPUT_CHARS of `nm,./` is that case, and is unaffected by this rule.
+     */
+    return valid_input_chars.count(scalar) == 0;
 }
 
 bool TableProperties::declared_number(pathime_option_t option, int64_t *out) const

@@ -48,31 +48,53 @@ missing.
 
 `src/engines/table/README.md` is the map. What follows is only what is missing.
 
-Four questions this engine raised were answered in the round of 2026-07-28 and
+Six questions this engine raised were answered in the round of 2026-07-28 and
 are **built**: char prompts stay in the preedit (the header clause was widened
 to cover key legends rather than the engine changed); the table loads when
 `PATHIME_OPT_TABLE_FILE` is *set*, so a bad name fails at the setter with
 `PATHIME_ERROR_BACKEND`; `PATHIME_OPT_TABLE_PINYIN_FALLBACK` reports itself off
-unless the compiled database really carries pinyin rows; and full-width
-conversion (§11.4) now runs through `src/punctuation.*`, shared with the pyzy
-adapter rather than transcribed from §11.4, so one option means one thing across
-both Chinese engines. The reasoning belongs in `docs/design-history.md` once that
-file grows a table round (queued below).
+unless the compiled database really carries pinyin rows; full-width conversion
+(§11.4) runs through `src/punctuation.*`, shared with the pyzy adapter rather
+than transcribed from §11.4, so one option means one thing across both Chinese
+engines; compile-time glyph filtering trims each table to a font's coverage; and
+cangjie5, quick5 and zhuyin now get Apple's `z` wildcard, derived per table
+rather than defaulted. The reasoning belongs in `docs/design-history.md` once
+that file grows a table round (queued below).
 
 ### Not implemented, in rough priority order
 
-- **User-derived phrases (§10.2).** The remaining half of learning. `RULES` is
-  parsed, goucima are compiled into the database and `TableDatabase::goucima()`
-  reads them back, so the data is all present; what is missing is applying the
-  parsed rules to consecutive single-character selections to derive a compound
-  key and insert it with `freq = -1`, `user_freq = 1`.
+- **User-derived phrases (§10.2). DISCUSS BEFORE BUILDING — do not just
+  implement this.** Flagged 2026-07-28: what the feature *is* and whether this
+  library wants it has not been talked through, and the mechanism is unusual
+  enough that starting from the spec alone would be building to an unexamined
+  premise.
 
-  Two shipped tables declare `USER_CAN_DEFINE_PHRASE`, not one:
-  wubi-jidian86, which also carries `RULES`, and **zhuyin, which does not**.
-  Derivation is defined entirely as applying rules to goucima, so a table
-  without rules derives nothing — zhuyin gets a `goucima` table it never uses.
-  That is the only coherent reading and needs no option, but it does mean the
-  feature lands for exactly one shipped table.
+  The sketch, for that conversation. With `USER_CAN_DEFINE_PHRASE = TRUE`,
+  selecting two single characters in a row makes the engine silently invent a
+  *new dictionary entry* for the pair. The key it files the pair under is not
+  the keys the user typed: each character has a `goucima` ("word-formation
+  code", §3.3/§4.3), and `RULES` (§3.5) says which positions of which
+  characters' goucima to concatenate. wubi-jidian86's
+  `ce2:p11+p12+p21+p22` reads "for a 2-character phrase, take characters 1 and 2
+  of the first character's goucima, then characters 1 and 2 of the second".
+  The compound is inserted into the user database with `freq = -1`,
+  `user_freq = 1`, and afterwards typing that derived code produces the phrase.
+
+  So it is not learning in the sense `PATHIME_OPT_LEARNING` currently means
+  (reordering by use, §10.1, already implemented). It *creates vocabulary the
+  user never asked for*, under codes they were never shown. Whether that belongs
+  behind the same option, a different one, or not at all is the discussion.
+
+  State of the code: `RULES` is parsed, goucima are compiled into the database
+  and `TableDatabase::goucima()` reads them back, so the data is all present.
+  Only the derive-and-insert step is missing.
+
+  Two shipped tables declare `USER_CAN_DEFINE_PHRASE`, not one: wubi-jidian86,
+  which also carries `RULES`, and **zhuyin, which does not**. Derivation is
+  defined entirely as applying rules to goucima, so a table without rules
+  derives nothing — zhuyin gets a `goucima` table it never uses. That needs no
+  option, but it does mean the feature would land for exactly one shipped table,
+  which is worth weighing against the discussion above.
 - **Write batching (§5.3).** Not implemented, and possibly not worth it: the
   spec's checkpoint-after-16-updates is a durability detail, and the user
   database is in WAL mode where SQLite checkpoints on its own. Measure before
@@ -112,17 +134,6 @@ file grows a table round (queued below).
   table feature; and it would put pyzy's candidate ordering and learning inside
   a table candidate list, which is exactly the cross-engine inconsistency the
   "second pinyin" question was asking about.
-- **`z` as a Cangjie wildcard.** Apple's Cangjie makes `Z` stand for an unknown
-  part of a decomposition, and it turns out this is nearly free. In cangjie5
-  `z` occurs in 496 of 68,632 rows and **only ever as the first key** — no row
-  uses it in a non-initial position. Those 496 are the punctuation codes (`za`
-  → `'` `'` `"` `"` `〔`).
-
-  So setting `PATHIME_OPT_TABLE_SINGLE_WILDCARD` to `"z"` already gives the
-  behaviour, with no code change, and it is unambiguous everywhere except a
-  leading `z`. To have both, the rule is: `z` is a wildcard in non-initial
-  position and literal at position 1. Small, well-defined, and it needs a
-  decision only about whether the position rule is worth the special case.
 - **One of the nine sort keys (§8.2).** Key 2 (the pinyin tone-suffix penalty)
   is now moot: pinyin mode is not being implemented. Key 8 (Big5 code of the
   first character, Cangjie and Quick only) needs a Big5 mapping this library
@@ -148,52 +159,46 @@ file grows a table round (queued below).
   taking it would have added a third GPL-3 source. A licensing question about
   what libpathime distributes, not a technical one, and to be pursued
   separately from the engine work.
-- **Glyph-coverage filtering should be available, and the reasoning behind it
-  is not the one this implementation assumed.** Frequency transfer and font
-  trimming are two halves of one purpose, and only the first is implemented.
+- **Glyph-coverage filtering: the compile-time half is built; the runtime half
+  is still deferred.**
 
-  The purpose: a table method is not really a candidate-driven input method.
-  Its whole advantage over pinyin is determinism — Cangjie can be typed with
-  your eyes closed, and unlike pinyin it produces text without ever consulting a
-  completion. Candidates are shown anyway, because we have them. But the stock
-  candidates for a partial code are frequently *obscure*, and that costs twice
-  over: the stock Cangjie table carries roughly twice as many characters as the
-  most capable font (Google Noto CJK), and vastly more than a typical font with
-  nothing like 30,000 glyphs. So a user one keystroke into the weeds sees a
-  candidate list of tofu.
+  The purpose, since it is not obvious from the code: a table method is not
+  really a candidate-driven input method. Its whole advantage over pinyin is
+  determinism — Cangjie can be typed with your eyes closed, and unlike pinyin it
+  produces text without ever consulting a completion. Candidates are shown
+  anyway, because we have them. But the stock candidates for a partial code are
+  frequently *obscure*, and that costs twice over: the stock Cangjie table
+  carries roughly twice as many characters as the most capable font, and vastly
+  more than a typical font with nothing like 30,000 glyphs. So a user one
+  keystroke into the weeds sees a candidate list of tofu.
 
   Frequency augmentation keeps useful characters at the front; coverage
-  filtering keeps unrenderable ones out entirely. Skipping the filter works, but
-  an embedder should be able to *guarantee* their candidate list stays
-  renderable on their target — that is a promise about their UI, not a
-  preference about their table.
+  filtering keeps unrenderable ones out entirely.
 
-  The shape it should take is **both, with runtime strictly narrowing compile
-  time**: a table is filtered once at build time against an inclusive font, and
-  an embedder may additionally supply a coverage set at runtime that can only
-  remove more. Runtime never widens, so the shipped `.db` stays the upper bound
-  and nothing has to be re-added from a table that no longer carries it.
+  **Built (Linux):** `tools/generate-coverage.py` bakes a font's coverage into
+  `src/engines/table/coverage_data.h`, `src/engines/table/coverage.*` reads it,
+  and `tools/table-compile` drops any phrase carrying an uncovered character.
+  The current map is Noto Sans CJK — 44,810 code points in 2,032 ranges — and it
+  removes about half of cangjie5 and quick5, which is the measured version of
+  the "twice as many characters as the most capable font" claim.
 
-  **In scope now: the compile-time half only**, and the shape is settled. Not
-  the fork's `--font` resolved at build time — that would make the shipped `.db`
-  a function of which fonts happen to be installed on the build machine, so two
-  builds of the same commit would produce different tables.
+  Deliberately *not* the fork's approach of reading a font at build time: that
+  makes a compiled `.db` a function of which fonts the build machine happens to
+  have, so two builds of the same commit ship different data. The map is
+  checked in, the same bargain `variants_data.h` makes with Unicode data.
+  Regeneration sits behind `LIBPATHIME_TABLE_REGENERATE_COVERAGE` (default OFF).
 
-  Instead: **bake a coverage map for Noto CJK into a generated header**, exactly
-  the pattern `variants_data.h` and `tools/generate-variants.py` already
-  establish for the variant table. The build is then deterministic and needs no
-  fontconfig at all. A regeneration tool sits behind a CMake option defaulting
-  **OFF**, so a future maintainer can rebuild the map against a newer Noto
-  without it being a build dependency for everyone else. `tools/table-compile`
-  keeps a `--font` override for anyone targeting something narrower.
+  **Not built: Windows.** `read_charset()` in the generator is the only
+  platform-specific piece, and it currently has only the fontconfig answer. The
+  Windows session that closes this out will find a full brief in that
+  function's docstring — `GetFontUnicodeRanges` is the equivalent call, the
+  surrogate-pair trap is named, and the instruction is to ship a *second*
+  generated header rather than overwrite the Linux one, since a single map
+  generated on whichever machine ran last is the non-reproducibility this whole
+  design avoids. Nothing else is blocked on it.
 
-  Windows gets the same treatment against a standard Windows font, generated by
-  its own enumeration path (the Windows font APIs rather than fontconfig).
-  **Deferred to a session running on Windows** — it cannot be written or checked
-  here, and nothing else is blocked on it.
-
-  **The runtime half is deferred**, and not only for effort. Four things have to
-  be answered first, and none of them is about tables:
+  **The runtime half is still deferred**, and not only for effort. Four things
+  have to be answered first, and none of them is about tables:
 
   - *What does it mean for the other three backends?* A coverage set that
     filters table candidates but not anthy's or pyzy's would be a promise the
@@ -210,8 +215,11 @@ file grows a table round (queued below).
     their own output; filtering theirs means intercepting it at the adapter, or
     it means patching submodules, which is the rule this project does not break.
 
-  So: build the compile-time filter, and leave the runtime one until those four
-  have answers.
+  The shape it should take when it does land is **runtime strictly narrowing
+  compile time**: the shipped `.db` stays the upper bound and a client-supplied
+  set can only remove more, so nothing ever has to be added back to a table that
+  no longer carries it. That is why the compile-time map is taken from a
+  deliberately inclusive font rather than a typical one.
 
 - **Is it worth implementing the input methods the other backends already
   cover?** **Answered: no, and the question was narrower than it looked.**

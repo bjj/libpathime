@@ -50,7 +50,11 @@ src/
                         backend.h; table_source.*, table_db.*,
                         table_properties.*, ranking.*, variants.* — the data
                         layer below it, which names no engine type at all;
-                        variants_data.h is generated (tools/generate-variants.py)
+                        variants_data.h is generated (tools/generate-variants.py).
+                        coverage.*/coverage_data.h are a further step out: the
+                        *library* does not link them, only tools/table-compile,
+                        because glyph filtering happens once at build time and
+                        the map would otherwise be dead weight in every process
 tools/
   table-compile/        pathime-table-compile: source .txt to compiled .db, built
                         from the engine's own data-layer sources

@@ -223,17 +223,28 @@ LikePattern build_like_pattern(const TableProperties &properties, const std::str
 
     size_t offset = 0;
     uint32_t scalar = 0;
+    bool first_key = true;
     while (utf8_next_scalar(keys.data(), keys.size(), &offset, &scalar)) {
+        const bool at_start = first_key;
+        first_key = false;
+
         std::string encoded;
         utf8_append_scalar(encoded, scalar);
 
-        if (!properties.single_wildcard.empty() && encoded == properties.single_wildcard) {
-            out.pattern += '_';
-            continue;
-        }
-        if (!properties.multi_wildcard.empty() && encoded == properties.multi_wildcard) {
-            out.pattern += '%';
-            continue;
+        /*
+         * Position matters here and nowhere else in this function: a wildcard
+         * that is also one of the table's input characters is literal at
+         * position 0. TableProperties::is_wildcard_at() carries the reasoning.
+         */
+        if (properties.is_wildcard_at(static_cast<char32_t>(scalar), at_start)) {
+            if (encoded == properties.single_wildcard) {
+                out.pattern += '_';
+                continue;
+            }
+            if (encoded == properties.multi_wildcard) {
+                out.pattern += '%';
+                continue;
+            }
         }
 
         /*

@@ -83,6 +83,45 @@ bool parse_table_source_file(const std::string &path, TableSource *out, std::str
 void derive_goucima(TableSource *source);
 
 /**
+ * Declare @a key as the table's single-character wildcard, if the table declares
+ * no wildcard of its own and @a key is never used in a non-initial position.
+ * Returns true if the declaration was made.
+ *
+ * This gives Cangjie the `Z` wildcard that Apple's implementation made familiar:
+ * `Z` stands for a part of a decomposition the user cannot remember, so `hz` or
+ * `hqz` finds 我 without knowing the whole code. It is a real ergonomic win on a
+ * method whose difficulty is precisely recalling decompositions.
+ *
+ * ---------------------------------------------------------------------------
+ * Why derived per table rather than defaulted once
+ * ---------------------------------------------------------------------------
+ *
+ * Because `z` is *not* free everywhere, and one of the tables this library
+ * already ships is a case in point. Across ibus-table-chinese, erbi, scj6, yong,
+ * easy-big, wu, cantonhk and even cangjie3 and cangjie-big use `z` inside a
+ * code, where making it a wildcard would shadow real entries — and so does
+ * **wubi-jidian86**, whose 678 `z`-prefixed punctuation codes are spelled `zzbd`
+ * and friends, putting a second `z` in position 1. A tier-4 default in
+ * options.cc would apply to all of them and break them silently, and would keep
+ * breaking them as tables are added.
+ *
+ * Where it *is* free: cangjie5 (496 `z` rows, every one of them leading),
+ * quick5 (494) and zhuyin (744) never put `z` after the first key, so they get
+ * the wildcard. stroke5 declares `?` and `*` of its own and keeps them.
+ * wubi-jidian86 is declined by the check, which is the check earning its place
+ * rather than a hypothetical.
+ *
+ * The leading occurrences survive too, because a wildcard that is also one of
+ * the table's own input characters is only a wildcard in non-initial position —
+ * see TableProperties::is_wildcard_at(). Those 496 punctuation codes still work.
+ *
+ * The declaration is written into the compiled database under the format's own
+ * `SINGLE_WILDCARD_CHAR` key rather than a private one, so the resulting `.db`
+ * says what it means to any reader, ibus-table included.
+ */
+bool derive_single_wildcard(TableSource *source, char key);
+
+/**
  * Rewrite @a target's frequencies from a second table's, for every entry
  * @a target itself ranks at or above @a threshold.
  *
@@ -113,6 +152,13 @@ void derive_goucima(TableSource *source);
 void apply_frequency_transfer(TableSource *target,
                               const TableSource &source,
                               int64_t threshold);
+
+/*
+ * The coverage filter — the other build-time transformation — is deliberately
+ * not here. It lives in coverage.h, because it carries a generated table of
+ * 2,000-odd ranges that only tools/table-compile has any use for, and this file
+ * is linked into the library itself.
+ */
 
 }  // namespace table
 }  // namespace pathime

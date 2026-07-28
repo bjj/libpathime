@@ -508,6 +508,57 @@ static void test_no_table_is_inert(pathime_engine_t *engine)
 }
 
 /*
+ * The `z` wildcard, and the position rule that lets cangjie5 have it without
+ * losing its `z`-prefixed punctuation codes.
+ *
+ * cangjie5 declares no wildcard, and tools/table-compile derives one because the
+ * table never uses `z` after the first key. See derive_single_wildcard() in
+ * table_source.h for why this is checked per table rather than defaulted once —
+ * wubi-jidian86, which is also shipped, fails the check.
+ */
+static void test_z_wildcard(pathime_engine_t *engine)
+{
+    client_log_t log;
+    pathime_context_t *ctx = open_context(engine, &log, "cangjie5");
+    pathime_str_t value;
+
+    if (ctx == NULL) {
+        return;
+    }
+
+    /* Derived at compile time and visible through tier 3, not set by anyone. */
+    PT_CHECK_STATUS(pathime_context_get_option_string(ctx, PATHIME_OPT_TABLE_SINGLE_WILDCARD,
+                                                      &value),
+                    PATHIME_OK);
+    PT_CHECK(value.len == 1 && value.bytes[0] == 'z');
+    PT_CHECK(!pathime_context_option_is_set(ctx, PATHIME_OPT_TABLE_SINGLE_WILDCARD));
+
+    /*
+     * 我 is `hqi`. Typing `hz` stands in for the middle key, so 我 must be
+     * reachable without knowing the whole decomposition — which is the entire
+     * point of the feature.
+     */
+    log_reset(&log);
+    PT_CHECK(press(ctx, 'h'));
+    PT_CHECK(press(ctx, 'z'));
+    PT_CHECK(press(ctx, 'i'));
+    PT_CHECK(index_of(ctx, log.last_candidates, "\xE6\x88\x91") != (size_t)-1); /* 我 */
+    PT_CHECK_STATUS(pathime_context_reset(ctx), PATHIME_OK);
+
+    /*
+     * And a *leading* `z` stays literal, so the punctuation codes still resolve.
+     * `za` is the opening single quote in cangjie5. If the wildcard applied at
+     * position 0 this would be a search for everything instead.
+     */
+    log_reset(&log);
+    PT_CHECK(press(ctx, 'z'));
+    PT_CHECK(press(ctx, 'a'));
+    PT_CHECK(index_of(ctx, log.last_candidates, "\xE2\x80\x98") != (size_t)-1); /* ‘ */
+
+    pathime_context_destroy(ctx);
+}
+
+/*
  * Tier 3 answers as soon as the table is named, because naming it is what loads
  * it. Before the setter did that work, the same query returned the descriptor
  * default until the first keystroke and the table's declaration afterwards.
@@ -985,6 +1036,7 @@ int main(void)
         test_return_commits_literal_keys(engine);
         test_backspace(engine);
         test_table_declares_options(engine);
+        test_z_wildcard(engine);
         test_declarations_available_before_typing(engine);
         test_pinyin_fallback_unsupported(engine);
         test_no_table_is_inert(engine);
