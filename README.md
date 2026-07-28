@@ -41,7 +41,7 @@ configure-time generated copy. See **[BUILD.md](BUILD.md)**.
 
 ## Demo
 
-`demo/` is an interactive IME in a terminal: type into a text field and watch
+**[`/demo` is an interactive IME in a terminal](demo/README.md)**: type into a text field and watch
 the preedit, the settled boundary, the candidate list, every callback the
 library makes, and the whole option inventory with everything the active engine
 implements editable live.
@@ -55,7 +55,7 @@ cmake --build build
 It is a client of the public header and nothing else, so it also serves as a
 worked example of the parts the snippet above skips — surrounding text,
 candidate paging, and what to do with a key the engine declines. See
-`demo/README.md`.
+**[`demo/README.md`](demo/README.md)**
 
 ## Example
 
