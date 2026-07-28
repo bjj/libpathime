@@ -39,12 +39,13 @@ src/
                         reach into the resource directory
   win32_utf.h           UTF-8 <-> UTF-16 for the Windows entry points that
                         name a file; Windows-only, header-only
+  punctuation.h/.cc     width and Chinese punctuation, shared by both Chinese
+                        engines — see the note below on why it is not per adapter
   backend.h             the internal engine interface — the load-bearing seam
   engines/
     hangul/             hangul_backend.h/.cc
     anthy/              anthy_backend.h/.cc, romaji.h/.cc — the composing front end
-    pyzy/               pyzy_backend.h/.cc, observer.h/.cc — the dirty-flag Observer,
-                        punctuation.h/.cc — width and Chinese punctuation
+    pyzy/               pyzy_backend.h/.cc, observer.h/.cc — the dirty-flag Observer
     table/              table_backend.h/.cc — the only file here that includes
                         backend.h; table_source.*, table_db.*,
                         table_properties.*, ranking.*, variants.* — the data
@@ -268,12 +269,20 @@ the fact and the check the library applies after it cannot disagree.
   char-prompt substitution, which is display-only and applies *after* the run is
   built.
 
-- **The width and punctuation tables are per-language, and so live per
-  adapter** — `engines/pyzy/punctuation.*` for Chinese, and the same job is
-  done inline by `engines/anthy/romaji.cc`'s `kSymbolTable` for Japanese.
+- **The width and punctuation tables are per-language, so Chinese has one and
+  Japanese has its own** — `punctuation.*` for Chinese, and the same job done
+  inline by `engines/anthy/romaji.cc`'s `kSymbolTable` for Japanese.
   `PATHIME_OPT_LATIN_WIDTH` and `PATHIME_OPT_PUNCTUATION_WIDTH` are common
   options, but nothing about their *content* is: the comma key is 、in
   Japanese and ，in Chinese, and Chinese needs two tables of its own for the
   simplified and traditional variants. Only the half-to-full-width arithmetic
-  is genuinely shared, and it is three lines. Hoisting it would buy a common
-  home for the one part that does not need one.
+  is genuinely shared, and it is three lines.
+
+  `punctuation.*` sits directly in `src/` rather than under an adapter because
+  **both** Chinese engines use it. It began as pyzy's; the table engine then
+  needed the same behaviour, and ibus-table's own answer (spec §11.4) disagrees
+  with ibus-pinyin's on four characters. Following each reference per engine
+  would make one option mean two things depending on which Chinese engine the
+  client picked, so the table engine uses this and the parity cost is recorded
+  at the top of `punctuation.h`. There is still no `engines/common/`: shared
+  code does not get a subdirectory, it goes in `src/` with the rest of the core.

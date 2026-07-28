@@ -68,6 +68,7 @@ set(_lpi_options_sources
   "${PROJECT_SOURCE_DIR}/src/keys.cc"
   "${PROJECT_SOURCE_DIR}/src/module_path.cc"
   "${PROJECT_SOURCE_DIR}/src/paths.cc"
+  "${PROJECT_SOURCE_DIR}/src/punctuation.cc"
   "${PROJECT_SOURCE_DIR}/src/utf8.cc")
 if(LIBPATHIME_WITH_HANGUL)
   list(APPEND _lpi_options_sources
@@ -81,8 +82,7 @@ endif()
 if(LIBPATHIME_WITH_PYZY)
   list(APPEND _lpi_options_sources
     "${PROJECT_SOURCE_DIR}/src/engines/pyzy/pyzy_backend.cc"
-    "${PROJECT_SOURCE_DIR}/src/engines/pyzy/observer.cc"
-    "${PROJECT_SOURCE_DIR}/src/engines/pyzy/punctuation.cc")
+    "${PROJECT_SOURCE_DIR}/src/engines/pyzy/observer.cc")
 endif()
 if(LIBPATHIME_WITH_TABLE)
   list(APPEND _lpi_options_sources

@@ -53,7 +53,7 @@
 
 #include "backend.h"
 #include "engines/pyzy/observer.h"
-#include "engines/pyzy/punctuation.h"
+#include "punctuation.h"
 
 namespace pathime {
 

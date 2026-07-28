@@ -52,7 +52,7 @@
 #include <PyZy/Variant.h>
 
 #include "engines/pyzy/observer.h"
-#include "engines/pyzy/punctuation.h"
+#include "punctuation.h"
 #include "paths.h"
 
 namespace pathime {

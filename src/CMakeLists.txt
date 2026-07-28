@@ -18,6 +18,7 @@ add_library(pathime
   keys.cc
   module_path.cc
   paths.cc
+  punctuation.cc
   utf8.cc
 )
 add_library(libpathime::pathime ALIAS pathime)
@@ -88,8 +89,7 @@ endif()
 if(LIBPATHIME_WITH_PYZY)
   target_sources(pathime PRIVATE
     engines/pyzy/pyzy_backend.cc
-    engines/pyzy/observer.cc
-    engines/pyzy/punctuation.cc)
+    engines/pyzy/observer.cc)
   target_link_libraries(pathime PRIVATE pyzy)
 
   # pyzy's src/String.h shadows the C library's <string.h> on a

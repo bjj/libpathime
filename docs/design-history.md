@@ -413,7 +413,9 @@ is implemented and tested end to end (`api.engine_hangul`, `api.engine_anthy`,
   decision, and all three are now implemented.
 
   `PATHIME_OPT_LATIN_WIDTH` and `PATHIME_OPT_PUNCTUATION_WIDTH` are
-  `src/engines/pyzy/punctuation.*`, transcribed from ibus-pinyin's
+  `src/punctuation.*` (written under `src/engines/pyzy/` and hoisted when the
+  table engine turned out to need the same behaviour), transcribed from
+  ibus-pinyin's
   FallbackEditor: two variant-specific substitution tables, the half-to-full
   arithmetic, and the three values that need memory (the two quote
   alternations and the digit-then-period look-behind). Full-width punctuation

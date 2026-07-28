@@ -9,7 +9,7 @@
  * the same answer by a different route.
  */
 
-#include "engines/pyzy/punctuation.h"
+#include "punctuation.h"
 
 #include "utf8.h"
 
@@ -130,8 +130,14 @@ WidthSettings width_settings(const OptionReader &options)
         options.number(PATHIME_OPT_LATIN_WIDTH));
     settings.punctuation = static_cast<pathime_width_t>(
         options.number(PATHIME_OPT_PUNCTUATION_WIDTH));
-    settings.simplified =
-        options.number(PATHIME_OPT_CHINESE_VARIANT) != PATHIME_CHINESE_TRADITIONAL_ONLY;
+    /*
+     * By preference rather than by exclusion, because the table engine accepts
+     * all five variant values where pyzy accepts two. WidthSettings::simplified
+     * says why ANY lands on the simplified table.
+     */
+    const int64_t variant = options.number(PATHIME_OPT_CHINESE_VARIANT);
+    settings.simplified = variant != PATHIME_CHINESE_TRADITIONAL_ONLY &&
+                          variant != PATHIME_CHINESE_TRADITIONAL_FIRST;
     return settings;
 }
 

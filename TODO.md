@@ -48,14 +48,16 @@ missing.
 
 `src/engines/table/README.md` is the map. What follows is only what is missing.
 
-Three questions this engine raised were answered in the round of 2026-07-28 and
+Four questions this engine raised were answered in the round of 2026-07-28 and
 are **built**: char prompts stay in the preedit (the header clause was widened
-to cover key legends rather than the engine changed), the table loads when
-`PATHIME_OPT_TABLE_FILE` is *set* so a bad name fails at the setter with
-`PATHIME_ERROR_BACKEND`, and `PATHIME_OPT_TABLE_PINYIN_FALLBACK` now reports
-itself off unless the compiled database really carries pinyin rows. The
-reasoning belongs in `docs/design-history.md` once that file grows a table round
-(queued below).
+to cover key legends rather than the engine changed); the table loads when
+`PATHIME_OPT_TABLE_FILE` is *set*, so a bad name fails at the setter with
+`PATHIME_ERROR_BACKEND`; `PATHIME_OPT_TABLE_PINYIN_FALLBACK` reports itself off
+unless the compiled database really carries pinyin rows; and full-width
+conversion (§11.4) now runs through `src/punctuation.*`, shared with the pyzy
+adapter rather than transcribed from §11.4, so one option means one thing across
+both Chinese engines. The reasoning belongs in `docs/design-history.md` once that
+file grows a table round (queued below).
 
 ### Not implemented, in rough priority order
 
@@ -75,25 +77,6 @@ reasoning belongs in `docs/design-history.md` once that file grows a table round
   spec's checkpoint-after-16-updates is a durability detail, and the user
   database is in WAL mode where SQLite checkpoints on its own. Measure before
   writing anything.
-- **Full-width conversion (§11.4).** Only the space is converted today
-  (`PATHIME_OPT_LATIN_WIDTH`, in the Space branch of `process_key`).
-  `PATHIME_OPT_PUNCTUATION_WIDTH` does nothing for this engine.
-
-  **Decided: share pyzy's table, not §11.4's.** The two disagree on four
-  characters — `^` (`……` vs `…`), `[` (variant-dependent vs `「`), `<`
-  (variant-dependent vs `《`), and the `.` rule (pyzy keeps "1.5" intact; §11.4
-  switches on sentence position). One option cannot mean two things across
-  engines, and the API's stated principle is one behaviour per concept, so
-  `src/engines/pyzy/punctuation.*` moves up to `src/punctuation.*` (no
-  subdirectory, per the layout rule) and the table engine calls it. The cost is
-  ibus-table parity on those four characters, and it is worth paying; pyzy's
-  `1.5` handling is also simply better.
-
-  It keys off `PATHIME_OPT_CHINESE_VARIANT`, which for this engine already
-  resolves through tier 3 to the table's own `LANGUAGE_FILTER` (`cm1` for
-  cangjie5/quick5, `cm2` for wubi-jidian86, `cm3` for stroke5/zhuyin). So the
-  per-table default falls out of data already parsed — no new declaration and
-  no per-table policy in code.
 - **Pinyin mode (§11.2) and suggestion mode (§11.3).** **Decided: not
   implemented, and the options stay.** Three findings closed this.
 

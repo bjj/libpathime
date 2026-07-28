@@ -234,10 +234,113 @@ static void test_space_commits_hovered(pathime_engine_t *engine)
     PT_CHECK(strcmp(log.commits, MAO) == 0);
     PT_CHECK(strcmp(log.last_preedit, "") == 0);
 
-    /* With nothing composing, Space is a space at the negotiated width. */
+    /*
+     * With nothing composing, Space is a space at the negotiated width — and it
+     * is *handled* even at half width, where the character is unchanged. A CJK
+     * table claims every printable ASCII key so that the two look-behind
+     * substitutions can see the document; test_punctuation_width below is what
+     * that buys.
+     */
     log_reset(&log);
-    PT_CHECK(!press(ctx, PATHIME_KEY_SPACE));
-    PT_CHECK(log.commit_count == 0);
+    PT_CHECK(press(ctx, PATHIME_KEY_SPACE));
+    PT_CHECK(strcmp(log.commits, " ") == 0);
+
+    /* Full-width Latin makes the same key U+3000. */
+    log_reset(&log);
+    PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_LATIN_WIDTH,
+                                                   PATHIME_WIDTH_FULL),
+                    PATHIME_OK);
+    PT_CHECK(press(ctx, PATHIME_KEY_SPACE));
+    PT_CHECK(strcmp(log.commits, "\xE3\x80\x80") == 0);
+
+    pathime_context_destroy(ctx);
+}
+
+/*
+ * Full-width punctuation, which the table engine takes from the shared layer in
+ * src/punctuation.h rather than from spec §11.4 — one option cannot mean two
+ * things across the two Chinese engines, and the four characters where the
+ * references disagree are named there.
+ *
+ * The variant that picks the table is not set by this test. It arrives through
+ * tier 3 from each table's own LANGUAGE_FILTER, which is what makes the same
+ * key give different brackets below without a client saying anything.
+ */
+static void test_punctuation_width(pathime_engine_t *engine)
+{
+    client_log_t log;
+    pathime_context_t *ctx = open_context(engine, &log, "cangjie5");
+
+    if (ctx == NULL) {
+        return;
+    }
+
+    /* Full-width punctuation with half-width Latin is the documented default. */
+
+    /* cangjie5 declares LANGUAGE_FILTER = cm1, so brackets are the corner pair. */
+    log_reset(&log);
+    PT_CHECK(press(ctx, '['));
+    PT_CHECK(strcmp(log.commits, "\xE3\x80\x8C") == 0); /* 「 */
+
+    /* The quote keys alternate opening and closing. */
+    log_reset(&log);
+    PT_CHECK(press(ctx, '"'));
+    PT_CHECK(strcmp(log.commits, "\xE2\x80\x9C") == 0); /* “ */
+    log_reset(&log);
+    PT_CHECK(press(ctx, '"'));
+    PT_CHECK(strcmp(log.commits, "\xE2\x80\x9D") == 0); /* ” */
+
+    /*
+     * And the digit look-behind: "1.5" survives. This is the case that forces a
+     * CJK table to claim even the keys it passes through unchanged — at the
+     * default half-width Latin the `1` converts to itself, and an engine that
+     * declined it would never disarm the decimal-point rule.
+     */
+    log_reset(&log);
+    PT_CHECK(press(ctx, '1'));
+    PT_CHECK(press(ctx, '.'));
+    PT_CHECK(press(ctx, '5'));
+    PT_CHECK(strcmp(log.commits, "1.5") == 0);
+
+    /*
+     * With something other than a digit in front, the same key is a full stop.
+     * The bracket is what disarms the look-behind — after the `5` above it is
+     * still armed, which is the rule working rather than an artefact.
+     */
+    log_reset(&log);
+    PT_CHECK(press(ctx, '['));
+    PT_CHECK(press(ctx, '.'));
+    PT_CHECK(strcmp(log.commits, "\xE3\x80\x8C\xE3\x80\x82") == 0); /* 「。 */
+
+    /* Half-width punctuation passes everything through unchanged. */
+    log_reset(&log);
+    PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_PUNCTUATION_WIDTH,
+                                                   PATHIME_WIDTH_HALF),
+                    PATHIME_OK);
+    PT_CHECK(press(ctx, '['));
+    PT_CHECK(strcmp(log.commits, "[") == 0);
+
+    pathime_context_destroy(ctx);
+}
+
+/*
+ * The same key, a different table, a different bracket — with no client
+ * involvement. wubi-jidian86 declares LANGUAGE_FILTER = cm2 where cangjie5
+ * declares cm1, so tier 3 resolves PATHIME_OPT_CHINESE_VARIANT differently and
+ * the punctuation layer picks the other table.
+ */
+static void test_punctuation_follows_table_variant(pathime_engine_t *engine)
+{
+    client_log_t log;
+    pathime_context_t *ctx = open_context(engine, &log, "wubi-jidian86");
+
+    if (ctx == NULL) {
+        return;
+    }
+
+    log_reset(&log);
+    PT_CHECK(press(ctx, '['));
+    PT_CHECK(strcmp(log.commits, "\xE3\x80\x90") == 0); /* 【, the simplified pair */
 
     pathime_context_destroy(ctx);
 }
@@ -247,11 +350,11 @@ static void test_space_commits_hovered(pathime_engine_t *engine)
  * choose, which for a table engine is §7.4's "commit the literal input": the
  * keys as typed, not the radicals the preedit displayed them as.
  *
- * That difference between what was shown and what is committed is the one place
- * this engine departs from the header's "this is the text that would be
- * committed if the composition ended right now", and it is an open question in
- * TODO.md rather than a settled reading. This test pins the current answer so
- * that changing it is a deliberate act.
+ * The preedit and the commit are two renderings of one key run: the table's
+ * char prompts are the *keycap legend* — cangjie5 prints 日 on `a` and 月 on `b`
+ * — so the preedit is the Cangjie keyboard rendered back at the user, and
+ * committing without choosing a candidate is the method's escape hatch to Latin
+ * text. The header's preedit clause covers this explicitly.
  */
 static void test_return_commits_literal_keys(pathime_engine_t *engine)
 {
@@ -877,6 +980,8 @@ int main(void)
     if (engine != NULL) {
         test_compose_and_select(engine);
         test_space_commits_hovered(engine);
+        test_punctuation_width(engine);
+        test_punctuation_follows_table_variant(engine);
         test_return_commits_literal_keys(engine);
         test_backspace(engine);
         test_table_declares_options(engine);

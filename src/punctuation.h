@@ -1,7 +1,28 @@
 /*
- * What the Chinese engines emit for a key pyzy will not take: the half/full
- * width conversion and the Chinese punctuation substitution behind
+ * What the Chinese engines emit for a key their converter will not take: the
+ * half/full width conversion and the Chinese punctuation substitution behind
  * PATHIME_OPT_LATIN_WIDTH and PATHIME_OPT_PUNCTUATION_WIDTH.
+ *
+ * ---------------------------------------------------------------------------
+ * Why this sits in src/ rather than under one adapter
+ * ---------------------------------------------------------------------------
+ *
+ * Both Chinese engines need it, and the two options must mean one thing. pyzy
+ * came first, so this was written as its adapter's; the table engine then
+ * arrived needing the same behaviour, and ibus-table's own answer (spec §11.4)
+ * disagrees with ibus-pinyin's on four characters — `^` (…… against …), `[` and
+ * `<` (variant-dependent here, fixed there), and the period, where §11.4
+ * switches on sentence position while this keeps "1.5" intact.
+ *
+ * Following each reference per engine would make PATHIME_OPT_PUNCTUATION_WIDTH
+ * mean two different things depending on which Chinese engine a client had
+ * chosen, against an API that deliberately presents one behaviour per concept.
+ * So the table engine uses this, and the cost — ibus-table parity on those four
+ * characters — is stated here rather than hidden. It is a real cost and a small
+ * one; the `1.5` handling is also simply better.
+ *
+ * No src/engines/common/ appears, because shared code does not get a
+ * subdirectory: it belongs in src/ beside the rest of the core.
  *
  * ---------------------------------------------------------------------------
  * Why this is ours to write, and where the reference puts it
@@ -55,8 +76,8 @@
  * it in the same places.
  */
 
-#ifndef LIBPATHIME_SRC_ENGINES_PYZY_PUNCTUATION_H
-#define LIBPATHIME_SRC_ENGINES_PYZY_PUNCTUATION_H
+#ifndef LIBPATHIME_SRC_PUNCTUATION_H
+#define LIBPATHIME_SRC_PUNCTUATION_H
 
 #include <cstdint>
 #include <string>
@@ -73,9 +94,20 @@ struct WidthSettings {
     pathime_width_t punctuation = PATHIME_WIDTH_FULL;
 
     /**
-     * Which of the two punctuation tables applies. Taken from
-     * PATHIME_OPT_CHINESE_VARIANT, whose valid values are narrowed to the two
-     * exclusive ones for these engines, so there is nothing else it can be.
+     * Which of the two punctuation tables applies, from
+     * PATHIME_OPT_CHINESE_VARIANT.
+     *
+     * pyzy narrows that option to the two exclusive values, but the table engine
+     * accepts all five, so the mapping is by *preference* rather than by
+     * exclusion: the traditional table applies to TRADITIONAL_ONLY and
+     * TRADITIONAL_FIRST, the simplified one to the other three. ANY has no
+     * preference to honour and takes the simplified table, which is what pyzy
+     * already did for everything that was not TRADITIONAL_ONLY.
+     *
+     * For a table engine this usually resolves through tier 3 to the table's own
+     * LANGUAGE_FILTER, so cangjie5 and quick5 (`cm1`) punctuate the traditional
+     * way, wubi-jidian86 (`cm2`) the simplified way, and stroke5 and zhuyin
+     * (`cm3`) the traditional way — without anything here knowing a table name.
      */
     bool simplified = true;
 };
@@ -135,4 +167,4 @@ std::string emit_text(char c, const WidthSettings &settings, PunctuationState *s
 
 }  // namespace pathime
 
-#endif /* LIBPATHIME_SRC_ENGINES_PYZY_PUNCTUATION_H */
+#endif /* LIBPATHIME_SRC_PUNCTUATION_H */

@@ -40,6 +40,7 @@
 #include "engines/table/table_db.h"
 #include "keys.h"
 #include "paths.h"
+#include "punctuation.h"
 #include "utf8.h"
 
 namespace pathime {
@@ -76,9 +77,6 @@ bool has_separator(const std::string &value)
 {
     return value.find('/') != std::string::npos || value.find('\\') != std::string::npos;
 }
-
-/** U+3000 IDEOGRAPHIC SPACE, what a full-width space commits as. */
-const char *const kFullWidthSpace = "\xE3\x80\x80";
 
 }  // namespace
 
@@ -289,6 +287,29 @@ private:
     void learn(const std::string &keys, const std::string &phrase,
                const OptionReader &options);
 
+    /**
+     * The full-width and Chinese-punctuation conversion of §11.4, or the
+     * character unchanged.
+     *
+     * Shared with the pyzy adapter (`punctuation.h`) rather than transcribed
+     * from §11.4, so that PATHIME_OPT_LATIN_WIDTH and
+     * PATHIME_OPT_PUNCTUATION_WIDTH mean one thing across both Chinese engines.
+     * The four characters where the two references disagree are named in
+     * punctuation.h.
+     *
+     * Applies only to a CJK table, which is §11.4's own `is_db_cjk` gate: a
+     * table for a Latin script has no business turning `<` into 《.
+     */
+    std::string convert_width(uint32_t scalar, const OptionReader &options);
+
+    /**
+     * Commit @a scalar at the negotiated width when that changes it, and report
+     * whether the key was taken. For the two paths where nothing is composing
+     * and the key is not table input.
+     */
+    bool emit_converted(uint32_t scalar, const OptionReader &options,
+                        Composition *model, Output *out);
+
     TableEngine *engine_;
     std::shared_ptr<TableDatabase> table_;
     std::string table_value_;   /* the option value `table_` was loaded from */
@@ -298,6 +319,15 @@ private:
     std::vector<Segment> segments_;
     std::vector<PhraseMatch> matches_;
     size_t cursor_ = 0;
+
+    /**
+     * The quote alternation and digit look-behind punctuation.h keeps.
+     *
+     * Cleared with the composition, on the same reasoning pyzy's copy is: the
+     * look-behind is over the document, and a reset means the engine no longer
+     * knows what precedes the caret.
+     */
+    PunctuationState punctuation_;
 };
 
 /* ---- Engine --------------------------------------------------------------- */
@@ -475,6 +505,16 @@ void TableContext::publish(Composition *model) const
 
 /* ---- Context: transitions ------------------------------------------------- */
 
+std::string TableContext::convert_width(uint32_t scalar, const OptionReader &options)
+{
+    std::string out;
+    if (table_ == nullptr || !properties().is_cjk || !emittable(scalar)) {
+        utf8_append_scalar(out, scalar);
+        return out;
+    }
+    return emit_text(static_cast<char>(scalar), width_settings(options), &punctuation_);
+}
+
 void TableContext::learn(const std::string &keys, const std::string &phrase,
                          const OptionReader &options)
 {
@@ -522,6 +562,15 @@ void TableContext::commit(const std::string &text, const std::string &chosen_key
 
     out->commit += staged_text();
     out->commit += text;
+
+    /*
+     * The digit look-behind is over the *document*, not over the punctuation
+     * layer's own output, so what this engine commits counts towards it: a
+     * Chinese character settled between a digit and a period has to disarm the
+     * "1.5" rule. Recorded here, in the order the two commits reach the client,
+     * because only the caller knows which came first.
+     */
+    punctuation_.note_commit(text.empty() ? staged_text() : text);
     clear_state();
 }
 
@@ -761,13 +810,12 @@ bool TableContext::process_key(const KeyEvent &key, const OptionReader &options,
             return true;
         }
 
-        /* Nothing composing: insert a space at the negotiated width. */
-        if (options.number(PATHIME_OPT_LATIN_WIDTH) == PATHIME_WIDTH_FULL) {
-            out->commit += kFullWidthSpace;
-            publish(model);
-            return true;
-        }
-        return false;
+        /*
+         * Nothing composing. A space never starts a key run — the header fixes
+         * Space as the convert key — so the only question left is the
+         * negotiated width.
+         */
+        return emit_converted(scalar, options, model, out);
     }
 
     if (scalar == 0) {
@@ -804,12 +852,57 @@ bool TableContext::process_key(const KeyEvent &key, const OptionReader &options,
             ending = typed_run();
         }
         commit(ending, ending_keys, options, out);
-        utf8_append_scalar(out->commit, scalar);
+        /*
+         * The character itself follows, at the negotiated width. The commit
+         * above has already been recorded against the digit look-behind by
+         * commit(), so a Chinese character settled between a digit and a period
+         * disarms it — which is the whole reason note_commit() takes both
+         * sources in the order they reach the client.
+         */
+        const std::string text = convert_width(scalar, options);
+        out->commit += text;
+        punctuation_.note_commit(text);
         publish(model);
         return true;
     }
 
-    return false;  /* nothing composing and not input: the client's key */
+    /* Nothing composing and not input: converted if the width says so. */
+    return emit_converted(scalar, options, model, out);
+}
+
+bool TableContext::emit_converted(uint32_t scalar, const OptionReader &options,
+                                  Composition *model, Output *out)
+{
+    /*
+     * Every printable ASCII key is taken when the table is CJK, including the
+     * ones that pass through unchanged — the same rule the pyzy adapter follows,
+     * and for the same two reasons.
+     *
+     * The first is that it is what makes the two look-behind substitutions
+     * possible at all. The default configuration is full-width punctuation with
+     * half-width Latin, so in the *default* case a digit converts to itself; if
+     * that meant declining the key, the engine would never see the `1` in
+     * "1.5", would not disarm the decimal-point rule, and would commit "1。5" —
+     * against an explicit promise at PATHIME_OPT_PUNCTUATION_WIDTH. A key the
+     * client inserts itself is one this engine never saw.
+     *
+     * The second is that it is correct for an IME the user has switched into.
+     * The mixed table-and-Latin case that PATHIME_OPT_TABLE_INVALID_INPUT
+     * exists for is about a key arriving *mid-composition*, which is handled
+     * above and never reaches here.
+     *
+     * A non-CJK table declines everything, which is §11.4's own `is_db_cjk`
+     * gate: a table for a Latin script has no business claiming ASCII.
+     */
+    if (table_ == nullptr || !properties().is_cjk || !emittable(scalar)) {
+        return false;
+    }
+
+    const std::string text = convert_width(scalar, options);
+    out->commit += text;
+    punctuation_.note_commit(text);
+    publish(model);
+    return true;
 }
 
 void TableContext::reset(Composition *model, Output *out)
@@ -821,8 +914,13 @@ void TableContext::reset(Composition *model, Output *out)
      * pathime_context_reset(). There is no library state to unwind beyond this
      * context's own — the loaded table belongs to the engine and outlives every
      * reset.
+     *
+     * The punctuation state goes too: its quote alternation and digit
+     * look-behind describe what precedes the caret, and after a reset the engine
+     * no longer knows that.
      */
     clear_state();
+    punctuation_.clear();
 }
 
 pathime_status_t TableContext::select_candidate(size_t index, const OptionReader &options,
