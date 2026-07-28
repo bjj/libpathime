@@ -68,10 +68,12 @@ std::string value_text(const OptionRow &row,
  *              larger magnitudes to move an int faster; 0 to toggle a bool or
  *              flip a flags option between all its bits and none.
  *
- * Strings are the one type this does not edit, and the reason is that the only
- * string option is PATHIME_OPT_TABLE_FILE, which belongs to an engine this
- * build cannot contain yet. It returns PATHIME_ERROR_UNSUPPORTED, and the
- * panel says so.
+ * Strings are the one type this does not edit, so PATHIME_OPT_TABLE_FILE — the
+ * only one — returns PATHIME_ERROR_UNSUPPORTED and the panel says so. That is
+ * now the single thing keeping the table engine out of this demo, and it is a
+ * missing affordance rather than a missing engine: every other option type is
+ * edited by stepping through values, and a table name has no value list to step
+ * through. See TODO.md.
  */
 pathime_status_t adjust_option(const OptionRow &row,
                                pathime_engine_t *engine,

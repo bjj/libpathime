@@ -21,9 +21,11 @@
  * Only one level of the store lives in one object: an OptionStore is the set
  * of values explicitly set at that level and nothing else. Resolution walks
  * the tiers described in the header's Options section — context store, engine
- * store, the table's own declaration (tier 3, table engine only, not written
- * yet), then the descriptor's default — and lives in options.cc, because only
- * it can see both levels at once.
+ * store, the table's own declaration (tier 3, table engine only), then the
+ * descriptor's default — and lives in options.cc, because only it can see both
+ * levels at once. Tier 3 is the one that is not a store: it is read through
+ * EngineBackend::declared_number/declared_text, because the value lives in a
+ * data file only the backend can open.
  */
 
 #ifndef LIBPATHIME_SRC_OPTIONS_H

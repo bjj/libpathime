@@ -103,16 +103,71 @@ and five of them ship: cangjie5, quick5, wubi-jidian86, stroke5, zhuyin.
   composition); and the `AUTO_SELECT` retry recurses one level to reprocess the
   character that broke the match. Both are choices, both are commented at the
   code, and neither has a table in the shipped set that exercises it hard.
+- **The demo cannot reach the table engine, and says so confusingly.** The
+  status line reports `needs a table file`, but tabbing into the options panel
+  and pressing Enter on `table-file` answers "engine does not implement this
+  operation". That is `demo/src/options_view.cc:162`: `adjust_option()` declines
+  every `PATHIME_OPTION_STRING` outright. The message is doubly misleading —
+  nothing is unimplemented, and the engine named is not the one refusing.
+
+  The fix needs a decision, because the demo edits options by *stepping through
+  values* and a table name has no value list to step through. Either the demo
+  carries its own list of names to cycle (matching how it already hardcodes
+  engine names, but going stale against a build with a different
+  `LIBPATHIME_TABLES`), or it scans the table directory — which it cannot do,
+  because it never learns where `resource_dir` resolved to. The second option is
+  the one that would argue for a table-enumeration API, which was considered and
+  declined at the bare-name decision.
+
+  Minimum worth doing regardless: make the refusal say what is actually wrong.
 - **`ibus-table-chinese` is GPL-3, and its compiled tables now ship inside
   `pathime-data/`.** Flagged at the decision round and still open: it is a
   licensing question about what libpathime distributes, not a technical one.
-- **The font-trimming half of the fork's preprocessing was left out.**
-  Frequency transfer is implemented in `tools/table-compile` and used for
-  cangjie5 and quick5, which is what makes their partial-code candidates
-  useful. Trimming to a target font's glyph coverage needs fontconfig and a
-  specific Noto build, and is a decision about a display target rather than
-  about the table — so it belongs to whoever packages for that target. If it
-  should be in-tree after all, it is a flag on the same tool.
+- **Glyph-coverage filtering should be available, and the reasoning behind it
+  is not the one this implementation assumed.** Frequency transfer and font
+  trimming are two halves of one purpose, and only the first is implemented.
+
+  The purpose: a table method is not really a candidate-driven input method.
+  Its whole advantage over pinyin is determinism — Cangjie can be typed with
+  your eyes closed, and unlike pinyin it produces text without ever consulting a
+  completion. Candidates are shown anyway, because we have them. But the stock
+  candidates for a partial code are frequently *obscure*, and that costs twice
+  over: the stock Cangjie table carries roughly twice as many characters as the
+  most capable font (Google Noto CJK), and vastly more than a typical font with
+  nothing like 30,000 glyphs. So a user one keystroke into the weeds sees a
+  candidate list of tofu.
+
+  Frequency augmentation keeps useful characters at the front; coverage
+  filtering keeps unrenderable ones out entirely. Skipping the filter works, but
+  an embedder should be able to *guarantee* their candidate list stays
+  renderable on their target — that is a promise about their UI, not a
+  preference about their table.
+
+  So the work is to make it optionally possible rather than to decide it away.
+  Open: whether it belongs at compile time (a `--font` flag on
+  `tools/table-compile`, needing fontconfig at build time, filtering baked into
+  the shipped `.db`) or at runtime (a coverage set the embedder supplies, so one
+  shipped table serves targets with different fonts). Compile time is what the
+  fork does and is far cheaper; runtime is what an embedder shipping one library
+  to several targets would actually want.
+
+- **Is it worth implementing the input methods the other backends already
+  cover?** `PINYIN_MODE` and `SUGGESTION_MODE` are the immediate cases, but the
+  question is general: pyzy already gives us Pinyin and Bopomofo, and a table
+  can be built to do the same job.
+
+  For ibus-table the duplication is harmless — it is one engine among many in a
+  world that already offers several pinyin implementations, and a user picks
+  one. For libpathime it may not be. Two code paths reaching the same input
+  method is two places to be inconsistent about candidate order, about what
+  `PATHIME_OPT_CHINESE_VARIANT` does, about learning — and the API deliberately
+  presents one behaviour per concept rather than an engine-dependent one.
+
+  So this is not only "how much work", though that matters too: §11.2 needs the
+  pinyin table, its source data, the tone encoding and sort key 2, none of which
+  is large. It is whether shipping a second pinyin makes the library worse. Answer
+  it before writing any of it — the cost of deciding late is a feature that has to
+  be taken away.
 
 ### Not verified
 
@@ -121,9 +176,6 @@ and five of them ship: cangjie5, quick5, wubi-jidian86, stroke5, zhuyin.
   and the compile tool runs at build time, so nothing structurally blocks it —
   but `docs/windows-port.md` has not been revisited and no Windows build of the
   table engine has been run.
-- **The demo does not offer the table engine.** `demo/README.md` still says it
-  cannot be built. Wiring it up means a way to pick a table, which is the first
-  real client of the bare-name resolution rule.
 
 ## Queued work
 

@@ -62,10 +62,19 @@ option(LIBPATHIME_WITH_ANTHY  "Build the Japanese (anthy-unicode) backend"  ON)
 option(LIBPATHIME_WITH_PYZY   "Build the Chinese (pyzy) backend"            ON)
 
 # The table-driven backend is not a submodule: ibus-table is Python, so it
-# cannot be wrapped, and our own table engine (docs/ibus-table-spec.md) will be
-# a peer of the vendored libraries rather than a wrapper around one. It is not
-# written yet, hence OFF — turning it on is gated in LibpathimeDependencies.
-option(LIBPATHIME_WITH_TABLE  "Build the table-driven backend (not implemented yet)" OFF)
+# cannot be wrapped, and our table engine (docs/ibus-table-spec.md) is a peer of
+# the vendored libraries rather than a wrapper around one.
+#
+# ON like the other three, and for the same reason they are: a default should
+# describe what the library is for, not what happens to be cheapest to build.
+# Pinyin alone does not reach the whole Chinese market — Cangjie, Quick, Wubi
+# and Zhuyin are how a great many people actually type, and a library that
+# shipped them off by default would be telling an embedder who does not read
+# Chinese that they are optional. They are not.
+#
+# Missing dependencies still turn it off with a warning, in
+# LibpathimeDependencies, exactly as they do for the other three.
+option(LIBPATHIME_WITH_TABLE  "Build the table-driven (Cangjie, Wubi, Zhuyin, …) backend" ON)
 option(LIBPATHIME_BUILD_TESTS "Build the test suites: libpathime's own, plus each submodule's where available" OFF)
 
 # The interactive terminal demo under demo/. Off by default, and for a

@@ -67,12 +67,16 @@ Done:
   `tests/api/CMakeLists.txt` explains why that is a test-environment problem
   rather than a library one.
 
-Not started:
+Landed since, without a round of its own here:
 
-- The table-driven engine. `PATHIME_ENGINE_TABLE` exists in the header and
-  `LIBPATHIME_WITH_TABLE` exists in the build, but the option defaults OFF and
-  is forced off with an explanatory warning if requested, because there is no
-  code behind it. See `TODO.md`.
+- The table-driven engine, in `src/engines/table/`, to
+  `docs/ibus-table-spec.md`. Its decisions — the single-directory layout with a
+  data/behaviour header boundary rather than a standalone library, tier 3 living
+  behind the seam instead of in the option store, bare-name table resolution
+  against the resource directory, and compiling tables at build time with a tool
+  built from the engine's own sources — are recorded in code comments and in
+  `src/engines/table/README.md`. Writing them up in the form the rounds below
+  take is queued in `TODO.md`.
 
 ---
 

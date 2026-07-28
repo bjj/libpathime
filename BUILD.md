@@ -32,9 +32,11 @@ from the engine's own sources. Upstream's `tables/CMakeLists.txt` is not used �
 it calls `ibus-table-createdb` (the Python being replaced) plus `sed`, `iconv`
 and `awk`, none of which run on Windows.
 
-`LIBPATHIME_WITH_TABLE` still defaults to `OFF`, and turning it on now needs
-only SQLite. Without the submodule the engine still builds and still opens a
-table a client names by absolute path; it simply ships none.
+`LIBPATHIME_WITH_TABLE` defaults `ON`, like the other three: Pinyin alone does
+not reach the whole Chinese market, and Cangjie, Quick, Wubi and Zhuyin are how
+a great many people type. Missing SQLite turns it off with a warning, as with
+any other backend. Without the submodule the engine still builds and still opens
+a table a client names by absolute path; it simply ships none.
 
 Linux (Debian/Ubuntu):
 
@@ -105,7 +107,7 @@ developer command prompt, and remember to re-set `VCPKG_ROOT` afterwards.
 | Option | Default | Meaning |
 |--------|---------|---------|
 | `LIBPATHIME_WITH_HANGUL` / `_ANTHY` / `_PYZY` | `ON` | Enable each backend, both the vendored library and its adapter. A backend whose dependencies are missing is warned about and skipped. |
-| `LIBPATHIME_WITH_TABLE` | `OFF` | The table-driven backend. Needs `sqlite3`; skipped with a warning (or a hard error under `LIBPATHIME_REQUIRE_BACKENDS`) without it. |
+| `LIBPATHIME_WITH_TABLE` | `ON` | The table-driven backend. Needs `sqlite3`; skipped with a warning (or a hard error under `LIBPATHIME_REQUIRE_BACKENDS`) without it. |
 | `LIBPATHIME_TABLES` | five tables | Which tables to compile into `pathime-data/table/`, as `<name>\|<source>\|<freq source>` entries. Default: `cangjie5`, `quick5`, `wubi-jidian86`, `stroke5`, `zhuyin` — about 9 MB compiled. All thirteen families in the submodule are available; adding one is a line. |
 | `LIBPATHIME_REQUIRE_BACKENDS` | `OFF` | Turn "missing dependency ⇒ skip" into a hard error (for CI). |
 | `LIBPATHIME_BUILD_TESTS` | `OFF` | Build the test suites — see `docs/testing.md`. |

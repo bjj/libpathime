@@ -399,10 +399,11 @@ PATHIME_API void pathime_shutdown(void);
  *
  * PATHIME_ENGINE_TABLE is the opposite case: one entry covers every
  * table-driven method (Wubi, Cangjie, Stroke5, Zhuyin, …) because they differ
- * only in the table loaded, and which table that is will be an engine option
- * rather than a separate id. Its implementation lives in this library — see
- * docs/ibus-table-spec.md — and is not written yet, so builds currently report
- * it absent through pathime_has_engine() and PATHIME_WITH_TABLE.
+ * only in the table loaded, and which table that is is an option
+ * (PATHIME_OPT_TABLE_FILE) rather than a separate id. Its implementation lives
+ * in this library — see docs/ibus-table-spec.md — rather than in a vendored
+ * one, because the reference implementation is Python and cannot be linked
+ * against.
  *
  * Values are assigned explicitly and are part of the ABI: new engines are
  * appended, never inserted.

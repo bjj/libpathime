@@ -7,8 +7,9 @@ implementation in `refs/ibus-table`; no code is copied.
 
 This is a specification we implement, not a library we wrap. `ibus-table` is self-contained Python,
 so there is nothing to link against — the table engine (`PATHIME_ENGINE_TABLE`) is written inside
-`libpathime` as a peer of the vendored backends. It does not exist yet; `LIBPATHIME_WITH_TABLE`
-defaults OFF and refuses to be enabled until it does. See `TODO.md`.
+`libpathime` as a peer of the vendored backends, in `src/engines/table/`. This document remains the
+specification rather than a description of that code: where the two disagree, one of them is a bug,
+and `TODO.md` records the sections not implemented yet.
 
 The document has one organizing goal: **connect the data, the text-input behavior, and our
 concepts.** Three kinds of information are kept distinct throughout:
