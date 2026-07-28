@@ -39,6 +39,24 @@ Linux and Windows (MSVC and clang-cl). The vendored submodule trees are never
 edited: everything Windows needs comes from an in-tree compat layer or a
 configure-time generated copy. See **[BUILD.md](BUILD.md)**.
 
+## Demo
+
+`demo/` is an interactive IME in a terminal: type into a text field and watch
+the preedit, the settled boundary, the candidate list, every callback the
+library makes, and the whole option inventory with everything the active engine
+implements editable live.
+
+```bash
+cmake -S . -B build -DLIBPATHIME_BUILD_DEMO=ON
+cmake --build build
+./build/bin/pathime-demo
+```
+
+It is a client of the public header and nothing else, so it also serves as a
+worked example of the parts the snippet above skips — surrounding text,
+candidate paging, and what to do with a key the engine declines. See
+`demo/README.md`.
+
 ## Example
 
 Typing `nihao` and taking the first candidate, in full:
@@ -87,24 +105,6 @@ int main(void)
 
 Everything the engine produces is dispatched through `client` before the call
 that caused it returns. The API is synchronous throughout and starts no threads.
-
-## Demo
-
-`demo/` is an interactive IME in a terminal: type into a text field and watch
-the preedit, the settled boundary, the candidate list, every callback the
-library makes, and the whole option inventory with everything the active engine
-implements editable live.
-
-```bash
-cmake -S . -B build -DLIBPATHIME_BUILD_DEMO=ON
-cmake --build build
-./build/bin/pathime-demo
-```
-
-It is a client of the public header and nothing else, so it also serves as a
-worked example of the parts the snippet above skips — surrounding text,
-candidate paging, and what to do with a key the engine declines. See
-`demo/README.md`.
 
 ## Tests
 
