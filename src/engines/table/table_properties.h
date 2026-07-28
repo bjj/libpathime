@@ -127,6 +127,30 @@ struct TableProperties {
      */
     int language_filter = -1;
 
+    /**
+     * Whether the *compiled database* actually carries pinyin and suggestion
+     * rows, as distinct from the table merely declaring the mode.
+     *
+     * These are not parsed from anything. TableDatabase::open() sets them by
+     * looking, and a TableProperties built from source text leaves them false.
+     *
+     * The distinction is load-bearing rather than pedantic. Four of the five
+     * shipped tables declare `PINYIN_MODE = TRUE` — cangjie5, quick5, stroke5
+     * and wubi-jidian86 — but their pinyin source (`pinyin_table.txt.bz2`)
+     * ships with ibus-table rather than with ibus-table-chinese, so this
+     * repository has nothing to compile into them and the table is created
+     * empty. Reporting PATHIME_OPT_TABLE_PINYIN_FALLBACK from the declaration
+     * alone would tell a client the option is on while it does nothing, and the
+     * header promises the opposite: enabling it without pinyin data is
+     * PATHIME_ERROR_UNSUPPORTED.
+     *
+     * A `.db` that ibus-table itself compiled *does* carry the rows, and these
+     * flags are what lets such a database light the feature up without the
+     * engine caring where the file came from.
+     */
+    bool pinyin_data = false;
+    bool suggestion_data = false;
+
     /** Every attribute as read, for round-tripping through the `ime` table. */
     std::map<std::string, std::string> attrs;
 

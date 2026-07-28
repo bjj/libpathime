@@ -662,12 +662,25 @@ typedef struct pathime_composition {
      * or ignore it; they never appear here unasked.
      *
      * The practical guarantee a client gets from that: this is the text that
-     * would be committed if the composition ended right now. The only
-     * departures are normalizations an engine applies at the moment of commit
-     * and cannot apply earlier — Japanese displays a trailing romaji "n" as
-     * "n", because one more key still decides whether it becomes ん or な, and
-     * commits it as ん; Pinyin and Bopomofo drop the separators they render
-     * between syllables. Neither changes which characters the user chose.
+     * would be committed if the composition ended right now, up to two kinds of
+     * departure, neither of which changes which characters the user chose.
+     *
+     * The first is normalization an engine applies at the moment of commit and
+     * cannot apply earlier — Japanese displays a trailing romaji "n" as "n",
+     * because one more key still decides whether it becomes ん or な, and commits
+     * it as ん; Pinyin and Bopomofo drop the separators they render between
+     * syllables.
+     *
+     * The second is a table method whose table supplies *key legends*. Such a
+     * table names a symbol for each key — Cangjie's `a` is 日, `b` is 月, `h` is
+     * 竹 — and the preedit shows those symbols rather than the letters, because
+     * they are what is printed on the keyboard the method was designed for, and
+     * showing the letters instead would hide the very thing being composed.
+     * Committing without choosing a candidate then yields the *letters*, which
+     * is the method's own escape hatch to Latin text. Read this as still
+     * satisfying the rule above: the preedit and the commit are two renderings
+     * of one key run, not two different pieces of text. A client that must have
+     * the literal run has it either way, since it typed the keys.
      */
     pathime_str_t preedit;
 
@@ -1684,7 +1697,21 @@ typedef enum pathime_option {
      * A context with no table resolved produces nothing and reports every key
      * unhandled. Reading the option in that state yields an empty string, which
      * is how "no table" is spelled: there is no tier-4 default to fall back to,
-     * and no distinction between unset and empty.
+     * and no distinction between unset and empty. Setting it to the empty string
+     * returns to that state and always succeeds.
+     *
+     * **Setting this option loads the table**, and so is the one setter in this
+     * API that reads a file and can fail on its contents: a name that resolves
+     * to nothing, or to something that is not an ibus-table database, is
+     * PATHIME_ERROR_BACKEND and changes nothing — the previously resolved table,
+     * if any, survives. Failing here rather than at the first keystroke is
+     * deliberate; it is the only point at which the failure can still be
+     * attributed to the name that caused it. It also means every other table
+     * option resolves against the new table's declarations immediately, with no
+     * window in which they answer with library defaults instead.
+     *
+     * Loading is cached per engine, so naming a table a second time — from
+     * another context, or after clearing the option — costs nothing.
      */
     PATHIME_OPT_TABLE_FILE = 23,
 

@@ -399,7 +399,12 @@ bool TableProperties::declared_number(pathime_option_t option, int64_t *out) con
         *out = auto_select ? 1 : 0;
         return true;
     case PATHIME_OPT_TABLE_PINYIN_FALLBACK:
-        *out = pinyin_mode ? 1 : 0;
+        /*
+         * The declaration is necessary but not sufficient: the compiled
+         * database has to hold the rows too. See TableProperties::pinyin_data
+         * for why the two come apart for every table this library ships.
+         */
+        *out = (pinyin_mode && pinyin_data) ? 1 : 0;
         return true;
     case PATHIME_OPT_LEARNING:
         /*

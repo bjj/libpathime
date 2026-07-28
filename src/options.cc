@@ -813,13 +813,24 @@ pathime_status_t set_number(pathime_engine_t *engine,
     }
 
     /*
-     * TODO(impl): PATHIME_OPT_TABLE_PINYIN_FALLBACK is PATHIME_ERROR_UNSUPPORTED
-     * when the resolved table was not compiled with pinyin data — the last
-     * rejection before the store, since it depends on the resolved table rather
-     * than on the value. Unreachable until tables exist: PATHIME_WITH_TABLE is 0
-     * in every build (TODO.md), so no engine implementing this option can be
-     * created yet.
+     * The last rejection before the store, because it depends on the resolved
+     * table rather than on the value: turning the pinyin fallback on requires
+     * the table to have been compiled with pinyin data. Tier 3 is the authority
+     * on that — the backend reports the option declared only when the compiled
+     * database actually carries pinyin rows, which for every table this library
+     * ships it does not (TableProperties::pinyin_data).
+     *
+     * Turning it *off* is always allowed: a client should not have to own a
+     * pinyin table to say it does not want the fallback.
      */
+    if (option == PATHIME_OPT_TABLE_PINYIN_FALLBACK && value != 0) {
+        int64_t declared = 0;
+        if (engine->backend == nullptr ||
+            !engine->backend->declared_number(tier3_table(engine, ctx), option, &declared) ||
+            declared == 0) {
+            return PATHIME_ERROR_UNSUPPORTED;
+        }
+    }
 
     status = store_number(ctx != nullptr ? ctx->options : engine->options, option, value);
     if (status != PATHIME_OK) {
@@ -848,6 +859,19 @@ pathime_status_t set_string(pathime_engine_t *engine,
     status = option_check_string(option, engine->id, PATHIME_OPTION_STRING, value);
     if (status != PATHIME_OK) {
         return status;
+    }
+
+    /*
+     * The last rejection before the store, and the only one that does work
+     * rather than checking a value: PATHIME_OPT_TABLE_FILE loads its table here
+     * so a bad name fails at the setter. EngineBackend::prepare_string() carries
+     * the reasoning.
+     */
+    if (engine->backend != nullptr) {
+        status = engine->backend->prepare_string(option, value);
+        if (status != PATHIME_OK) {
+            return status;
+        }
     }
 
     status = store_string(ctx != nullptr ? ctx->options : engine->options, option, value);

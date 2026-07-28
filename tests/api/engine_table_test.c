@@ -377,12 +377,85 @@ static void test_no_table_is_inert(pathime_engine_t *engine)
     PT_CHECK(!press(ctx, 'a'));
     PT_CHECK(log.commit_count == 0);
 
-    /* A table that does not exist leaves the context just as inert. */
+    /*
+     * A table that does not exist is refused at the setter, not accepted into a
+     * context that then quietly does nothing. The setter is what loads the
+     * table, so this is where the failure can still be attributed to the name
+     * that caused it.
+     */
     PT_CHECK_STATUS(pathime_context_set_option_string(ctx, PATHIME_OPT_TABLE_FILE,
                                                       "no-such-table"),
+                    PATHIME_ERROR_BACKEND);
+
+    /* And the rejected value was not stored: the option still reads as no table. */
+    PT_CHECK_STATUS(pathime_context_get_option_string(ctx, PATHIME_OPT_TABLE_FILE, &value),
                     PATHIME_OK);
+    PT_CHECK(value.len == 0);
+    PT_CHECK(!pathime_context_option_is_set(ctx, PATHIME_OPT_TABLE_FILE));
+
     PT_CHECK(!press(ctx, 'a'));
     PT_CHECK(log.commit_count == 0);
+
+    /* Clearing the option back to "no table" stays legal. */
+    PT_CHECK_STATUS(pathime_context_set_option_string(ctx, PATHIME_OPT_TABLE_FILE, ""),
+                    PATHIME_OK);
+    PT_CHECK(!press(ctx, 'a'));
+
+    pathime_context_destroy(ctx);
+}
+
+/*
+ * Tier 3 answers as soon as the table is named, because naming it is what loads
+ * it. Before the setter did that work, the same query returned the descriptor
+ * default until the first keystroke and the table's declaration afterwards.
+ */
+static void test_declarations_available_before_typing(pathime_engine_t *engine)
+{
+    client_log_t log;
+    pathime_context_t *ctx = open_context(engine, &log, "cangjie5");
+    int64_t value = 0;
+
+    if (ctx == NULL) {
+        return;
+    }
+
+    /* Not one key pressed. cangjie5 declares LANGUAGE_FILTER = cm1. */
+    PT_CHECK_STATUS(pathime_context_get_option_int(ctx, PATHIME_OPT_CHINESE_VARIANT, &value),
+                    PATHIME_OK);
+    PT_CHECK(value == PATHIME_CHINESE_TRADITIONAL_ONLY);
+
+    pathime_context_destroy(ctx);
+}
+
+/*
+ * The pinyin fallback reports itself off, and refuses to be turned on, for every
+ * table this library ships.
+ *
+ * Four of the five *declare* PINYIN_MODE = TRUE — cangjie5, quick5, stroke5 and
+ * wubi-jidian86 — but the pinyin source data ships with ibus-table rather than
+ * with ibus-table-chinese, so the compiled `pinyin` table is created empty. The
+ * declaration alone would tell a client the option is on while it does nothing.
+ */
+static void test_pinyin_fallback_unsupported(pathime_engine_t *engine)
+{
+    client_log_t log;
+    pathime_context_t *ctx = open_context(engine, &log, "cangjie5");
+    bool value = true;
+
+    if (ctx == NULL) {
+        return;
+    }
+
+    PT_CHECK_STATUS(pathime_context_get_option_bool(ctx, PATHIME_OPT_TABLE_PINYIN_FALLBACK, &value),
+                    PATHIME_OK);
+    PT_CHECK(!value);
+
+    PT_CHECK_STATUS(pathime_context_set_option_bool(ctx, PATHIME_OPT_TABLE_PINYIN_FALLBACK, true),
+                    PATHIME_ERROR_UNSUPPORTED);
+
+    /* Turning it off needs no pinyin data: a client may always decline it. */
+    PT_CHECK_STATUS(pathime_context_set_option_bool(ctx, PATHIME_OPT_TABLE_PINYIN_FALLBACK, false),
+                    PATHIME_OK);
 
     pathime_context_destroy(ctx);
 }
@@ -807,6 +880,8 @@ int main(void)
         test_return_commits_literal_keys(engine);
         test_backspace(engine);
         test_table_declares_options(engine);
+        test_declarations_available_before_typing(engine);
+        test_pinyin_fallback_unsupported(engine);
         test_no_table_is_inert(engine);
         test_second_table(engine);
         test_enumeration(engine);

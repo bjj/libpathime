@@ -121,6 +121,25 @@ std::string to_text(sqlite3_stmt *statement, int column)
 }
 
 /**
+ * Whether @a sql yields at least one row.
+ *
+ * A statement that will not even prepare answers false rather than raising,
+ * because the only caller is asking about tables that are optional in the
+ * schema (§4.4): a database that never declared pinyin mode has no `pinyin`
+ * table at all, and "no such table" is one of the answers meaning "no data".
+ */
+bool table_has_rows(sqlite3 *db, const char *sql)
+{
+    sqlite3_stmt *statement = nullptr;
+    if (sqlite3_prepare_v2(db, sql, -1, &statement, nullptr) != SQLITE_OK) {
+        return false;
+    }
+    const bool any = sqlite3_step(statement) == SQLITE_ROW;
+    sqlite3_finalize(statement);
+    return any;
+}
+
+/**
  * The char_prompts map as ibus-table stores it: a Python dict literal in the
  * `ime` table (§3.4). Parsed rather than ignored because the prompts are
  * preedit *content* for Cangjie and Stroke5 — a user typing `a` sees 日 — so a
@@ -530,6 +549,22 @@ bool TableDatabase::read_properties(std::string *error)
         parse_char_prompts(char_prompts, &properties_);
     }
     properties_.finalize();
+
+    /*
+     * Whether the optional tables were populated, as opposed to merely declared.
+     * TableProperties::pinyin_data carries the reasoning; the short version is
+     * that every table this library ships declares PINYIN_MODE and none of them
+     * has any pinyin rows, so the declaration on its own would make the option
+     * read as enabled while doing nothing.
+     *
+     * `LIMIT 1` rather than a count: the question is emptiness, and the pinyin
+     * table of a real ibus-table database has tens of thousands of rows.
+     */
+    properties_.pinyin_data =
+        properties_.pinyin_mode && table_has_rows(db_, "SELECT 1 FROM system.pinyin LIMIT 1;");
+    properties_.suggestion_data =
+        properties_.suggestion_mode &&
+        table_has_rows(db_, "SELECT 1 FROM system.suggestion LIMIT 1;");
     return true;
 }
 

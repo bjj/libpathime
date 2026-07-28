@@ -360,6 +360,38 @@ public:
         (void)option;
         return nullptr;
     }
+
+    /**
+     * Do the work a string option implies — and refuse it if that work fails —
+     * before the value reaches the option store.
+     *
+     * The one implementor is the table engine and the one option is
+     * PATHIME_OPT_TABLE_FILE, where naming a table is what loads it. Loading
+     * here rather than at the first keystroke is a decision about *where a
+     * failure surfaces*: a client that names a table which does not exist, or
+     * which is not an ibus-table database, learns at the setter that named it
+     * rather than several keys later from a context that silently reports every
+     * key unhandled. The cost is a setter that does file I/O and can fail,
+     * which is the honest shape of an operation that opens a database.
+     *
+     * It also makes tier 3 answer immediately. declared_number() reads the
+     * *loaded* table and will not load one, so before this hook existed the same
+     * query returned the descriptor default before the first keystroke and the
+     * table's declaration after it.
+     *
+     * Returning anything but PATHIME_OK aborts the set: the status reaches the
+     * client unchanged and nothing is stored, so the previously resolved value
+     * survives.
+     *
+     * Default: PATHIME_OK — no other backend has a string option whose value
+     * names anything that can be missing.
+     */
+    virtual pathime_status_t prepare_string(pathime_option_t option, const char *value)
+    {
+        (void)option;
+        (void)value;
+        return PATHIME_OK;
+    }
 };
 
 /* ---------------------------------------------------------------------------

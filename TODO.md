@@ -48,63 +48,110 @@ missing.
 
 `src/engines/table/README.md` is the map. What follows is only what is missing.
 
+Three questions this engine raised were answered in the round of 2026-07-28 and
+are **built**: char prompts stay in the preedit (the header clause was widened
+to cover key legends rather than the engine changed), the table loads when
+`PATHIME_OPT_TABLE_FILE` is *set* so a bad name fails at the setter with
+`PATHIME_ERROR_BACKEND`, and `PATHIME_OPT_TABLE_PINYIN_FALLBACK` now reports
+itself off unless the compiled database really carries pinyin rows. The
+reasoning belongs in `docs/design-history.md` once that file grows a table round
+(queued below).
+
 ### Not implemented, in rough priority order
 
 - **User-derived phrases (§10.2).** The remaining half of learning. `RULES` is
   parsed, goucima are compiled into the database and `TableDatabase::goucima()`
   reads them back, so the data is all present; what is missing is applying the
   parsed rules to consecutive single-character selections to derive a compound
-  key and insert it with `freq = -1`, `user_freq = 1`. wubi-jidian86 is the
-  shipped table that declares `USER_CAN_DEFINE_PHRASE`.
+  key and insert it with `freq = -1`, `user_freq = 1`.
+
+  Two shipped tables declare `USER_CAN_DEFINE_PHRASE`, not one:
+  wubi-jidian86, which also carries `RULES`, and **zhuyin, which does not**.
+  Derivation is defined entirely as applying rules to goucima, so a table
+  without rules derives nothing — zhuyin gets a `goucima` table it never uses.
+  That is the only coherent reading and needs no option, but it does mean the
+  feature lands for exactly one shipped table.
 - **Write batching (§5.3).** Not implemented, and possibly not worth it: the
   spec's checkpoint-after-16-updates is a durability detail, and the user
   database is in WAL mode where SQLite checkpoints on its own. Measure before
   writing anything.
 - **Full-width conversion (§11.4).** Only the space is converted today
   (`PATHIME_OPT_LATIN_WIDTH`, in the Space branch of `process_key`).
-  `PATHIME_OPT_PUNCTUATION_WIDTH` does nothing for this engine. The table is
-  per-language content like `engines/pyzy/punctuation.*`, and §11.4 lists the
-  punctuation overrides in full.
-- **Pinyin mode (§11.2) and suggestion mode (§11.3).** Blocked on data, not on
-  code: the `pinyin` and `suggestion` tables are created when a table declares
-  the mode, but their source (`pinyin_table.txt.bz2`, `phrase.txt.bz2`) ships
-  with **ibus-table**, not with ibus-table-chinese, so this repository has
-  nothing to compile into them. `PATHIME_OPT_TABLE_PINYIN_FALLBACK` and the
-  table meaning of `PATHIME_OPT_PREDICTION` are unimplemented until that data
-  has a source. Decide whether to vendor it or drop both options.
-- **Two of the nine sort keys (§8.2).** Key 2 (the pinyin tone-suffix penalty)
-  follows pinyin mode. Key 8 (Big5 code of the first character, Cangjie and
-  Quick only) needs a Big5 mapping this library does not carry — the same
-  regenerate-don't-copy situation as the variant table, and
-  `tools/generate-variants.py` is the pattern to follow. Both affect only ties
-  the remaining seven keys already order plausibly.
+  `PATHIME_OPT_PUNCTUATION_WIDTH` does nothing for this engine.
+
+  **Decided: share pyzy's table, not §11.4's.** The two disagree on four
+  characters — `^` (`……` vs `…`), `[` (variant-dependent vs `「`), `<`
+  (variant-dependent vs `《`), and the `.` rule (pyzy keeps "1.5" intact; §11.4
+  switches on sentence position). One option cannot mean two things across
+  engines, and the API's stated principle is one behaviour per concept, so
+  `src/engines/pyzy/punctuation.*` moves up to `src/punctuation.*` (no
+  subdirectory, per the layout rule) and the table engine calls it. The cost is
+  ibus-table parity on those four characters, and it is worth paying; pyzy's
+  `1.5` handling is also simply better.
+
+  It keys off `PATHIME_OPT_CHINESE_VARIANT`, which for this engine already
+  resolves through tier 3 to the table's own `LANGUAGE_FILTER` (`cm1` for
+  cangjie5/quick5, `cm2` for wubi-jidian86, `cm3` for stroke5/zhuyin). So the
+  per-table default falls out of data already parsed — no new declaration and
+  no per-table policy in code.
+- **Pinyin mode (§11.2) and suggestion mode (§11.3).** **Decided: not
+  implemented, and the options stay.** Three findings closed this.
+
+  *The data will not be vendored.* Its source (`pinyin_table.txt.bz2`,
+  `phrase.txt.bz2`) ships with **ibus-table**, not ibus-table-chinese, so
+  taking it means a third GPL-3 dependency. Not while the licensing question
+  below is open.
+
+  *It was never reachable anyway.* ibus-table binds `toggle_pinyin_mode` to
+  `Shift_R` (`org.freedesktop.ibus.engine.table.gschema.xml:50`) — a bare
+  modifier press, which this library's key model cannot express and
+  deliberately never could. `toggle_suggestion_mode` is `Super+Mod4+F6`.
+
+  *And the audience is thinner than it looks.* Cangjie and Quick are the Hong
+  Kong methods, where the user speaks Cantonese and Mandarin pinyin is close to
+  useless to them; the Cantonese analogue would be Jyutping, which ibus-table
+  does not offer. Only wubi-jidian86 targets a Mandarin-speaking audience for
+  whom the fallback is genuinely worth something — and it declares `PINYIN_MODE
+  = TRUE` alongside cangjie5, quick5 and stroke5, which do not benefit.
+
+  What was left was a **bug, not a feature gap**, and it is fixed: tier 3
+  reported `PATHIME_OPT_TABLE_PINYIN_FALLBACK` *on* for those four tables while
+  their compiled `pinyin` table was empty, so the option read as enabled and did
+  nothing. `TableProperties::pinyin_data` now records whether the database
+  actually carries rows, tier 3 consults it, and turning the option on without
+  them is `PATHIME_ERROR_UNSUPPORTED` at the setter as the header always
+  promised.
+
+  *The alternative, if this is ever revisited:* satisfy the fallback from
+  **pyzy** rather than from vendored data. Rejected for now on two grounds, both
+  independent of effort. It would make table input's behaviour depend on
+  `LIBPATHIME_WITH_PYZY`, so turning off an unrelated engine silently removes a
+  table feature; and it would put pyzy's candidate ordering and learning inside
+  a table candidate list, which is exactly the cross-engine inconsistency the
+  "second pinyin" question was asking about.
+- **`z` as a Cangjie wildcard.** Apple's Cangjie makes `Z` stand for an unknown
+  part of a decomposition, and it turns out this is nearly free. In cangjie5
+  `z` occurs in 496 of 68,632 rows and **only ever as the first key** — no row
+  uses it in a non-initial position. Those 496 are the punctuation codes (`za`
+  → `'` `'` `"` `"` `〔`).
+
+  So setting `PATHIME_OPT_TABLE_SINGLE_WILDCARD` to `"z"` already gives the
+  behaviour, with no code change, and it is unambiguous everywhere except a
+  leading `z`. To have both, the rule is: `z` is a wildcard in non-initial
+  position and literal at position 1. Small, well-defined, and it needs a
+  decision only about whether the position rule is worth the special case.
+- **One of the nine sort keys (§8.2).** Key 2 (the pinyin tone-suffix penalty)
+  is now moot: pinyin mode is not being implemented. Key 8 (Big5 code of the
+  first character, Cangjie and Quick only) needs a Big5 mapping this library
+  does not carry — the same regenerate-don't-copy situation as the variant
+  table, and `tools/generate-variants.py` is the pattern to follow. It affects
+  only ties the remaining seven keys already order plausibly.
 - **The phrase cache (§5.4).** Explicitly optional in the spec. Not started,
   and worth measuring before writing: a lookup is one statement against one
   unindexed table, and it has not been profiled.
 
 ### Open questions the implementation raised
 
-- **Return commits the typed keys, not the preedit that was displayed.**
-  Spec §7.4 says the essential operation is "commit the literal input", so
-  Cangjie `a`+`b` commits `ab`. But the preedit showed 日月, and the header
-  promises at `pathime_composition_t::preedit` that the preedit "is the text
-  that would be committed if the composition ended right now", with only
-  commit-time normalizations departing from it. Prompt substitution is a bigger
-  departure than the Japanese trailing-`n` case that clause was written for.
-  Three readings are available: commit the keys (current, pinned by
-  `api.engine_table`), commit the prompts, or treat prompts as display-only and
-  keep the preedit raw. **This one wants a decision** — it is visible to any
-  Cangjie or Stroke5 user, and it is the only place this engine knowingly bends
-  the header.
-- **Tier 3 answers nothing until a context has typed.**
-  `EngineBackend::declared_number()` reads the *loaded* table and deliberately
-  does not load one, because resolving an option must not open a database — a
-  client calling `pathime_engine_option_get_int()` has asked a question, not
-  asked for work. The consequence is that the same call returns the descriptor
-  default before the first keystroke and the table's declaration after it.
-  Defensible, and possibly surprising. The alternative is loading eagerly when
-  `PATHIME_OPT_TABLE_FILE` is *set* rather than when it is first used, which
-  moves the cost to a place the client can predict.
 - **Two behaviours in §7.2 that the spec does not pin down.** At
   `MAX_KEY_LENGTH` with `AUTO_COMMIT` off the key is absorbed and discarded
   (letting it through would drop a latin letter into the middle of a
@@ -112,8 +159,12 @@ missing.
   character that broke the match. Both are choices, both are commented at the
   code, and neither has a table in the shipped set that exercises it hard.
 - **`ibus-table-chinese` is GPL-3, and its compiled tables now ship inside
-  `pathime-data/`.** Flagged at the decision round and still open: it is a
-  licensing question about what libpathime distributes, not a technical one.
+  `pathime-data/`.** Still open, and now with a standing consequence: **no
+  further GPL data gets vendored until it is resolved.** That is what closed the
+  pinyin/suggestion question above — the data exists in `refs/ibus-table` and
+  taking it would have added a third GPL-3 source. A licensing question about
+  what libpathime distributes, not a technical one, and to be pursued
+  separately from the engine work.
 - **Glyph-coverage filtering should be available, and the reasoning behind it
   is not the one this implementation assumed.** Frequency transfer and font
   trimming are two halves of one purpose, and only the first is implemented.
@@ -140,15 +191,23 @@ missing.
   remove more. Runtime never widens, so the shipped `.db` stays the upper bound
   and nothing has to be re-added from a table that no longer carries it.
 
-  **In scope now: the compile-time half only.** A `--font` flag on
-  `tools/table-compile`, filtering against something deliberately inclusive —
-  Noto CJK is the obvious target. That is what the fork already does, it needs
-  no API surface, and it is the half that removes the tofu.
+  **In scope now: the compile-time half only**, and the shape is settled. Not
+  the fork's `--font` resolved at build time — that would make the shipped `.db`
+  a function of which fonts happen to be installed on the build machine, so two
+  builds of the same commit would produce different tables.
 
-  Portability is not a blocker for it: fontconfig covers Linux, and Windows can
-  read its own fonts through the Windows APIs. Two implementations of "which
-  code points does this font cover", both build-time and neither touching the
-  library.
+  Instead: **bake a coverage map for Noto CJK into a generated header**, exactly
+  the pattern `variants_data.h` and `tools/generate-variants.py` already
+  establish for the variant table. The build is then deterministic and needs no
+  fontconfig at all. A regeneration tool sits behind a CMake option defaulting
+  **OFF**, so a future maintainer can rebuild the map against a newer Noto
+  without it being a build dependency for everyone else. `tools/table-compile`
+  keeps a `--font` override for anyone targeting something narrower.
+
+  Windows gets the same treatment against a standard Windows font, generated by
+  its own enumeration path (the Windows font APIs rather than fontconfig).
+  **Deferred to a session running on Windows** — it cannot be written or checked
+  here, and nothing else is blocked on it.
 
   **The runtime half is deferred**, and not only for effort. Four things have to
   be answered first, and none of them is about tables:
@@ -172,22 +231,24 @@ missing.
   have answers.
 
 - **Is it worth implementing the input methods the other backends already
-  cover?** `PINYIN_MODE` and `SUGGESTION_MODE` are the immediate cases, but the
-  question is general: pyzy already gives us Pinyin and Bopomofo, and a table
-  can be built to do the same job.
+  cover?** **Answered: no, and the question was narrower than it looked.**
 
-  For ibus-table the duplication is harmless — it is one engine among many in a
-  world that already offers several pinyin implementations, and a user picks
-  one. For libpathime it may not be. Two code paths reaching the same input
-  method is two places to be inconsistent about candidate order, about what
-  `PATHIME_OPT_CHINESE_VARIANT` does, about learning — and the API deliberately
-  presents one behaviour per concept rather than an engine-dependent one.
+  The worry was two code paths reaching the same input method — two places to
+  be inconsistent about candidate order, about `PATHIME_OPT_CHINESE_VARIANT`,
+  about learning — against an API that deliberately presents one behaviour per
+  concept.
 
-  So this is not only "how much work", though that matters too: §11.2 needs the
-  pinyin table, its source data, the tone encoding and sort key 2, none of which
-  is large. It is whether shipping a second pinyin makes the library worse. Answer
-  it before writing any of it — the cost of deciding late is a feature that has to
-  be taken away.
+  §11.2 turns out not to be a second pinyin IME at all. It is a lookup escape
+  hatch *within* a table method: type pinyin to find a character whose table
+  code you do not know, against the same phrase set, and carry on. It competes
+  with nothing pyzy does. So the general question mostly dissolves, and what is
+  left is the specific one — **should this library ever ship a table that is
+  itself a pinyin table?** ibus-table-chinese has several. The answer is no, for
+  the original reason: that would be a genuine second pinyin, and the
+  inconsistency would be real.
+
+  Recorded here rather than dropped so the option inventory in
+  `docs/ibus-table-options.md` stops reading as undecided.
 
 ### Not verified
 

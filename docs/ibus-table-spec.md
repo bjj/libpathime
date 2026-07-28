@@ -732,9 +732,9 @@ shapes:
 | Table | Path | Exercises |
 |-------|------|-----------|
 | Wubi-Jidian | `tables/wubi-jidian/wubi-jidian86.txt` | `RULES`, `USER_CAN_DEFINE_PHRASE`, `PINYIN_MODE`, `SUGGESTION_MODE`, `DYNAMIC_ADJUST`, auto-derived goucima, `MAX_KEY_LENGTH = 4`. |
-| Cangjie 5 | `tables/cangjie/cangjie5.txt` | `AUTO_WILDCARD`, char prompts (radical names), `MAX_KEY_LENGTH = 5`, no rules. |
-| Stroke5 | `tables/stroke5/stroke5.txt` | `AUTO_COMMIT` with `AUTO_SELECT = FALSE`, non-alpha `VALID_INPUT_CHARS` (`nm,./`), stroke-name char prompts. |
-| Zhuyin | `tables/zhuyin.txt`, `tables/zhuyin-big.txt` | Phonetic keys, larger phrase set. |
+| Cangjie 5 | `tables/cangjie/cangjie5.txt` | Char prompts (the 24 radicals as printed on a Cangjie keyboard), `MAX_KEY_LENGTH = 5`, `LANGUAGE_FILTER = cm1`, no rules, **no** wildcard declarations. |
+| Stroke5 | `tables/stroke5/stroke5.txt` | `AUTO_WILDCARD` with explicit `SINGLE_WILDCARD_CHAR`/`MULTI_WILDCARD_CHAR`, `AUTO_COMMIT` with `AUTO_SELECT = FALSE`, non-alpha `VALID_INPUT_CHARS` (`nm,./`), stroke-name char prompts. |
+| Zhuyin | `tables/zhuyin.txt`, `tables/zhuyin-big.txt` | Phonetic keys, larger phrase set, `USER_CAN_DEFINE_PHRASE` **without** `RULES`. |
 
 ### Minimal synthetic table (no goucima, no rules)
 

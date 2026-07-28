@@ -157,6 +157,32 @@ public:
     }
 
     /**
+     * Load the table PATHIME_OPT_TABLE_FILE names, so that a name which does not
+     * resolve fails here instead of turning into a context that reports every
+     * key unhandled.
+     *
+     * The empty string stays legal and loads nothing: the header spells "no
+     * table" as the empty value, and a client clearing the option is not making
+     * an error.
+     */
+    pathime_status_t prepare_string(pathime_option_t option, const char *value) override
+    {
+        if (option != PATHIME_OPT_TABLE_FILE) {
+            return PATHIME_OK;
+        }
+        if (value == nullptr || *value == '\0') {
+            return PATHIME_OK;
+        }
+        /*
+         * PATHIME_ERROR_BACKEND rather than PATHIME_ERROR_INVALID_ARGUMENT: the
+         * argument is a well-formed table name, and what failed is the data file
+         * behind it — which is exactly what that status is for. load() caches
+         * the failure, so a client retrying the same bad name pays for one open.
+         */
+        return (load(value) == nullptr) ? PATHIME_ERROR_BACKEND : PATHIME_OK;
+    }
+
+    /**
      * The table @a value names, loading it if this is the first request.
      *
      * Cached for the engine's lifetime and shared by every context naming the

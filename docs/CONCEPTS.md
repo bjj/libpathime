@@ -204,7 +204,11 @@ One rule fixes what it contains, for every engine:
 
 So a Japanese engine shows kana, a Pinyin engine shows syllables, a Bopomofo engine shows zhuyin, and a table-based engine shows its key run — each preceded by whatever the user has already chosen. An engine's guesses are the *candidate list*, which the user may take or ignore; they do not appear in the preedit unasked.
 
-The guarantee this gives a client: preedit text is what would be committed if the composition ended now. The only departures are normalizations an engine can only apply at the moment of commit — resolving a trailing romaji consonant that one more keystroke would still change, or dropping separators rendered between syllables. Neither changes which characters the user chose.
+The guarantee this gives a client: preedit text is what would be committed if the composition ended now, up to two kinds of departure, neither of which changes which characters the user chose.
+
+The first is normalization an engine can only apply at the moment of commit — resolving a trailing romaji consonant that one more keystroke would still change, or dropping separators rendered between syllables.
+
+The second is a table method whose table supplies *key legends*: a symbol per key, being what is printed on the keyboard the method was designed for. Cangjie's `a` is 日, `b` is 月, `h` is 竹, and the preedit shows those symbols rather than the letters — showing the letters would hide the very thing being composed. Committing without choosing a candidate then yields the letters, which is the method's own escape hatch to Latin text. The preedit and the commit are two renderings of one key run, not two different pieces of text.
 
 This is also where the content other frameworks carry as *auxiliary text* belongs. What a user has typed is not supplemental to their composition; it is the composition. Auxiliary text as those frameworks use it in practice is either that same content displaced, or a candidate position indicator, which is presentation derived from the *candidate cursor* and the candidate count.
 
