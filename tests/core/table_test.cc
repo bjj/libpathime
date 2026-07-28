@@ -6,7 +6,7 @@
  * where a wrong answer shows up as a differently ordered candidate list and a
  * right answer proves little about the edge cases. Here they are called
  * directly, against inputs chosen to be awkward: the synthetic table from
- * docs/ibus-table-spec.md §14, wildcard characters that collide with SQL's own,
+ * the mapping doc's minimal example, wildcard characters that collide with SQL's own,
  * and rule sets that are malformed in each of the ways §3.5 forbids.
  *
  * Nothing here opens a database. That is the point of the split the directory
@@ -33,7 +33,7 @@ using namespace pathime::table;
 
 namespace {
 
-/* The synthetic table of docs/ibus-table-spec.md §14, verbatim. */
+/* A minimal table: no goucima, no rules, three single-key entries and a pair. */
 const char *const kSyntheticTable =
     "BEGIN_DEFINITION\n"
     "NAME = Example\n"

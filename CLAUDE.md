@@ -8,7 +8,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 vendored submodules (libhangul, anthy-unicode, pyzy); the fourth, the
 table-driven engine, is **ours** — `ibus-table` is Python, so it was the
 reference feature set rather than a linkable library, and the engine is written
-in `src/engines/table/` to `docs/ibus-table-spec.md`. The build, the core, all
+in `src/engines/table/` against the data format in
+`docs/ibus-table-mapping.md`. The build, the core, all
 four adapters, options and negotiation including tier 3, and the terminal demo
 are implemented and tested; the table engine is Linux-verified only so far, and
 what it still lacks (learning, full-width conversion, pinyin and suggestion
@@ -72,8 +73,11 @@ only the routing:
   candidate-order observation taken against a real profile.
 - `docs/testing.md` — the suites and what is deliberate about them. Read
   before concluding a missing test is a bug.
-- `docs/*-mapping.md` — per-backend API-to-concepts mapping, source-verified
-  with file:line citations, each ending in "Impedance mismatches".
+- `docs/*-mapping.md` — one per backend, describing how a living external thing
+  connects to this library; read before upgrading the submodule it covers. The
+  three vendored ones map a C API with file:line citations;
+  `ibus-table-mapping.md` maps a *data format*, because there is no library to
+  link. Each ends in "Impedance mismatches".
 - `src/engines/table/README.md` — the table engine's own map, including the
   data/behaviour boundary inside that directory and what the ibus-table data
   contract costs.

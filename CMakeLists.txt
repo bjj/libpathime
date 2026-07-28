@@ -64,7 +64,7 @@ endif()
 
 # --- Table-driven (Wubi, Cangjie, Stroke5, Zhuyin, …): no library to build.
 # ibus-table, the feature-complete reference for these methods, is Python and
-# so cannot be wrapped; the engine of docs/ibus-table-spec.md is written in
+# so cannot be wrapped; the engine of docs/ibus-table-mapping.md is written in
 # src/engines/table/ instead, as a peer of the vendored libraries rather than a
 # wrapper around one. There is nothing to add_subdirectory here: the only
 # outside thing the engine needs is SQLite, gated in LibpathimeDependencies,

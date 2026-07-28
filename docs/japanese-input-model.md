@@ -241,7 +241,7 @@ one; anthy's was empty; pyzy's turned out to be the *preedit* under another
 name (§7); and the table engine's is `get_aux_strings()`
 (`refs/ibus-table/engine/table.py:1732`), which is the raw key run mapped
 through `char_prompts` plus the same `current / total` counter — the key run
-being preedit text under the rule, exactly as `docs/ibus-table-spec.md` §6.2
+being preedit text under the rule, exactly as `docs/ibus-table-mapping.md` §6.2
 already specified before any of this. Four engines, nothing left in the field.
 
 ## 7. pyzy's three text parts are really two, and they rearrange on selection

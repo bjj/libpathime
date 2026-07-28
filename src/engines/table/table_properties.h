@@ -1,5 +1,5 @@
 /*
- * A table's declaration: everything docs/ibus-table-spec.md §3.1 puts in the
+ * A table's declaration: everything docs/ibus-table-mapping.md §3.1 puts in the
  * source file's DEFINITION section, typed.
  *
  * This is deliberately its own file rather than part of the .txt parser,
@@ -92,7 +92,7 @@ struct TableProperties {
     /** If non-empty, only these scalars may begin a key run. */
     std::set<char32_t> start_chars;
 
-    /** Scalars excluded from frequency adjustment and phrase learning (§10.2). */
+    /** Scalars excluded from frequency adjustment and phrase learning. */
     std::set<char32_t> no_check_chars;
 
     size_t max_key_length = 4;
@@ -104,7 +104,7 @@ struct TableProperties {
 
     Rules rules;
 
-    /** Per-key preedit substitutions (§3.4, §6.2). Empty when none declared. */
+    /** Per-key preedit substitutions (§3.4). Empty when none declared. */
     std::map<char32_t, std::string> char_prompts;
 
     /* ---- Engine options (tier 3) ---- */
@@ -171,7 +171,7 @@ struct TableProperties {
 
     /**
      * The key-run lengths at which typing another character stages the current
-     * segment into the preedit (§7.5).
+     * segment into the preedit.
      *
      * From RULES when the table has them — the output length of each `ceN` rule
      * below the `caN` threshold — and otherwise from LEAST_COMMIT_LENGTH, which

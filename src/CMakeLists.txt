@@ -1,5 +1,5 @@
 # The libpathime library target. docs/source-layout.md is the map: what each
-# file is for, the conventions, and which choices are still open. docs/adapter-findings.md
+# file is for, the conventions, and which choices are still open. docs/design-history.md §2
 # holds the adapter-layer findings the layout answers to.
 #
 # Core files sit directly in src/ — the public API entry points and the shared

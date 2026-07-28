@@ -1,22 +1,22 @@
 /*
  * Implementation of the table-driven engine declared in table_backend.h.
  *
- * The state machine is docs/ibus-table-spec.md §6 and §7, mapped onto the three
- * strings of composition.h. That mapping is the one structural decision worth
+ * The state machine reproduces ibus-table's, mapped onto the three strings of
+ * composition.h. That mapping is the one structural decision worth
  * reading before the code:
  *
- *   settled  the phrases of the pre-committed segments (§6.1), in order
- *   active   the current key run as displayed (§6.2) — chars_valid with
+ *   settled  the phrases of the pre-committed segments, in order
+ *   active   the current key run as displayed — chars_valid with
  *            char-prompt substitution, then chars_invalid unchanged
  *   tail     always empty
  *
  * `tail` is empty because the model has no cursor inside a span and this engine
  * declines the motions that would need one. ibus-table lets the user move a
  * caret among the pre-committed segments and insert in the middle, which is
- * what its `cursor_precommit` is for; §6.3 already records that
- * docs/CONCEPTS.md flattens that away. So new input always joins at the end,
+ * what its `cursor_precommit` is for; docs/CONCEPTS.md flattens that away, and
+ * docs/ibus-table-mapping.md records it as an impedance mismatch. So new input always joins at the end,
  * every pre-committed segment is to the left of it, and `settled` holds all of
- * them. That also makes preedit_settled fall out exactly as §6.3 asks: the
+ * them. That also makes preedit_settled fall out as it should: the
  * display position is the end of the pre-committed segments.
  *
  * The consequence is the same one anthy and pyzy already pay, and it is
@@ -129,8 +129,8 @@ namespace {
 
 /**
  * One pre-committed segment: the keys that produced it and the phrase they were
- * staged as (§7.5). The keys are kept because backspacing out of an empty run
- * pulls the previous segment back apart (§7.3).
+ * staged as. The keys are kept because backspacing out of an empty run pulls
+ * the previous segment back apart.
  */
 struct Segment {
     std::string keys;
@@ -265,7 +265,7 @@ private:
     bool take_input_scalar(uint32_t scalar, const OptionReader &options, Output *out);
     bool take_backspace(const OptionReader &options);
 
-    /** Stage the current run as a segment using candidate @a index (§7.5). */
+    /** Stage the current run as a segment using candidate @a index. */
     void stage_segment(size_t index, const OptionReader &options);
 
     /**
@@ -273,7 +273,8 @@ private:
      *
      * @a chosen_keys is the key run @a text was chosen for, or "" when the text
      * is not a candidate — the literal run Return commits, or a lone character
-     * §7.6 passed through. That distinction is what learning turns on: a user
+     * passed through by the trailing-character rule. That distinction is what
+     * learning turns on: a user
      * who typed their way out of a composition expressed no preference, and
      * recording one would teach the table something the user did not say.
      */
@@ -281,7 +282,7 @@ private:
                 const OptionReader &options, Output *out);
 
     /**
-     * Record one (keys, phrase) selection in the user database (§10.1), if the
+     * Record one (keys, phrase) selection in the user database, if the
      * table adapts and the client left learning on.
      */
     void learn(const std::string &keys, const std::string &phrase,
@@ -433,7 +434,7 @@ std::string TableContext::displayed_run() const
     }
 
     /*
-     * Prompt substitution applies to the valid run only (§6.2). The invalid
+     * Prompt substitution applies to the valid run only. The invalid
      * tail is shown as typed, because a character that matched nothing has no
      * prompt to stand for it — and because seeing the raw character is what
      * tells the user which keystroke went wrong.
@@ -591,7 +592,7 @@ bool TableContext::take_input_scalar(uint32_t scalar, const OptionReader &option
     const TableProperties &props = properties();
 
     /*
-     * Step 1 of §7.2: a run that has already reached a boundary stages before
+     * A run that has already reached a boundary stages before
      * the new character joins, so the boundary is enforced against what was
      * typed rather than against what is about to be.
      */
@@ -632,7 +633,7 @@ bool TableContext::take_input_scalar(uint32_t scalar, const OptionReader &option
 
     if (!matches_.empty()) {
         /*
-         * Step 4 of §7.2: a lone exact match under AUTO_COMMIT commits at once,
+         * A lone exact match under AUTO_COMMIT commits at once,
          * which is what makes a fixed-length table like Wubi feel like typing
          * rather than like selecting.
          */
@@ -687,7 +688,7 @@ bool TableContext::take_backspace(const OptionReader &options)
     if (!segments_.empty()) {
         /*
          * The run is empty, so backspace takes apart the most recent staged
-         * segment (§7.3): its keys become the current run again, minus their
+         * segment: its keys become the current run again, minus their
          * last character. That is what makes a mis-staged segment repairable
          * without discarding everything before it.
          */
@@ -761,7 +762,8 @@ bool TableContext::process_key(const KeyEvent &key, const OptionReader &options,
             return false;
         }
         /*
-         * §7.4: commit the literal input. The header's rule for Return is that
+         * Commit the literal input, which is ibus-table's rule for Return too. The
+         * header's rule is that
          * it ends the composition without applying a conversion the user did
          * not choose, and for this engine what the user typed is the key run
          * itself.
@@ -819,7 +821,7 @@ bool TableContext::process_key(const KeyEvent &key, const OptionReader &options,
     }
 
     if (scalar == 0) {
-        return false;  /* a named key with no character: not ours (§7.6) */
+        return false;  /* a named key with no character: not ours */
     }
 
     const char32_t typed = static_cast<char32_t>(scalar);
@@ -836,7 +838,7 @@ bool TableContext::process_key(const KeyEvent &key, const OptionReader &options,
     }
 
     /*
-     * §7.6: any other character ends the composition and then commits itself.
+     * Any other character ends the composition and then commits itself.
      * PATHIME_OPT_TABLE_INVALID_INPUT chooses which of the two endings applies
      * — the hovered candidate, or the keys as typed.
      */
@@ -935,9 +937,9 @@ pathime_status_t TableContext::select_candidate(size_t index, const OptionReader
 
     /*
      * A selection finalizes the whole preedit: the staged segments plus the
-     * chosen phrase. §9's phrase-building variant — staging instead of
+     * chosen phrase. ibus-table's phrase-building variant — staging instead of
      * committing — is not a second operation here, because staging already
-     * happens on its own at the boundaries of §7.5. Giving the client a second
+     * happens on its own at the segment boundaries. Giving the client a second
      * meaning for the same call would make the result depend on a modifier the
      * API does not carry.
      */

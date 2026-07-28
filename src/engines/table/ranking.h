@@ -1,5 +1,5 @@
 /*
- * Candidate ordering: the multi-key sort of docs/ibus-table-spec.md §8.2.
+ * Candidate ordering: the multi-key sort of docs/ibus-table-mapping.md §8.2.
  *
  * Separate from the lookup because the order is not the database's opinion —
  * it depends on the typed key run, on the negotiated Chinese variant, and on

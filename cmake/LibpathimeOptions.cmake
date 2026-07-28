@@ -62,7 +62,7 @@ option(LIBPATHIME_WITH_ANTHY  "Build the Japanese (anthy-unicode) backend"  ON)
 option(LIBPATHIME_WITH_PYZY   "Build the Chinese (pyzy) backend"            ON)
 
 # The table-driven backend is not a submodule: ibus-table is Python, so it
-# cannot be wrapped, and our table engine (docs/ibus-table-spec.md) is a peer of
+# cannot be wrapped, and our table engine (docs/ibus-table-mapping.md) is a peer of
 # the vendored libraries rather than a wrapper around one.
 #
 # ON like the other three, and for the same reason they are: a default should

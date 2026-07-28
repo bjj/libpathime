@@ -1,9 +1,9 @@
 # Table engine
 
-The fourth engine, written here from scratch to `docs/ibus-table-spec.md`. It is
-a peer of the vendored backends rather than a wrapper: `ibus-table` is Python,
-so there is nothing to link against — it supplied the proven feature set, and
-the spec was derived from it clean-room.
+The fourth engine, written here from scratch rather than wrapped: `ibus-table`
+is Python, so there is nothing to link against. It supplied the proven feature
+set, and the data format both programs read is `docs/ibus-table-mapping.md`.
+Why this engine behaves as it does is `docs/design-history.md` §6.
 
 One engine id (`PATHIME_ENGINE_TABLE`) covers every table-driven method, because
 they differ only in the table loaded. Tables are selected per context with
@@ -13,7 +13,8 @@ a different one to each context.
 ## The split, and the rule that holds it
 
 ```
-table_backend.cc     the seam: EngineBackend, ContextBackend, the §7 state machine
+table_backend.cc     the seam: EngineBackend, ContextBackend, the key-event
+                     state machine
 table_db.*           SQLite — the §4 schema, compilation, the §8.1 lookup
 table_source.*       the §3 source .txt parser
 table_properties.*   the §3.1 declaration, typed; also tier 3
@@ -55,7 +56,7 @@ choice.
 The compiled `.db` this engine reads is the one `ibus-table` writes, so the
 schema, the column order, the row order and the pragmas are all transcribed
 rather than chosen. Anything here that looks arbitrary probably is not — check
-the spec section named in the comment before changing it.
+the `docs/ibus-table-mapping.md` section named in the comment before changing it.
 
 Two consequences worth knowing:
 

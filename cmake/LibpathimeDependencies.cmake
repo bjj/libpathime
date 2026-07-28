@@ -66,7 +66,7 @@ endif()
 
 # --- Table-driven: our own engine, not a submodule, so the only thing to find
 #     is SQLite. That is a genuine dependency rather than an incidental one:
-#     the compiled table format of docs/ibus-table-spec.md §4 *is* a SQLite
+#     the compiled table format of docs/ibus-table-mapping.md §4 *is* a SQLite
 #     database, and reading one ibus-table produced is the whole point of
 #     sharing the format. Probed independently of pyzy, which also uses SQLite
 #     — either backend may be built without the other. ---

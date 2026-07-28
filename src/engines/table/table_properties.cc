@@ -273,8 +273,8 @@ void TableProperties::set(const std::string &key, const std::string &value)
         /*
          * A rule set that does not parse leaves `rules` empty rather than
          * failing the load. The consequence is confined and knowable: no
-         * user-phrase derivation (§10.2) and no RULES-derived commit boundaries
-         * (§7.5), so the table still types.
+         * user-phrase derivation and no RULES-derived commit boundaries, so the
+         * table still types.
          */
         Rules parsed;
         if (parse_rules(v, &parsed)) {
@@ -345,7 +345,7 @@ std::set<size_t> TableProperties::commit_boundaries() const
     if (!rules.empty()) {
         /*
          * "the output length of each ceN rule for N from 2 up to (but not
-         * including) the caN threshold" (§7.5). The catch-all is excluded
+         * including) the caN threshold". The catch-all is excluded
          * because it describes phrases of unbounded length, so its output
          * length is not a boundary the run can be said to reach.
          */

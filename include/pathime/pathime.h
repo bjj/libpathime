@@ -401,7 +401,7 @@ PATHIME_API void pathime_shutdown(void);
  * table-driven method (Wubi, Cangjie, Stroke5, Zhuyin, …) because they differ
  * only in the table loaded, and which table that is is an option
  * (PATHIME_OPT_TABLE_FILE) rather than a separate id. Its implementation lives
- * in this library — see docs/ibus-table-spec.md — rather than in a vendored
+ * in this library — see docs/ibus-table-mapping.md — rather than in a vendored
  * one, because the reference implementation is Python and cannot be linked
  * against.
  *

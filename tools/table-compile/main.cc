@@ -1,6 +1,6 @@
 /*
  * pathime-table-compile — turn an ibus-table source `.txt` into the compiled
- * SQLite `.db` of docs/ibus-table-spec.md §4.
+ * SQLite `.db` of docs/ibus-table-mapping.md §4.
  *
  * This exists because `ibus-table-chinese` distributes source text only, while
  * the engine reads compiled databases. Upstream's own build calls

@@ -61,7 +61,7 @@ Done:
   default, adoption, one option spanning anthy and table, the span gap
   accepted — and the strip-selection semantics built with it.
 - **The table engine.** §6 — the fourth engine, written here rather than
-  wrapped, to `docs/ibus-table-spec.md`. Shape in §6a, the behaviour round in
+  wrapped, to `docs/ibus-table-mapping.md`. Shape in §6a, the behaviour round in
   §6b, and what was ruled out of scope in §6c. Five tables ship, trimmed at
   build time to a font's glyph coverage.
 - **Tests: 34, all passing.** `tests/core/` compiles internal sources directly,
@@ -909,7 +909,7 @@ hangul never had one; anthy's was always empty, and ibus-anthy's only content is
 `( 3 / 12 )`, which this API publishes as `candidate_cursor` and
 `candidate_count`; pyzy's turned out to be the preedit under another name; and
 the table engine's is `get_aux_strings()` — the key run, which
-`docs/ibus-table-spec.md` §6.2 *already* specified as preedit text, plus the
+`docs/ibus-table-mapping.md` §6.2 *already* specified as preedit text, plus the
 same counter. Nothing was left in the field.
 
 `PATHIME_OPT_PINYIN_SHOW_RAW` went with it, since the auxiliary text was the
@@ -978,7 +978,7 @@ as kana, cursor browsing without rewriting anything.
   browse/preview rule in place of the per-engine wording.
 - **One option covers table too**, reworded rather than split: it toggles
   "offerings the user did not ask to convert" — pre-conversion on anthy,
-  post-commit suggestion mode on table (`docs/ibus-table-spec.md` §11.3) —
+  post-commit suggestion mode on table (`docs/ibus-table-mapping.md` §11.3) —
   and a phone strip consumes both, which is why shipping IMEs give them one
   name. Table's as-you-type candidates are structural (spec §7.2) and are not
   what the option governs there. The user's settings flexibility was part of
@@ -1212,7 +1212,7 @@ again:
 
 The fourth engine, and the only one written here rather than wrapped. `ibus-table`
 is Python, so there was nothing to link against: it supplied a proven feature set,
-`docs/ibus-table-spec.md` was derived from it clean-room, and the implementation
+`docs/ibus-table-mapping.md` was derived from it clean-room, and the implementation
 answers to that spec. What follows is the decisions taken along the way, in two
 groups — the ones about *shape*, taken while the engine was being built, and the
 ones about *behaviour*, taken in a round of questions the finished engine raised.

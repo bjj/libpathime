@@ -13,7 +13,7 @@
  * The engine is ours rather than a vendored library, so the usual adapter
  * caveats do not apply: nothing here is working around an upstream API. What it
  * is working around instead is the distance between two documents — the
- * key-event behaviour of docs/ibus-table-spec.md §7 and the fixed meanings the
+ * key-event behaviour this engine reproduces and the fixed meanings the
  * public header gives Space and Return — and where they disagree the header
  * wins, because it is the contract every other engine already keeps.
  */

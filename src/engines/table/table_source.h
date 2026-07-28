@@ -1,5 +1,5 @@
 /*
- * The source `.txt` table format of docs/ibus-table-spec.md §3, parsed.
+ * The source `.txt` table format of docs/ibus-table-mapping.md §3, parsed.
  *
  * This is half the data contract: `ibus-table-chinese` distributes source text
  * only, so every table this library ships passes through here on its way to the

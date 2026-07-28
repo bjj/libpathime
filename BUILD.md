@@ -25,7 +25,7 @@ Per-backend dependencies:
 The table-driven backend (`PATHIME_ENGINE_TABLE`: Wubi, Cangjie, Stroke5,
 Zhuyin, …) wraps no library. `ibus-table`, the reference implementation, is
 Python and cannot be linked against, so this engine is written in `libpathime`
-itself against `docs/ibus-table-spec.md`. What it *does* need is data:
+itself against `docs/ibus-table-mapping.md`. What it *does* need is data:
 `engines/ibus-table-chinese` is a submodule of table sources, and the build
 compiles a selected set of them with `pathime-table-compile`, a host tool built
 from the engine's own sources. Upstream's `tables/CMakeLists.txt` is not used —

@@ -6,7 +6,7 @@
  * wrapped, so this test carries a second job the other three do not. For
  * hangul, anthy and pyzy the vendored library is the authority on what correct
  * output looks like; here there is no such authority, and the test *is* where
- * the behaviour of docs/ibus-table-spec.md §6–§9 is pinned down.
+ * this engine's key-event behaviour is pinned down.
  *
  * It runs against the real compiled tables the build ships, not a fixture. That
  * is deliberate: the format is an interoperability contract with ibus-table, so
@@ -163,7 +163,7 @@ static pathime_context_t *open_context(pathime_engine_t *engine, client_log_t *l
 }
 
 /*
- * The core transition of §7.2: each valid input character extends the key run,
+ * The core transition: each valid input character extends the key run,
  * the preedit shows the run through the table's char prompts, and the candidate
  * list is the lookup's result in the order §8.2 fixes.
  */
@@ -183,7 +183,7 @@ static void test_compose_and_select(pathime_engine_t *engine)
 
     /*
      * Nothing is settled: the whole preedit is the provisional key run, so any
-     * candidate can replace it. §6.3's "position is 0" case.
+     * candidate can replace it: the "display position is 0" case.
      */
     PT_CHECK(log.last_settled == 0);
     PT_CHECK(log.last_candidates > 0);
@@ -201,7 +201,7 @@ static void test_compose_and_select(pathime_engine_t *engine)
     candidate_at(ctx, 1, candidate, sizeof(candidate));
     PT_CHECK(strcmp(candidate, MAO) == 0);
 
-    /* Selecting commits the phrase and clears the composition (§9). */
+    /* Selecting commits the phrase and clears the composition. */
     PT_CHECK_STATUS(pathime_context_select_candidate(ctx, 0), PATHIME_OK);
     PT_CHECK(strcmp(log.commits, MING) == 0);
     PT_CHECK(strcmp(log.last_preedit, "") == 0);
@@ -347,7 +347,7 @@ static void test_punctuation_follows_table_variant(pathime_engine_t *engine)
 
 /*
  * Return ends the composition without applying a conversion the user did not
- * choose, which for a table engine is §7.4's "commit the literal input": the
+ * choose, which for a table engine is "commit the literal input": the
  * keys as typed, not the radicals the preedit displayed them as.
  *
  * The preedit and the commit are two renderings of one key run: the table's
@@ -379,7 +379,7 @@ static void test_return_commits_literal_keys(pathime_engine_t *engine)
     pathime_context_destroy(ctx);
 }
 
-/* Backspace walks the run back one character at a time (§7.3). */
+/* Backspace walks the run back one character at a time. */
 static void test_backspace(pathime_engine_t *engine)
 {
     client_log_t log;
@@ -784,7 +784,7 @@ static void test_enumeration(pathime_engine_t *engine)
 }
 
 /*
- * Learning (§10.1): selecting a candidate bumps its user_freq in the user
+ * Learning: selecting a candidate bumps its user_freq in the user
  * database, and user_freq outranks freq in the candidate sort (§8.2 key 3), so
  * a phrase the user keeps choosing rises to the front.
  *

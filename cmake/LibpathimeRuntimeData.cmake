@@ -16,7 +16,7 @@ set(LIBPATHIME_RUNTIME_DATA_DIRNAME "pathime-data")
 # The tables compiled into the shipped data, as
 #   <name>|<source .txt, relative to engines/ibus-table-chinese>|<freq source or "">
 #
-# The set is docs/ibus-table-spec.md §14's test matrix plus quick5, and between
+# The set covers the distinct table shapes worth exercising, and between
 # them they exercise every shape the engine has code for: RULES and
 # USER_CAN_DEFINE_PHRASE (wubi-jidian86), AUTO_WILDCARD and char prompts
 # (cangjie5, quick5), AUTO_COMMIT without AUTO_SELECT and non-alphabetic

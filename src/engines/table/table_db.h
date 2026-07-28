@@ -1,5 +1,5 @@
 /*
- * The compiled SQLite database of docs/ibus-table-spec.md §4 and §5: creating
+ * The compiled SQLite database of docs/ibus-table-mapping.md §4 and §5: creating
  * one from a parsed source, opening one ibus-table itself compiled, and running
  * the lookup of §8.1 against it.
  *
@@ -115,7 +115,7 @@ public:
 
     /**
      * Record that the user chose @a phrase for @a tabkeys, bumping its
-     * `user_freq` in the user database (§10.1).
+     * `user_freq` in the user database (§5.1).
      *
      * A pair that has no user row yet gets one with `user_freq = 1` and
      * `freq = 0` — zero rather than the system table's value, because §5.1 is

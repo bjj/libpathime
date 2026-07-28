@@ -71,9 +71,10 @@ bool phrase_is_covered(const std::string &phrase);
  * tools/table-compile links coverage.cc.
  *
  * Only `phrases` is filtered. `goucima` is left alone deliberately: it is
- * word-formation input for §10.2 rather than anything a user is shown, and
- * derive_goucima() reads the phrase rows anyway, so a dropped phrase takes its
- * goucima with it — which is why the filter must run *before* derivation.
+ * word-formation input for user-phrase derivation rather than anything a user
+ * is shown, and derive_goucima() reads the phrase rows anyway, so a dropped
+ * phrase takes its goucima with it — which is why the filter must run *before*
+ * derivation.
  *
  * The count is returned rather than logged so the compile tool can print it
  * beside the row count. A table losing a suspicious number of rows is then a

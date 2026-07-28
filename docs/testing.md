@@ -37,7 +37,7 @@ real Korean, Japanese and Chinese through the public API.
 pyzy the vendored library is the authority on what correct output looks like and
 the test records what it does; the table engine has no such authority, because
 libpathime wrote it. So that test *is* where the behaviour of
-`docs/ibus-table-spec.md` §6–§9 is pinned down, and it deliberately runs against
+`docs/ibus-table-mapping.md` §6–§9 is pinned down, and it deliberately runs against
 the real tables the build compiles out of `ibus-table-chinese` rather than a
 fixture — the format is an interoperability contract, and a table this
 repository invented would prove much less about it.

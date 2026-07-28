@@ -1,6 +1,6 @@
 /*
  * Chinese variant classification: which script a character belongs to, and what
- * PATHIME_OPT_CHINESE_VARIANT does with the answer (docs/ibus-table-spec.md
+ * PATHIME_OPT_CHINESE_VARIANT does with the answer (docs/ibus-table-mapping.md
  * §11.1).
  *
  * Per-adapter rather than in src/, by the rule docs/source-layout.md already

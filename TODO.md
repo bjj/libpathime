@@ -279,13 +279,6 @@ build-time compilation, enumeration through the option machinery) are §6a.
   closed. The table engine has landed, so this is now unblocked — and it should
   pick up `PATHIME_OPT_TABLE_*`, whose doc comments were written before there
   was an implementation to check them against.
-- **`docs/ibus-table-mapping.md` does not exist.** Every other backend has a
-  source-verified API-to-concepts mapping ending in "Impedance mismatches".
-  This engine has the spec instead, which is a different document: it describes
-  ibus-table, not the adapter. The mismatches are real — the mid-preedit caret,
-  the commit-key policy, the char-prompt commit — and are currently split
-  between code comments and `docs/design-history.md` §6, neither of which is
-  the per-backend mapping a reader of the other three would expect to find.
 
 ## Open questions
 
