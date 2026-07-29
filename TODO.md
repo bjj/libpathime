@@ -213,7 +213,12 @@ that engine does not do.
   - *What does it mean for the other three backends?* A coverage set that
     filters table candidates but not anthy's or pyzy's would be a promise the
     library keeps in one place and breaks in another. Either it is a
-    library-wide concept or it is a misleading one.
+    library-wide concept or it is a misleading one. The *compile-time* half of
+    this question is answered and written down in `BUILD.md`, "Glyph coverage":
+    the other three are not filtered because there is nothing to filter — over
+    their own data the two maps drop four characters between them, all anthy's,
+    all under `noto`. That does not settle the runtime half, which is a promise
+    about an embedder's UI rather than a property of the shipped data.
   - *What is the API surface?* A set of code points is not a shape the option
     system has — every option today is a number, an enum, a flag set or a short
     string, and a coverage set is none of those.

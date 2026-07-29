@@ -115,7 +115,7 @@ developer command prompt, and remember to re-set `VCPKG_ROOT` afterwards.
 | `LIBPATHIME_BUILD_TESTS` | `OFF` | Build the test suites — see `docs/testing.md`. |
 | `LIBPATHIME_BUILD_DEMO` | `OFF` | Build the interactive terminal demo — see `demo/README.md`. Needs the `demo/cpp-terminal` submodule. |
 | `PYZY_BUILD_DB_ANDROID` | `ON` | Build pyzy's bundled Android pinyin database (needs Python 3). |
-| `BUILD_SHARED_LIBS` | `ON` | Shared vs. static libraries. Two exceptions ignore it: on Windows the anthy family is static either way (`docs/anthy-mapping.md`), and cpp-terminal — which only the demo links — is always static, because its published globals carry no `dllimport` and a DLL build of it therefore cannot be linked against on Windows at all. |
+| `BUILD_SHARED_LIBS` | `ON` | Shared vs. static libraries. One exception ignores it: on Windows cpp-terminal — which only the demo links — is always static, because its published globals carry no `dllimport` and a DLL build of it therefore cannot be linked against on Windows at all. |
 
 Which backends survived the gating is recorded in the generated
 `include/pathime/config.h` as `PATHIME_WITH_*`, so a client can compile out
@@ -158,9 +158,7 @@ puts it there, and the build stages the same layout beside the built library so
 that the demo and the tests find it identically.
 
 Shipping libpathime with an application therefore means copying `pathime-data/`
-along with the library and keeping the two together. Nothing needs configuring,
-no environment variable is involved, and the path may contain anything the
-platform permits — spaces, non-ASCII, `${`.
+along with the library and keeping the two together.
 
 A client whose layout separates code from data sets
 `pathime_init_params_t::resource_dir` instead. Either way an engine whose data
@@ -201,6 +199,33 @@ The default follows the platform because a default describing the wrong font
 landscape is a worse failure than the cross-platform difference — and the
 difference stays visible: the configure summary prints the map, and so does every
 line `pathime-table-compile` emits.
+
+**Only the table engine is trimmed.** hangul, anthy and pyzy commit whatever
+their own data holds, at build time and at runtime alike; no coverage map is
+applied to them. That is a measurement rather than an oversight — the same two
+maps, run over the other three backends' data, drop almost nothing:
+
+| backend | data | distinct characters | dropped by `noto` | by `windows` |
+|---------|------|---------------------|-------------------|--------------|
+| hangul | precomposed syllables and compat jamo | 11,172 + jamo | none | none |
+| anthy | 245,374 word entries, the dictionaries `mkworddic/dict.args` reads | 10,986 | 4, in 11 entries | none |
+| pyzy | 65,105 phrase rows, `pyzy/main.db` | 16,463 | none | none |
+
+pyzy's phrases stop at U+9FA5, inside the original CJK block every CJK font
+carries. anthy's reach further — 301 of its characters are supplementary-plane —
+but those are the JIS X 0213 additions, which a font aimed at Japanese carries by
+definition, so both maps hold every one of them; what the Noto map drops is four
+symbols (`≒`, `⅓`, `⅔`, `⅕`) that Noto Sans CJK JP genuinely lacks. hangul is
+narrower still: it emits precomposed syllables and compat jamo only, and hanja
+conversion is out of scope for the adapter, so libhangul's hanja tables — which
+do carry 54 Ext-B characters the Windows map would drop — are never read.
+
+The table engine is the outlier because of what its data *is*. A Cangjie or Wubi
+table is a mapping over a character repertoire, extended as far as Unicode goes;
+a conversion dictionary is a list of words people write. Trimming the repertoire
+is worth 36–38% of its rows, and trimming the dictionaries would be worth four
+characters — so an embedder wanting a guarantee that nothing unrenderable reaches
+their candidate list does not have one, and is within four characters of it.
 
 **The build never reads a font.** Each map is generated data checked in at
 `src/engines/table/coverage_data_<map>.h` — the same arrangement
