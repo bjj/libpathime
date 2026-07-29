@@ -138,7 +138,7 @@ static size_t candidates_of(pathime_context_t *ctx)
 }
 
 /*
- * A focused context on @a slot's engine, or NULL if the engine cannot serve
+ * A context on @a slot's engine, or NULL if the engine cannot serve
  * one. The table engine is the only case that can fail here, and only because
  * its table has to exist on disk; failing is how a build without cangjie5
  * drops that engine rather than failing every assertion below.
@@ -164,7 +164,6 @@ static pathime_context_t *open_context(const engine_slot_t *slot,
         pathime_context_destroy(ctx);
         return NULL;
     }
-    PT_CHECK_STATUS(pathime_context_set_focused(ctx, true), PATHIME_OK);
     return ctx;
 }
 

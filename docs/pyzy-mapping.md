@@ -60,8 +60,7 @@ are set per-context via `setProperty()` using the `PropertyName` enum and
 | **Surrounding text** | Not present. pyzy has no API to accept or use surrounding text from the client. |
 | **Commit text** | `Observer::commitText(InputContext*, const std::string&)` — fires when pyzy decides to emit finalized text. The caller can also force a commit by calling `InputContext::commit(CommitType)` directly (`TYPE_RAW`, `TYPE_PHONETIC`, or `TYPE_CONVERTED`). |
 | **Delete surrounding text** | Not present. pyzy never issues a delete-surrounding-text request. |
-| **Focus** | Not present. pyzy has no focus-in / focus-out lifecycle callbacks. |
-| **Activation** | Not present. pyzy has no enable / disable callbacks. |
+| **Activation** | Not present. pyzy has no enable / disable callbacks, and no focus-in / focus-out ones either — part of why CONCEPTS.md has neither concept. |
 | **Reset** | `InputContext::reset()` — discards all transient composition state and returns to empty. Does not commit; the caller must commit explicitly first if it wants to preserve the preedit. |
 | **Negotiation** | Partially covered by `setProperty(PropertyName, Variant)`. The **five** properties (`InputContext.h:176-209`) are `PROPERTY_CONVERSION_OPTION` (unsigned int bitmask), `PROPERTY_DOUBLE_PINYIN_SCHEMA` (unsigned int), `PROPERTY_BOPOMOFO_SCHEMA` (unsigned int), `PROPERTY_SPECIAL_PHRASE` (bool), and `PROPERTY_MODE_SIMP` (bool). `setProperty` is split across the class hierarchy: `PhoneticContext::setProperty` handles only `CONVERSION_OPTION`, `SPECIAL_PHRASE`, and `MODE_SIMP`, and returns `false` for the two schema properties, which are honored only in the `DoublePinyinContext` / `BopomofoContext` subclasses. There is no capability negotiation, no field-purpose hints, and no behavioral-policy exchange. |
 
@@ -471,21 +470,20 @@ cannot use surrounding context.
 
 ### 6. Focus and activation lifecycle: not present
 
-**Project concept:** The engine is informed when an input context gains or
-loses focus, and when the engine becomes active or inactive for that
-context.
+**Project concept:** Neither exists. This section records what pyzy lacks and
+what the reference wrapper builds on top, because a reader coming from
+ibus-pinyin will look for both.
 
 **pyzy provides:** No focus or activation callbacks on `InputContext`. The
 only lifecycle events pyzy knows about are `reset()` (clear state) and
 destruction.
 
-**Bridge required:** The integrator is responsible for deciding what to do
-on focus-out (typically: call `reset()` or `commit(TYPE_CONVERTED)`), on
-focus-in (typically: nothing, or re-register display state), on activation
-(initialize the context, push current config), and on deactivation
-(optionally commit or reset). The ibus-pinyin wrapper calls `reset()` on
-all editors in `focusOut()` and re-registers language-bar properties in
-`focusIn()`.
+**Bridge required:** None for this library, which asks pyzy for nothing at a
+lifecycle boundary the client does not ask for itself. For comparison, the
+ibus-pinyin wrapper calls `reset()` on all editors in `focusOut()`
+(`PYPinyinEngine.cc:198`) and re-registers language-bar properties in
+`focusIn()` — the latter being panel bookkeeping this model has no equivalent
+of, since the client presents everything.
 
 ### 7. Negotiation: not present except for conversion options
 
@@ -502,8 +500,8 @@ protocol versioning.
 
 **Bridge required:** Engine options that map to pyzy properties can be
 delivered via `setProperty()`. All other negotiation concepts (client
-capabilities, input purpose/hints, behavioral policies such as what to do
-on focus-out) must be managed entirely by the integrator above pyzy.
+capabilities and input purpose/hints) must be managed entirely by the
+integrator above pyzy.
 
 ### 8. Commit text: auto-fired versus caller-controlled
 

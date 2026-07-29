@@ -23,8 +23,7 @@
  * validation, modifiers, the PATHIME_KEY_* keys, and any composing front end
  * sit above this interface. What crosses it is a KeyEvent the adapter is free
  * to reject, because "handled" is a judgement only the backend can make — but
- * a backend never sees a key release, an unfocused context, or a malformed
- * event.
+ * a backend never sees a key release or a malformed event.
  *
  * A backend mutates the Composition **in place** and appends to an Output. It
  * does not dispatch callbacks, does not know the client exists, does not

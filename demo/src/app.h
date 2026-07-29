@@ -17,10 +17,11 @@
  *     the client's own to act on.
  *
  * One engine per input method and one input context per engine, all created up
- * front and kept alive; switching input methods moves *focus* rather than
- * rebuilding anything. That is the arrangement the header recommends, and it
- * has a property worth watching in the demo: losing focus neither commits nor
- * discards, so an unfinished composition is still there when you switch back.
+ * front and kept alive; switching input methods only changes which context
+ * this program offers keys to, rather than rebuilding anything. That is the
+ * arrangement the header recommends, and it has a property worth watching in
+ * the demo: a context that is not being keyed is not told so and does not
+ * care, so an unfinished composition is still there when you switch back.
  */
 
 #ifndef PATHIME_DEMO_APP_H

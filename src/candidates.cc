@@ -163,9 +163,6 @@ pathime_status_t pathime_context_candidate(const pathime_context_t *ctx,
     }
 
     /*
-     * Focus is not required: this is a non-mutating query, and focus gates
-     * input and only input.
-     *
      * The bound is ctx->model.candidates.size(), which is exactly
      * ctx->composition.candidate_count — refresh_composition() publishes the
      * one from the other — but reading it from the vector is what makes the
@@ -199,9 +196,6 @@ pathime_status_t pathime_context_set_candidate_cursor(pathime_context_t *ctx,
     }
     if (!pathime::initialized()) {
         return PATHIME_ERROR_NOT_INITIALIZED;
-    }
-    if (!ctx->focused) {
-        return PATHIME_ERROR_NOT_FOCUSED;
     }
 
     /*
@@ -264,9 +258,6 @@ pathime_status_t pathime_context_select_candidate(pathime_context_t *ctx,
     }
     if (!pathime::initialized()) {
         return PATHIME_ERROR_NOT_INITIALIZED;
-    }
-    if (!ctx->focused) {
-        return PATHIME_ERROR_NOT_FOCUSED;
     }
 
     /*

@@ -96,8 +96,9 @@ void run(demo::App *app)
         case Term::Event::Type::Empty:
         case Term::Event::Type::Focus:
             /* A resize or a focus change only needs the redraw at the top of
-             * the loop. Terminal focus is not the library's focus: the input
-             * context keeps whatever this program gave it. */
+             * the loop. Terminal focus means nothing to the library, which has
+             * no such concept: the input context keeps whatever this program
+             * gave it. */
             break;
         default:
             break;

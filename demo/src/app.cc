@@ -117,10 +117,6 @@ bool App::open(const std::string &initial_engine, std::string *error)
         }
     }
 
-    /* A new context starts unfocused, and focus gates input: only the one the
-     * user is typing into is focused, and the rest keep their compositions
-     * intact for when it comes back to them. */
-    pathime_context_set_focused(engines_[active_].ctx, true);
     options_ = collect_options(engine());
     refresh_surrounding_text();
     note_info("ready — F1 for help");
@@ -691,15 +687,12 @@ void App::set_active(std::size_t index)
 {
     if (index >= engines_.size() || index == active_) return;
 
-    /* Losing focus neither commits nor discards, and dispatches nothing: the
-     * composition is exactly where the user left it when focus returns. Both
-     * calls are logged because the *absence* of callbacks between them is the
-     * thing worth seeing. */
-    const std::uint64_t leave = note_call("context_set_focused  false");
-    note_result(leave, pathime_context_set_focused(engines_[active_].ctx, false));
+    /* Switching is nothing but a change of which context gets the next key.
+     * The library is told nothing, neither context is disturbed, and the one
+     * being left keeps its composition exactly as the user left it — which is
+     * why no call is logged here and the log stays silent across the switch.
+     * That silence is the thing worth seeing. */
     active_ = index;
-    const std::uint64_t enter = note_call("context_set_focused  true");
-    note_result(enter, pathime_context_set_focused(engines_[active_].ctx, true));
 
     options_ = collect_options(engine());
     option_index_ = 0;

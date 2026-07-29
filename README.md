@@ -86,7 +86,6 @@ int main(void)
     pathime_init(NULL);
     pathime_engine_create(PATHIME_ENGINE_PINYIN, &engine);
     pathime_context_create(engine, &client, NULL, &ctx);
-    pathime_context_set_focused(ctx, true);
 
     for (; *keys; keys++) {
         pathime_key_event_t key = { sizeof(key), (uint32_t)*keys, 0, 0 };

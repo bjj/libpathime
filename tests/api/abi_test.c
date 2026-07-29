@@ -13,8 +13,8 @@
 _Static_assert(PATHIME_OK == 0, "PATHIME_OK must be zero");
 
 /* Status values are assigned explicitly and are part of the ABI. */
-_Static_assert(PATHIME_ERROR_NOT_FOCUSED == 7, "rejection block ends at 7");
-_Static_assert(PATHIME_ERROR_BACKEND == 9, "failure block ends at 9");
+_Static_assert(PATHIME_ERROR_ALREADY_INITIALIZED == 6, "rejection block ends at 6");
+_Static_assert(PATHIME_ERROR_BACKEND == 8, "failure block ends at 8");
 
 int main(void)
 {

@@ -251,20 +251,21 @@ static void test_syllable_composition(pathime_engine_t *engine)
     PT_CHECK_STATUS(pathime_context_create(engine, &client, &log, &ctx), PATHIME_OK);
     PT_CHECK(ctx != NULL);
 
-    /* A new context starts unfocused, and focus gates input and only input. */
+    /*
+     * out_handled is documented as always written, including on error, so a
+     * client's fallback path is correct even if it ignores the status. A
+     * malformed event is the rejection nearest to hand for checking it.
+     */
     {
         pathime_key_event_t event;
         bool handled = true;
         memset(&event, 0, sizeof(event));
-        event.struct_size = sizeof(event);
+        event.struct_size = 0;
         event.keysym = 'g';
         PT_CHECK_STATUS(pathime_context_process_key(ctx, &event, &handled),
-                        PATHIME_ERROR_NOT_FOCUSED);
-        /* out_handled is documented as always written, including on error, so
-         * a client's fallback path is correct even if it ignores the status. */
+                        PATHIME_ERROR_INVALID_ARGUMENT);
         PT_CHECK(handled == false);
     }
-    PT_CHECK_STATUS(pathime_context_set_focused(ctx, true), PATHIME_OK);
 
     /* g-k-s composes 한 one jamo at a time: ㅎ, then 하, then 한. */
     PT_CHECK(press(ctx, 'g'));
@@ -351,7 +352,6 @@ static void test_word_mode_settled_boundary(pathime_engine_t *engine)
     PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_HANGUL_PREEDIT,
                                                    PATHIME_HANGUL_PREEDIT_WORD),
                     PATHIME_OK);
-    PT_CHECK_STATUS(pathime_context_set_focused(ctx, true), PATHIME_OK);
 
     /* 한 completes and is held, not committed; 글 begins. */
     press(ctx, 'g');
@@ -412,7 +412,6 @@ static void test_backspace(pathime_engine_t *engine)
     PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_HANGUL_PREEDIT,
                                                    PATHIME_HANGUL_PREEDIT_WORD),
                     PATHIME_OK);
-    PT_CHECK_STATUS(pathime_context_set_focused(ctx, true), PATHIME_OK);
 
     press(ctx, 'g');
     press(ctx, 'k');
@@ -462,7 +461,6 @@ static void test_key_position_and_shift(pathime_engine_t *engine)
     client.composition_changed = on_changed;
 
     PT_CHECK_STATUS(pathime_context_create(engine, &client, &log, &ctx), PATHIME_OK);
-    PT_CHECK_STATUS(pathime_context_set_focused(ctx, true), PATHIME_OK);
 
     /*
      * Shift+Q on a US keyboard: keysym 'Q', layout_key 'q', PATHIME_MOD_SHIFT.
@@ -499,11 +497,10 @@ static void test_key_position_and_shift(pathime_engine_t *engine)
 }
 
 /*
- * Reset discards without committing, and focus loss preserves state exactly —
- * the model case for the project's rule of preferring a determinate behaviour
- * to a deferral.
+ * Reset discards without committing — the model case for the project's rule of
+ * preferring a determinate behaviour to a deferral.
  */
-static void test_reset_and_focus(pathime_engine_t *engine)
+static void test_reset(pathime_engine_t *engine)
 {
     client_log_t log;
     pathime_client_t client;
@@ -516,7 +513,6 @@ static void test_reset_and_focus(pathime_engine_t *engine)
     client.composition_changed = on_changed;
 
     PT_CHECK_STATUS(pathime_context_create(engine, &client, &log, &ctx), PATHIME_OK);
-    PT_CHECK_STATUS(pathime_context_set_focused(ctx, true), PATHIME_OK);
 
     press(ctx, 'g');
     press(ctx, 'k');
@@ -536,29 +532,19 @@ static void test_reset_and_focus(pathime_engine_t *engine)
     PT_CHECK(log.changed_count == 0);
 
     /*
-     * Focus loss neither commits nor discards. Composition state is preserved
-     * exactly, so refocusing resumes where the user left off, and no callback
-     * is dispatched.
+     * Everything that is not a reset leaves the composition alone. Reading it,
+     * supplying surrounding text and changing settings all pass through
+     * without disturbing a half-built syllable, so composition continues from
+     * where it was — which is what makes a client free to leave a field and
+     * come back to it without the library being told anything.
      */
     press(ctx, 'g');
     press(ctx, 'k');
     log_reset(&log);
-    PT_CHECK(pathime_context_is_focused(ctx));
-    PT_CHECK_STATUS(pathime_context_set_focused(ctx, false), PATHIME_OK);
-    PT_CHECK(!pathime_context_is_focused(ctx));
+    check_str("preedit is undisturbed by reads", preedit_of(ctx), HA);
     PT_CHECK(log.changed_count == 0);
     PT_CHECK_SIZE(strlen(log.commits), 0);
-    check_str("preedit survives focus loss", preedit_of(ctx), HA);
 
-    /* Redundant transitions are no-ops. */
-    PT_CHECK_STATUS(pathime_context_set_focused(ctx, false), PATHIME_OK);
-    PT_CHECK(!pathime_context_is_focused(ctx));
-    PT_CHECK_STATUS(pathime_context_set_focused(ctx, true), PATHIME_OK);
-    PT_CHECK(pathime_context_is_focused(ctx));
-    PT_CHECK(log.changed_count == 0);
-    check_str("preedit survives refocus", preedit_of(ctx), HA);
-
-    /* And composition continues from where it was. */
     press(ctx, 's');
     check_str("composition resumes", preedit_of(ctx), HAN);
 
@@ -584,7 +570,6 @@ static void test_layout_option(pathime_engine_t *engine)
     client.composition_changed = on_changed;
 
     PT_CHECK_STATUS(pathime_context_create(engine, &client, &log, &ctx), PATHIME_OK);
-    PT_CHECK_STATUS(pathime_context_set_focused(ctx, true), PATHIME_OK);
 
     PT_CHECK_STATUS(pathime_context_get_option_int(ctx, PATHIME_OPT_HANGUL_LAYOUT, &layout),
                     PATHIME_OK);
@@ -774,10 +759,8 @@ static void test_interleaved_contexts(pathime_engine_t *engine)
         return;
     }
 
-    /* Both focused at once: focus is per-context and is not a claim on the
-     * engine, so nothing here has to hand it back and forth. */
-    PT_CHECK_STATUS(pathime_context_set_focused(a, true), PATHIME_OK);
-    PT_CHECK_STATUS(pathime_context_set_focused(b, true), PATHIME_OK);
+    /* Both live at once, and neither is a claim on the engine: nothing here
+     * has to hand anything back and forth between them. */
 
     /* g-k-s builds 한 in a, r-m-f builds 글 in b, one key each in turn. */
     PT_CHECK(press(a, 'g'));
@@ -852,7 +835,6 @@ static void test_preedit_none_builds_in_document(pathime_engine_t *engine)
     client.composition_changed = on_changed;
 
     PT_CHECK_STATUS(pathime_context_create(engine, &client, &log, &ctx), PATHIME_OK);
-    PT_CHECK_STATUS(pathime_context_set_focused(ctx, true), PATHIME_OK);
     PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_HANGUL_PREEDIT,
                                                    PATHIME_HANGUL_PREEDIT_NONE),
                     PATHIME_OK);
@@ -933,7 +915,6 @@ static void test_preedit_none_backspace(pathime_engine_t *engine)
     client.delete_surrounding_text = on_delete;
 
     PT_CHECK_STATUS(pathime_context_create(engine, &client, &log, &ctx), PATHIME_OK);
-    PT_CHECK_STATUS(pathime_context_set_focused(ctx, true), PATHIME_OK);
     PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_HANGUL_PREEDIT,
                                                    PATHIME_HANGUL_PREEDIT_NONE),
                     PATHIME_OK);
@@ -979,7 +960,6 @@ static void test_preedit_none_end_composition(pathime_engine_t *engine)
     client.delete_surrounding_text = on_delete;
 
     PT_CHECK_STATUS(pathime_context_create(engine, &client, &log, &ctx), PATHIME_OK);
-    PT_CHECK_STATUS(pathime_context_set_focused(ctx, true), PATHIME_OK);
     PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_HANGUL_PREEDIT,
                                                    PATHIME_HANGUL_PREEDIT_NONE),
                     PATHIME_OK);
@@ -1037,7 +1017,6 @@ static void test_preedit_none_stale_snapshot(pathime_engine_t *engine)
     client.delete_surrounding_text = on_delete;
 
     PT_CHECK_STATUS(pathime_context_create(engine, &client, &log, &ctx), PATHIME_OK);
-    PT_CHECK_STATUS(pathime_context_set_focused(ctx, true), PATHIME_OK);
     PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_HANGUL_PREEDIT,
                                                    PATHIME_HANGUL_PREEDIT_NONE),
                     PATHIME_OK);
@@ -1081,7 +1060,7 @@ int main(void)
         test_word_mode_settled_boundary(engine);
         test_backspace(engine);
         test_key_position_and_shift(engine);
-        test_reset_and_focus(engine);
+        test_reset(engine);
         test_context_requirements(engine);
         test_interleaved_contexts(engine);
         test_layout_option(engine);

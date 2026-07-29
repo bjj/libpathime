@@ -47,7 +47,7 @@ answer is the implementation.
 | **Reset** | Discard the current key run and pre-committed segments; produce empty composition data. Does not commit. | `table_backend.cc`, `reset()` |
 | **Surrounding text / Delete surrounding text** | Unused. ibus-table performs no reconversion from client context. | §12 |
 | **Forward key event** | Unused. ibus-table declines keys it does not use (unhandled) rather than forwarding. | §12 |
-| **Focus / Activation** | Lifecycle hooks with no intrinsic commit or reset; commit-on-focus-out is a negotiated policy. | §12 |
+| **Focus / Activation** | Not in the model. ibus-table's lifecycle hooks carry no intrinsic commit or reset. | §12 |
 | **Negotiation** | Engine options carried in the table's definition (Chinese variant mode, full-width modes, pinyin/suggestion modes) plus the client-policy fields the engine ignores. | §3.1, §11 |
 
 **Excluded as client / UI policy** (parsed where present, never acted on by the engine): candidate
@@ -416,8 +416,9 @@ Relative to `CONCEPTS.md`, ibus-table exercises only part of the interface:
   surrounding text unsupported.
 - **Forward key event** — unused. Keys the engine does not use are reported **unhandled**; ibus-table
   does not synthesize forwarded events.
-- **Focus / Activation** — lifecycle hooks with no intrinsic commit or reset. Commit-on-focus-out is
-  a negotiated policy, not implied by focus.
+- **Focus / Activation** — not in the model, and nothing is lost by their absence: ibus-table's
+  lifecycle hooks carry no intrinsic commit or reset, and what `do_focus_in_id()` does record —
+  which application holds focus — is used only to label debug output (`table.py:3149`).
 - **Auxiliary text** — not in the model at all: this API has no auxiliary-text
   field. ibus-table's `get_aux_strings()` carries the current key run, which this
   document already specifies as preedit text (§3.4, §8), plus a "position / total"

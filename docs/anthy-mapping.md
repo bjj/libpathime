@@ -49,8 +49,7 @@ All text exchanged with the library is UTF-8 when the context is configured with
 | **Auxiliary text** | No equivalent | Not a concept in this model either — `pathime_composition_t` has no such field. ibus-anthy synthesises `( 3 / 12 )` (candidate position / total), which this API publishes as `candidate_cursor` and `candidate_count`. See `docs/japanese-input-model.md` §6. |
 | **Surrounding text** | No direct equivalent | `anthy_set_reconversion_mode(ctx, ANTHY_RECONVERT_*)` controls whether the library uses reconversion, but the caller must supply the surrounding text to `anthy_set_string` manually. |
 | **Delete surrounding text** | No equivalent | The library never requests deletion of client text. |
-| **Focus** | No equivalent | anthy-unicode has no lifecycle callbacks or awareness of focus. |
-| **Activation** | No equivalent | Same as focus — purely a wrapper/framework concern. |
+| **Activation** | No equivalent | Purely a wrapper/framework concern. anthy-unicode has no lifecycle callbacks and no awareness of focus, which is part of why CONCEPTS.md has neither. |
 | **Negotiation** | `anthy_conf_override(key, value)` for global config; `anthy_set_personality(name)` for dictionary personality | Closer to static configuration than to a per-context negotiation protocol. `anthy_set_personality` and `anthy_conf_override` are the **public** entry points (`anthy/anthy.h`); `anthy_do_set_personality` / `anthy_init_personality` are **internal** (`src-main/main.h`) and must not be bound directly. |
 | **Composition data** | Assembled by the caller from (a) the pre-conversion hiragana buffer and (b) `anthy_get_segment` calls for the converted text | No single library call returns both. |
 
@@ -185,7 +184,9 @@ Segment resizing (`anthy_resize_segment`) is exposed via `__shrink_segment`.
 ### Focus, activation, and reset (`engine.py:do_focus_in`, `do_focus_out`, `do_disable`, `do_reset`)
 
 These IBus lifecycle methods are all handled by the wrapper; anthy-unicode has no corresponding
-callbacks:
+callbacks. Only reset survives into this library — recorded here because a reader coming from
+ibus-anthy will look for the other three, and because the focus-out preference below is the
+evidence that even upstream does not treat leaving a field as engine-intrinsic behaviour:
 
 - `do_focus_in`: re-registers IBus properties; may restore preedit depending on
   `behavior-on-focus-out` preference.

@@ -794,8 +794,8 @@ void PyzyContext::reset(Composition *model, Output *out)
     /*
      * Cleared even when there is no pyzy context to reset, because this state
      * is ours and not pyzy's. A reset is the API's "start again" — the client
-     * has changed document, or lost focus and come back to a different one —
-     * and carrying a half-open quotation mark across that is exactly the bug
+     * has changed document, or moved to a different one — and carrying a
+     * half-open quotation mark across that is exactly the bug
      * ibus-pinyin's FallbackEditor::reset() avoids.
      */
     punctuation_.clear();

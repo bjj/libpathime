@@ -273,7 +273,7 @@ static const char *candidate_of(pathime_context_t *ctx, size_t index)
     return cand.bytes;
 }
 
-/* A focused context with the standard callback table. */
+/* A context with the standard callback table. */
 static pathime_context_t *open_context(pathime_engine_t *engine,
                                        pathime_client_t *client,
                                        client_log_t *log)
@@ -289,7 +289,6 @@ static pathime_context_t *open_context(pathime_engine_t *engine,
 
     PT_CHECK_STATUS(pathime_context_create(engine, client, log, &ctx), PATHIME_OK);
     PT_CHECK(ctx != NULL);
-    PT_CHECK_STATUS(pathime_context_set_focused(ctx, true), PATHIME_OK);
     return ctx;
 }
 
@@ -594,12 +593,12 @@ static void test_candidate_cursor(pathime_engine_t *engine)
     PT_CHECK_STATUS(pathime_context_select_candidate(ctx, 0), PATHIME_OK);
     PT_CHECK_SIZE(pathime_context_composition(ctx)->candidate_cursor, 0);
 
-    /* Focus gates it, as it gates every other input operation. */
-    PT_CHECK_STATUS(pathime_context_set_focused(ctx, false), PATHIME_OK);
-    PT_CHECK_STATUS(pathime_context_set_candidate_cursor(ctx, 0),
-                    PATHIME_ERROR_NOT_FOCUSED);
-    /* But reading it is not gated, because it is not a call: the cursor is
-     * composition data, and reading the composition is always available. */
+    /* An index past the end of whatever list is current is rejected, and the
+     * rejection changes nothing. */
+    PT_CHECK_STATUS(
+        pathime_context_set_candidate_cursor(
+            ctx, pathime_context_composition(ctx)->candidate_count),
+        PATHIME_ERROR_INVALID_ARGUMENT);
     PT_CHECK(pathime_context_composition(ctx) != NULL);
 
     pathime_context_destroy(ctx);
@@ -1293,29 +1292,15 @@ static void test_options(pathime_engine_t *engine)
 }
 
 /*
- * Focus and reset, which behave the same for every engine but are worth
- * checking on the one whose state is deepest: mid-conversion there is a live
- * anthy context behind the composition, not just a string.
+ * Reset, which behaves the same for every engine but is worth checking on the
+ * one whose state is deepest: mid-conversion there is a live anthy context
+ * behind the composition, not just a string.
  */
-static void test_reset_and_focus(pathime_engine_t *engine)
+static void test_reset(pathime_engine_t *engine)
 {
     client_log_t log;
     pathime_client_t client;
     pathime_context_t *ctx = open_context(engine, &client, &log);
-
-    /* Focus gates input and only input. */
-    PT_CHECK_STATUS(pathime_context_set_focused(ctx, false), PATHIME_OK);
-    {
-        pathime_key_event_t event;
-        bool handled = true;
-        memset(&event, 0, sizeof(event));
-        event.struct_size = sizeof(event);
-        event.keysym = 'a';
-        PT_CHECK_STATUS(pathime_context_process_key(ctx, &event, &handled),
-                        PATHIME_ERROR_NOT_FOCUSED);
-        PT_CHECK(handled == false);
-    }
-    PT_CHECK_STATUS(pathime_context_set_focused(ctx, true), PATHIME_OK);
 
     /* Reset mid-conversion discards without committing — an engine that must
      * preserve text would have to commit it explicitly, and cancelling a
@@ -1335,25 +1320,22 @@ static void test_reset_and_focus(pathime_engine_t *engine)
     PT_CHECK(log.changed_count == 0);
 
     /*
-     * Focus loss neither commits nor discards, and this is the interesting
-     * case: the state preserved is a live anthy conversion with a segment
-     * index, not merely a preedit string.
+     * A live conversion is disturbed by nothing but a reset, and this is the
+     * interesting case: what survives is an anthy conversion with a segment
+     * index behind it, not merely a preedit string. This is what lets a client
+     * leave a field and come back to it without telling the library anything.
      */
     type(ctx, "kanji");
     PT_CHECK(press(ctx, ' '));
     log_reset(&log);
-    PT_CHECK_STATUS(pathime_context_set_focused(ctx, false), PATHIME_OK);
+    check_str("conversion is undisturbed by reads", preedit_of(ctx), KANJI);
+    PT_CHECK(pathime_context_composition(ctx)->candidate_count > 0);
     PT_CHECK(log.changed_count == 0);
     PT_CHECK_SIZE(strlen(log.commits), 0);
-    check_str("conversion survives focus loss", preedit_of(ctx), KANJI);
-    PT_CHECK(pathime_context_composition(ctx)->candidate_count > 0);
 
-    PT_CHECK_STATUS(pathime_context_set_focused(ctx, true), PATHIME_OK);
-    PT_CHECK(log.changed_count == 0);
-
-    /* And the conversion resumes: Return still commits what was on screen. */
+    /* And it resumes: Return still commits what was on screen. */
     PT_CHECK(press(ctx, PATHIME_KEY_RETURN));
-    check_str("conversion resumes after refocus", log.commits, KANJI);
+    check_str("conversion resumes", log.commits, KANJI);
 
     pathime_context_destroy(ctx);
 }
@@ -1553,7 +1535,7 @@ int main(void)
         test_commit_and_cancel(engine);
         test_prediction_strip(engine);
         test_options(engine);
-        test_reset_and_focus(engine);
+        test_reset(engine);
         /* Last: it commits a non-default candidate, and anthy learns on
          * commit. Every test above that pins a candidate position has already
          * run by this point. */

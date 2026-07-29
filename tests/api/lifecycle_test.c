@@ -14,8 +14,8 @@
  *
  * What is absent, and absent rather than forgotten: everything downstream of an
  * input context — context creation and its _MISSING_CALLBACK rejection,
- * process_key, the focus rules and _NOT_FOCUSED, composition state surviving
- * focus loss. Those say nothing meaningful without a live adapter behind them,
+ * process_key, composition state surviving a
+ * reset. Those say nothing meaningful without a live adapter behind them,
  * so they belong to the per-engine suites in tests/api/engine_*.c, and the
  * option machinery that hangs off a context belongs to
  * tests/core/options_test.cc, which builds engine and context handles directly
@@ -494,11 +494,6 @@ static void check_null_context_calls(void)
     PT_CHECK_STATUS(pathime_context_set_surrounding_text(NULL, text, 0),
                     PATHIME_ERROR_INVALID_ARGUMENT);
 
-    PT_CHECK_STATUS(pathime_context_set_focused(NULL, true),
-                    PATHIME_ERROR_INVALID_ARGUMENT);
-    PT_CHECK_STATUS(pathime_context_set_focused(NULL, false),
-                    PATHIME_ERROR_INVALID_ARGUMENT);
-
     PT_CHECK_STATUS(pathime_context_reset(NULL), PATHIME_ERROR_INVALID_ARGUMENT);
 
     /*
@@ -512,7 +507,6 @@ static void check_null_context_calls(void)
     PT_CHECK(pathime_context_composition(NULL) == NULL);
     PT_CHECK(pathime_engine_requirements(NULL) == 0);
     PT_CHECK(pathime_context_requirements(NULL) == 0);
-    PT_CHECK(!pathime_context_is_focused(NULL));
 }
 
 static void test_null_handle_gate(void)

@@ -1,6 +1,6 @@
 /*
  * The per-context layer: pathime_context_* lifecycle, the process_key entry
- * point, focus, reset, surrounding text, and callback dispatch.
+ * point, reset, surrounding text, and callback dispatch.
  *
  * The discipline this file exists to enforce is the ordering of a mutating
  * call: validate → route through the key layer (keys.cc, or the engine's own
@@ -20,8 +20,7 @@
  *
  *  - Validation order is NULL and struct_size first
  *    (PATHIME_ERROR_INVALID_ARGUMENT), then pathime::initialized()
- *    (PATHIME_ERROR_NOT_INITIALIZED), then focus
- *    (PATHIME_ERROR_NOT_FOCUSED), then value legality. Out-parameters are
+ *    (PATHIME_ERROR_NOT_INITIALIZED), then value legality. Out-parameters are
  *    untouched on failure — the one documented exception being
  *    pathime_context_process_key()'s out_handled, which is always written.
  *  - No exception crosses the C boundary, and nor is one avoided by
@@ -225,8 +224,8 @@ pathime_status_t pathime_context_create(pathime_engine_t *engine,
     }
 
     /*
-     * A new context starts unfocused, with empty composition data and no
-     * surrounding text — context.h's member initializers say all three. What
+     * A new context starts with empty composition data and no surrounding
+     * text — context.h's member initializers say both. What
      * remains is to publish the flat composition value, because
      * pathime_context_composition() is documented never NULL for a valid
      * context and its zero-length pathime_str_t members must point at "" and
@@ -248,8 +247,8 @@ void pathime_context_destroy(pathime_context_t *ctx)
     /*
      * Composition state is discarded, never committed, and no callback is
      * dispatched — including composition_changed. A client that wants the
-     * preedit finalized commits it before destroying, exactly as it decides
-     * for itself what happens on focus loss.
+     * preedit finalized does that before destroying, exactly as it decides for
+     * itself what happens when the user leaves a field.
      */
 
     if (ctx->engine != nullptr) {
@@ -332,9 +331,6 @@ pathime_status_t pathime_context_process_key(pathime_context_t *ctx,
     if (!pathime::initialized()) {
         return PATHIME_ERROR_NOT_INITIALIZED;
     }
-    if (!ctx->focused) {
-        return PATHIME_ERROR_NOT_FOCUSED;
-    }
 
     /*
      * Value legality, last, and in the key layer rather than here — keys.cc is
@@ -414,12 +410,6 @@ pathime_status_t pathime_context_set_surrounding_text(pathime_context_t *ctx,
         return PATHIME_ERROR_NOT_INITIALIZED;
     }
 
-    /*
-     * Focus is deliberately not required. Focus gates input and only input,
-     * and the header lists supplying surrounding text among the operations
-     * that work regardless of it.
-     */
-
     size_t scalars = 0;
     if (!pathime::utf8_validate(text.bytes, text.len, &scalars)) {
         return PATHIME_ERROR_INVALID_ARGUMENT;
@@ -469,55 +459,8 @@ pathime_status_t pathime_context_set_surrounding_text(pathime_context_t *ctx,
 }
 
 /* ===========================================================================
- * Focus and reset
+ * Reset
  * ======================================================================== */
-
-pathime_status_t pathime_context_set_focused(pathime_context_t *ctx, bool focused)
-{
-    if (ctx == nullptr) {
-        return PATHIME_ERROR_INVALID_ARGUMENT;
-    }
-    if (!pathime::initialized()) {
-        return PATHIME_ERROR_NOT_INITIALIZED;
-    }
-
-    /* Redundant transitions are no-ops. */
-    if (ctx->focused == focused) {
-        return PATHIME_OK;
-    }
-
-    /*
-     * This assignment is the entire implementation, and that is the point.
-     * Focus gates input and only input: everything else in this context —
-     * composition, candidates, surrounding text, options — is preserved
-     * exactly, so refocusing resumes where the user left off. Losing focus
-     * neither commits nor discards and dispatches no callback; a client that
-     * wants the preedit finalized or thrown away decides that for itself,
-     * before dropping focus.
-     *
-     * The reference engines each answered this differently, and the answer is
-     * genuinely arbitrary — which is why the API fixes one behaviour and
-     * writes down why rather than calling it engine-dependent or negotiable.
-     * It is the model case for preferring a determinate rule to a deferral, so
-     * it is implemented literally: nothing else happens here.
-     */
-    ctx->focused = focused;
-    return PATHIME_OK;
-}
-
-bool pathime_context_is_focused(const pathime_context_t *ctx)
-{
-    /*
-     * No error channel, for the reason pathime_context_option_is_set() has
-     * none: every case this cannot answer — a null handle, a library that was
-     * never started — reads the same way, which is that this context is not
-     * taking input.
-     */
-    if (ctx == nullptr || !pathime::initialized()) {
-        return false;
-    }
-    return ctx->focused;
-}
 
 pathime_status_t pathime_context_reset(pathime_context_t *ctx)
 {
@@ -527,10 +470,6 @@ pathime_status_t pathime_context_reset(pathime_context_t *ctx)
     if (!pathime::initialized()) {
         return PATHIME_ERROR_NOT_INITIALIZED;
     }
-
-    /* Focus is not required: reset is the documented recovery path after a
-     * failure status, and a client must be able to take it whether or not the
-     * field is still focused. */
 
     const bool was_indeterminate = ctx->indeterminate;
 

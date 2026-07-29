@@ -1458,3 +1458,85 @@ and clang-cl produce identical `.db` files for all five tables.
 **Cost:** a `windows` build's `cangjie5` carries 30,980 phrases where a `noto`
 build carries 32,695, and neither number is the 68,632 the source holds. An
 embedder who wants all of them now has a supported way to ask, which is new.
+
+---
+
+## 7. Focus removed (2026-07-29)
+
+The concept was hollowed out before it was cut, and the cut followed from
+noticing how little was left.
+
+**What it had become.** `focused` was a `bool` on the context read in exactly
+three places, all gates — `process_key`, `set_candidate_cursor`,
+`select_candidate` — plus `pathime_context_is_focused()` handing it back.
+`pathime_context_set_focused()` was one assignment and a redundant-transition
+no-op. No backend was ever told: `src/backend.h` promised the opposite, that "a
+backend never sees ... an unfocused context." So there was no state to preserve
+on a transition, because nothing downstream had ever been informed of one.
+
+**The invariant it did not have.** Nothing enforced that at most one context was
+focused. There was no registry — contexts do not know their siblings — and
+`multicontext_test.c` focused *every* context it opened, in the one suite whose
+whole subject is many contexts at once. `engine_hangul_test.c` said so out loud
+("Both focused at once: focus is per-context and is not a claim on the engine").
+The header never stated which it was, so a client was free to assume the library
+was maintaining routing it was not. That unstated cardinality is the same shape
+of gap as the at-most-one-deletion question in §5.
+
+**Why enforcing it was the wrong fix.** Exclusivity is the minimum bar at which
+focus would have been useful: automatic preemption is what a caller creating a
+new isolated input would expect, and not knowing where focus came *from* is a
+real problem for a client with many fields. But delivering it means the core
+tracking every context to preempt the previous holder — and at the end of it the
+transition still does nothing, because no backend has anywhere to put it.
+Paying registry overhead to deliver a no-op is worse than not having the
+concept.
+
+**What the reference engines actually do on focus, checked rather than assumed.**
+None of the three vendored libraries has a focus concept: zero mentions in
+anthy-unicode, zero in pyzy (`m_focused_candidate` is candidate highlight), and
+one doc comment in libhangul saying the *framework* normally calls
+`hangul_ic_flush()` on focus-out. Focus lives entirely in the IBus engine
+wrapper — the layer this library occupies, not the layer it wraps. Sorting what
+the four wrappers do in `focus_in`/`focus_out`:
+
+- **Panel property registration** (all four) — excluded by `docs/CONCEPTS.md`;
+  there is no panel division here and nothing to re-register with.
+- **Re-reading config** (`PYPinyinEngine.cc:180` swaps the Full/Double pinyin
+  editor; anthy re-reads page-size and typing-mode) — an artifact of ibus's
+  config-daemon architecture. Options here apply when set.
+- **Discard on focus-out** (hangul, pinyin, bopomofo, ibus-table) — the real
+  behaviour, and already the client's. anthy makes it a *preference*
+  (`behavior-on-focus-out`, mode 2 being keep-and-restore), which is the
+  evidence that even upstream does not treat it as engine-intrinsic.
+- **Client identity** (`table.py:do_focus_in_id`, the most modern of the four) —
+  records `'gtk3-im:firefox'` and uses it in one place: appended to the aux text
+  under `_debug_level > 0` (`table.py:3149`). Diagnostic, not behavioural. It
+  also wants an identity *string*, not a bool; here the identity is the context.
+
+**Cost, stated plainly.** What is given up is a startup tripwire. Contexts
+started unfocused, so a client that never wired focus failed on its first
+keystroke with `_NOT_FOCUSED` instead of silently doing nothing. That was the
+only part earning its place, and it is genuinely gone: nothing now distinguishes
+"typed into the wrong context" from "typed into the right one." The narrower
+story the gate seemed to offer — catching a mis-routed key among several fields
+— it never actually delivered, since a client that has lost track of its own
+focus has mis-set the bit too and the gate passes the key through.
+
+Also given up is the ability to re-add a gate later at full strength. Adding one
+to a shipped API breaks every existing client, so a later version would have to
+default to focused, which keeps the gate and loses the tripwire. That asymmetry
+was the strongest argument for keeping the concept and it did not carry: it
+insures against a backend need that the source survey says does not exist, and
+insures badly, because a backend that ever does need to know about focus
+requires new `ContextBackend` plumbing whether or not the public bool survived.
+
+**What replaced it.** Nothing, which is the point. `PATHIME_ERROR_NOT_FOCUSED`
+is gone and the status enum renumbered to close the gap (nothing has shipped);
+`_OUT_OF_MEMORY` is 7 and `_BACKEND` is 8. The header carries a short block
+under "Lifecycle" saying there is no focus and why, so the absence reads as a
+decision rather than an oversight, and `docs/CONCEPTS.md` §"No focus state"
+does the same for the model. Every suite lost its `set_focused(ctx, true)`
+boilerplate, and `App::set_active()` in the demo lost both calls — switching
+engines is now nothing but a change of which context gets the next key, and the
+log's silence across a switch is what shows it.

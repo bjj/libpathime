@@ -89,7 +89,6 @@ An input context normally has its own:
 * composition state
 * composition data
 * surrounding text
-* focus state
 * negotiated capabilities and options
 
 Creating an input context begins the lifetime of this per-destination state. Destroying the input context ends that lifetime.
@@ -398,26 +397,19 @@ The concrete API must define the Unicode unit used for offsets and counts, such 
 
 ## Input-context lifecycle
 
-### Focus
+### No focus state
 
-**Focus** indicates whether an input context currently corresponds to the client destination receiving input.
+An input context has no focus, and the omission is deliberate.
 
-Focus is a property of the client and its input context.
+An input context is already a client destination, so which destination is receiving input is expressed by which input context the client offers key events to. An input method that is not being given keys is not doing anything, and a separate flag saying so would have to earn its place by changing behavior. There is nothing for it to change: this model fixes that a context left alone neither commits nor discards, so a transition carries no work, and no underlying conversion library has a focus entry point to be told about one. A client that wants the composition finalized or abandoned when the user leaves a field performs that itself, and then stops sending keys.
 
-The client informs the engine when the input context:
+Keeping a text field's contents a decision the client owns matters because engines disagree: some underlying libraries flush their pending syllable when their framework reports focus loss and others ignore focus entirely.
 
-* gains focus
-* loses focus
+A client with several destinations keeps an input context for each and routes key events to the right one. That routing cannot be checked by the library, because knowing which destination should be receiving input is precisely what only the client knows.
 
-Focus gates input and nothing else. An unfocused input context does not accept key events, candidate cursor movements, or candidate selections; reading composition data — including the candidate cursor — supplying surrounding text, changing settings, and resetting all remain available.
+**IBus and Fcitx note:** IBus exposes separate focus-in and focus-out notifications, and Fcitx input contexts also explicitly gain and lose focus. In both, what the engine does on those notifications is dominated by re-registering properties with a separate panel component and by re-reading configuration that a daemon may have changed — neither of which exists in this model, which has no panel division and applies option changes when they are set. ([Intelligent Input Bus][2])
 
-Losing focus neither commits nor discards. Composition state is preserved unchanged, so regaining focus resumes exactly where the user left off, and the engine produces no output as a result of the transition itself. A client that wants the preedit finalized or abandoned when the user leaves a field performs that itself, before dropping focus. Making this a fixed rule rather than negotiated behavior keeps a text field's contents a decision the client owns, which matters because engines disagree: some underlying libraries flush their pending syllable on focus loss and others ignore focus entirely.
-
-An input context begins its lifetime unfocused.
-
-**IBus and Fcitx note:** IBus exposes separate focus-in and focus-out notifications. Fcitx input contexts also explicitly gain and lose focus. ([Intelligent Input Bus][2])
-
-Both frameworks also carry an *activation* concept — IBus enable/disable, Fcitx activate/deactivate — indicating whether the engine is selected and enabled for a context, independently of focus. This model does not. A client that wants direct keyboard input, or that has selected another engine, stops sending key events to the input context; no separate state is required to express it.
+Both frameworks also carry an *activation* concept — IBus enable/disable, Fcitx activate/deactivate — indicating whether the engine is selected and enabled for a context. This model does not. A client that wants direct keyboard input, or that has selected another engine, stops sending key events to the input context; no separate state is required to express it.
 
 ### Reset
 
@@ -576,7 +568,7 @@ The following are outside this model:
 * handwriting input
 * virtual-keyboard presentation
 * forwarded key events
-* engine activation state, as distinct from focus
+* engine activation state
 * key release events
 
 These may be useful features of a complete input-method framework, but they are not required to define the engine library interface described by this document.
@@ -602,7 +594,6 @@ The canonical terms used by this documentation are:
 | **Surrounding text**        | Client text near the insertion position, supplied as context.       |
 | **Commit text**             | Insert finalized text into the client.                              |
 | **Delete surrounding text** | Delete client text using an offset and character count.             |
-| **Focus**                   | Whether the input context is currently receiving client input.      |
 | **Reset**                   | Discard transient composition state without destroying the context. |
 | **Negotiation**             | Exchange capabilities, field information, options, and policies.    |
 

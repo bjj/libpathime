@@ -68,8 +68,9 @@ it while the options panel has the keyboard.
   the one under the cursor. Every one of those names comes from
   `pathime_option_value_name()`; this program carries no table of its own, which
   is the whole point of the inventory walk.
-- **Switch engines mid-composition with `Ctrl+E` and come back.** Losing focus
-  neither commits nor discards, so the composition is exactly where you left it.
+- **Switch engines mid-composition with `Ctrl+E` and come back.** A context
+  that stops being keyed is not told so and does not care, so the composition
+  is exactly where you left it.
 - **Set `hangul-preedit` to `none` in the options panel, then type `gks`.**
   This is the one mode where the document *is* the composition: each jamo is
   committed, then deleted and recommitted one component fuller. One

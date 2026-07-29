@@ -113,8 +113,10 @@ same habits should carry into the implementation:
   "just in case" costs every future reader.
 - **Prefer a determinate rule to a deferral.** Where backends disagree, pick one
   fixed behaviour and write down why, rather than declaring it engine-dependent,
-  negotiable, or undefined. Focus loss preserving composition state is the model
-  case. Reserve "undefined" for things genuinely outside the model.
+  negotiable, or undefined. The stale-snapshot recovery is the model case: an
+  engine that cannot see the text it wants to revise abandons the revision and
+  treats what is in the document as final, rather than guessing or refusing the
+  key. Reserve "undefined" for things genuinely outside the model.
 - **State the cost of a decision, not just the decision.** Where something was
   given up — the JIS ¥ case, thumb-shift layouts, segment navigation — say so
   plainly at the point of the choice.

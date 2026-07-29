@@ -54,14 +54,6 @@ struct pathime_context {
     void (*composition_changed)(void *, const pathime_composition_t *) = nullptr;
 
     /**
-     * Focus gates input and only input: an unfocused context rejects
-     * process_key and select_candidate with PATHIME_ERROR_NOT_FOCUSED, while
-     * reading, configuring and resetting work regardless. Losing focus neither
-     * commits nor discards — composition state below is preserved exactly.
-     */
-    bool focused = false;
-
-    /**
      * Set when a call failed partway through, leaving composition state
      * indeterminate (the header's Status section: failures, as opposed to
      * rejections). It changes exactly one behaviour — pathime_context_reset()

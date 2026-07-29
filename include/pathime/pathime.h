@@ -81,7 +81,7 @@
  *     pathime_version, pathime_version_string, pathime_status_string,
  *     pathime_has_engine, pathime_engine_id, pathime_engine_requirements,
  *     pathime_context_engine, pathime_context_user_data,
- *     pathime_context_requirements, pathime_context_is_focused,
+ *     pathime_context_requirements,
  *     pathime_context_composition, pathime_context_candidate,
  *     pathime_option_count, pathime_option_name, pathime_option_value_name,
  *     pathime_engine_option_info,
@@ -212,8 +212,8 @@ PATHIME_API const char *pathime_version_string(void);
  * callback table, or the context's state made the call impossible. Nothing
  * changed, no callbacks were dispatched, and the client may simply try
  * something else. PATHIME_ERROR_INVALID_ARGUMENT, _UNKNOWN_ENGINE,
- * _MISSING_CALLBACK, _UNSUPPORTED, _NOT_INITIALIZED, _ALREADY_INITIALIZED and
- * _NOT_FOCUSED are all rejections.
+ * _MISSING_CALLBACK, _UNSUPPORTED, _NOT_INITIALIZED and _ALREADY_INITIALIZED
+ * are all rejections.
  *
  * Failures happen partway through, when a backend or an allocation gives out
  * with work already done. The library cannot describe how far it got, and
@@ -238,11 +238,10 @@ typedef enum pathime_status {
     PATHIME_ERROR_UNSUPPORTED         = 4,  /**< Engine does not implement this operation. */
     PATHIME_ERROR_NOT_INITIALIZED     = 5,  /**< pathime_init() has not been called. */
     PATHIME_ERROR_ALREADY_INITIALIZED = 6,  /**< pathime_init() has already succeeded. */
-    PATHIME_ERROR_NOT_FOCUSED         = 7,  /**< Context is not focused; see pathime_context_set_focused(). */
 
     /* Failures — composition state is indeterminate until reset. */
-    PATHIME_ERROR_OUT_OF_MEMORY       = 8,
-    PATHIME_ERROR_BACKEND             = 9   /**< Backend library or data file failure. */
+    PATHIME_ERROR_OUT_OF_MEMORY       = 7,
+    PATHIME_ERROR_BACKEND             = 8   /**< Backend library or data file failure. */
 } pathime_status_t;
 
 /**
@@ -844,7 +843,7 @@ typedef struct pathime_client {
 
 /**
  * One independently editable client destination and the engine state that
- * belongs to it: composition state, surrounding text, focus, and per-context
+ * belongs to it: composition state, surrounding text, and per-context
  * settings.
  */
 typedef struct pathime_context pathime_context_t;
@@ -862,8 +861,8 @@ typedef struct pathime_context pathime_context_t;
  * Fails with PATHIME_ERROR_MISSING_CALLBACK if @a client omits a callback that
  * pathime_engine_requirements() reports as required.
  *
- * A new context starts unfocused, with empty composition data, no surrounding
- * text, and a candidate cap of PATHIME_DEFAULT_MAX_CANDIDATES.
+ * A new context starts with empty composition data, no surrounding text, and a
+ * candidate cap of PATHIME_DEFAULT_MAX_CANDIDATES.
  */
 PATHIME_API pathime_status_t pathime_context_create(pathime_engine_t *engine,
                                                     const pathime_client_t *client,
@@ -898,8 +897,7 @@ PATHIME_API uint32_t pathime_context_requirements(const pathime_context_t *ctx);
 /* ---- Key input -------------------------------------------------------- */
 
 /**
- * Offer a key press to the engine. Requires the context to be focused;
- * otherwise returns PATHIME_ERROR_NOT_FOCUSED and does nothing.
+ * Offer a key press to the engine.
  *
  * Any commit, deletion, or composition change caused by the event is
  * dispatched through pathime_client before this returns — including when the
@@ -981,8 +979,7 @@ PATHIME_API pathime_status_t pathime_context_candidate(const pathime_context_t *
 
 /**
  * Move pathime_composition_t::candidate_cursor to absolute position @a index,
- * without choosing what is there. Requires the context to be focused;
- * otherwise returns PATHIME_ERROR_NOT_FOCUSED and does nothing.
+ * without choosing what is there.
  *
  * This is how a client navigates a candidate list: it is what the arrow keys
  * of a desktop client and the swipe of a phone keyboard both end in. The
@@ -1021,8 +1018,7 @@ PATHIME_API pathime_status_t pathime_context_set_candidate_cursor(pathime_contex
 
 /**
  * Tell the engine the client has chosen the candidate at absolute position
- * @a index in the most recently supplied candidate list. Requires the context
- * to be focused; otherwise returns PATHIME_ERROR_NOT_FOCUSED and does nothing.
+ * @a index in the most recently supplied candidate list.
  *
  * Selection is greedy and resolves left to right: choosing a candidate settles
  * the portion of the composition it covers, extends the settled region of the
@@ -1077,38 +1073,23 @@ PATHIME_API pathime_status_t pathime_context_set_surrounding_text(pathime_contex
 
 /* ---- Lifecycle -------------------------------------------------------- */
 
-/**
- * Report whether this context is the client destination currently receiving
- * input. A new context is unfocused; a client driving a single text field
- * should focus it once after creation.
+/*
+ * There is no focus concept, and its absence is deliberate. A context is a
+ * client destination, so which destination the user is typing into is
+ * expressed by which context the client offers keys to: an input method that
+ * is not receiving keys is not doing anything. A focus flag on top of that
+ * would have to earn its place by changing behaviour, and there is nothing for
+ * it to change — the model already fixes that leaving a field neither commits
+ * nor discards, so a transition would carry no work, and no backend has a
+ * focus entry point to be told about one. The client owns what happens when
+ * the user leaves a field: pathime_context_reset() to discard, or finalize
+ * first, and then simply stop offering keys.
  *
- * Focus gates input, and only input: an unfocused context rejects
- * pathime_context_process_key(), pathime_context_set_candidate_cursor() and
- * pathime_context_select_candidate() with PATHIME_ERROR_NOT_FOCUSED, so a
- * client that forgets to focus gets a diagnosable error rather than silence.
- * Everything else — reading the
- * composition, supplying surrounding text, changing settings, resetting —
- * works regardless of focus.
- *
- * Losing focus neither commits nor discards. Composition state is preserved
- * exactly, so refocusing resumes where the user left off, and no callbacks are
- * dispatched. A client that wants the preedit finalized or thrown away when
- * the user leaves the field decides that for itself, before dropping focus.
- * Redundant transitions are no-ops.
+ * A client with several fields keeps a context per field and routes to the
+ * right one. The library cannot check that routing for it — knowing which
+ * context should be receiving input is exactly the thing only the client
+ * knows.
  */
-PATHIME_API pathime_status_t pathime_context_set_focused(pathime_context_t *ctx, bool focused);
-
-/**
- * Whether @a ctx currently holds focus. False for NULL, and for any call made
- * before pathime_init() has succeeded; there is no error channel because the
- * useful reading of both is the same — this context is not taking input.
- *
- * A client that focuses its own contexts already knows the answer. This is for
- * the caller that does not: a language binding handed a bare context handle by
- * its own callback plumbing, in the same position as pathime_context_engine()
- * and pathime_context_user_data() are for. Callback-safe.
- */
-PATHIME_API bool pathime_context_is_focused(const pathime_context_t *ctx);
 
 /**
  * Discard transient composition state and return to a neutral state, without
@@ -1142,8 +1123,7 @@ PATHIME_API pathime_status_t pathime_context_reset(pathime_context_t *ctx);
  *   them from the model.
  *
  *   Direct or Latin passthrough is engine activation state, which the model
- *   excludes as distinct from focus. A client that wants Latin stops offering
- *   keys to the engine.
+ *   excludes. A client that wants Latin stops offering keys to the engine.
  *
  *   Encodings, dictionary paths, and backend init parameters are consumed
  *   internally. Where they carry a genuine client decision it has been lifted

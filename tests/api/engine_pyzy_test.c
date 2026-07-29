@@ -243,7 +243,7 @@ static const char *candidate_of(pathime_context_t *ctx, size_t index)
     return cand.bytes;
 }
 
-/* A focused context with the standard callback table. */
+/* A context with the standard callback table. */
 static pathime_context_t *open_context(pathime_engine_t *engine,
                                        pathime_client_t *client,
                                        client_log_t *log)
@@ -259,7 +259,6 @@ static pathime_context_t *open_context(pathime_engine_t *engine,
 
     PT_CHECK_STATUS(pathime_context_create(engine, client, log, &ctx), PATHIME_OK);
     PT_CHECK(ctx != NULL);
-    PT_CHECK_STATUS(pathime_context_set_focused(ctx, true), PATHIME_OK);
     return ctx;
 }
 

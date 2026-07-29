@@ -231,7 +231,6 @@ const char *pathime_status_string(pathime_status_t status)
     case PATHIME_ERROR_UNSUPPORTED:         return "engine does not implement this operation";
     case PATHIME_ERROR_NOT_INITIALIZED:     return "pathime_init() has not been called";
     case PATHIME_ERROR_ALREADY_INITIALIZED: return "pathime_init() has already succeeded";
-    case PATHIME_ERROR_NOT_FOCUSED:         return "context is not focused";
     case PATHIME_ERROR_OUT_OF_MEMORY:       return "out of memory";
     case PATHIME_ERROR_BACKEND:             return "backend library or data file failure";
     }

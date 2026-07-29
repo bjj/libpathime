@@ -171,7 +171,6 @@ static pathime_context_t *open_context(pathime_engine_t *engine, client_log_t *l
     PT_CHECK_STATUS(
         pathime_context_set_option_string(ctx, PATHIME_OPT_TABLE_FILE, table),
         PATHIME_OK);
-    PT_CHECK_STATUS(pathime_context_set_focused(ctx, true), PATHIME_OK);
     return ctx;
 }
 
@@ -484,7 +483,6 @@ static void test_no_table_is_inert(pathime_engine_t *engine)
     if (ctx == NULL) {
         return;
     }
-    PT_CHECK_STATUS(pathime_context_set_focused(ctx, true), PATHIME_OK);
 
     /* "no table" is spelled as the empty string, with no unset/empty distinction. */
     PT_CHECK_STATUS(pathime_context_get_option_string(ctx, PATHIME_OPT_TABLE_FILE, &value),
