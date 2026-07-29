@@ -19,37 +19,12 @@ configure_file(config.h.in "${CMAKE_CURRENT_BINARY_DIR}/config.h" @ONLY)
 # has to go on the -I path (which would shadow <string.h> with pyzy's String.h
 # on a case-insensitive filesystem).
 #
-# One edit is made everywhere: teaching pyzy to take its data directory from
-# the embedding program (DataDir.h, and the rewrites of Database.cc and
-# SpecialPhraseTable.cc below).
-#
-# Four more are Windows-only, because they assume GCC and/or LP64. Three of
-# them no MSVC-style compiler will accept at all; the fourth compiles and then
-# misbehaves at runtime.
-#
-#   1. PinyinParserTable.h initialises its ~400-entry table with GNU labelled
-#      fields (`text : "a",`) — an obsolete GCC extension. The labels appear in
-#      struct-declaration order, so dropping them leaves valid aggregate
-#      initialisation.
-#   2. String.h overloads operator<< for int / unsigned int / unsigned long
-#      only, which under LP64 happens to cover every integer type pyzy streams.
-#      On Windows it does not, and two kinds of ambiguity appear in
-#      Database.cc's SQL building:
-#        * size_t is unsigned long long, so `sql << i` sits equidistant from
-#          all three overloads;
-#        * for the narrow types (`p.pinyin_id[i].sheng` is unsigned char) MSVC
-#          throws a built-in `operator<<(bool, unsigned char)` into the
-#          candidate set — reachable because String has an implicit
-#          `operator const char *` — which costs one user-defined conversion on
-#          the left where the member `operator<<(int)` costs a promotion on the
-#          right, so neither wins.
-#      Both are fixed by widening the overload set with exact matches.
-#   3. PhraseEditor.h forward-declares `class Config;` where Config.h says
-#      `struct Config` — invisible under the Itanium ABI, a link error under
-#      MSVC's class-key-sensitive mangling.
-#   4. BopomofoContext.cc casts a `const wchar_t *` to UCS-4. Correct only
-#      where wchar_t is 32-bit; where it is 16-bit the zhuyin auxiliary text
-#      silently comes out empty.
+# One edit is made, and it is not a portability fix: teaching pyzy to take its
+# data directory from the embedding program rather than from a compiled-in
+# PKGDATADIR and the process's working directory (DataDir.h, and the rewrites
+# of Database.cc and SpecialPhraseTable.cc below). That is libpathime's
+# contract with pyzy, so it lives here; the portability fixes pyzy needs to
+# compile at all are commits in the submodule.
 #
 # The mirror is produced at configure time: editing engines/pyzy/src needs a re-run of
 # cmake to take effect.
@@ -142,88 +117,6 @@ string(REPLACE "#include \"DynamicSpecialPhrase.h\""
                "#include \"DataDir.h\"\n#include \"DynamicSpecialPhrase.h\""
   _spt_cc_patched "${_spt_cc_patched}")
 file(WRITE "${_pyzy_dir}/SpecialPhraseTable.cc" "${_spt_cc_patched}")
-
-if(WIN32)
-  file(READ "${_pyzy_dir}/PinyinParserTable.h" _tbl)
-  string(REGEX REPLACE
-    "\n([ \t]+)(text|bopomofo|sheng|yun|pinyin_id|len|flags)[ \t]*:[ \t]*"
-    "\n\\1/* \\2 */ " _tbl_patched "${_tbl}")
-  if(_tbl_patched STREQUAL _tbl)
-    message(FATAL_ERROR
-      "pyzy: PinyinParserTable.h has no GNU labelled-field initialisers to "
-      "rewrite — the vendored source has changed shape.")
-  endif()
-  file(WRITE "${_pyzy_dir}/PinyinParserTable.h" "${_tbl_patched}")
-
-  # PhraseEditor.h forward-declares Config with the wrong class-key
-  # (`class Config;` against Config.h's `struct Config`). The Itanium ABI does
-  # not encode the class-key so GCC never notices; MSVC does, and
-  # PhraseEditor's constructor ends up defined and referenced under two
-  # different mangled names.
-  file(READ "${_pyzy_dir}/PhraseEditor.h" _pe_h)
-  string(REPLACE "class Config;" "struct Config;" _pe_h_patched "${_pe_h}")
-  if(_pe_h_patched STREQUAL _pe_h)
-    message(FATAL_ERROR
-      "pyzy: could not find PhraseEditor.h's `class Config;` forward "
-      "declaration to correct — the vendored source has changed shape.")
-  endif()
-  file(WRITE "${_pyzy_dir}/PhraseEditor.h" "${_pe_h_patched}")
-
-  file(READ "${_pyzy_dir}/String.h" _str_h)
-  string(REGEX REPLACE
-    "(String & operator<< \\(unsigned long i\\)[^}]*\\})"
-    [[\1
-
-    /* Grafted in by libpathime's Windows port; see cmake/ports/pyzy for why.
-     * Every one of these routes to the overload the same expression picks on
-     * Linux, so the rendered SQL is byte-identical across platforms. */
-    String & operator<< (long long i)
-    {
-        return appendPrintf ("%lld", i);
-    }
-
-    String & operator<< (unsigned long long i)
-    {
-        return appendPrintf ("%llu", i);
-    }
-
-    String & operator<< (signed char i)    { return operator<< ((int) i); }
-    String & operator<< (unsigned char i)  { return operator<< ((int) i); }
-    String & operator<< (short i)          { return operator<< ((int) i); }
-    String & operator<< (unsigned short i) { return operator<< ((int) i); }]]
-    _str_h_patched "${_str_h}")
-  if(_str_h_patched STREQUAL _str_h)
-    message(FATAL_ERROR
-      "pyzy: could not graft the extra operator<< overloads onto String.h "
-      "— the vendored source has changed shape.")
-  endif()
-  file(WRITE "${_pyzy_dir}/String.h" "${_str_h_patched}")
-
-  # 4. BopomofoContext.cc builds its auxiliary text by casting the table's
-  #    `const wchar_t *` straight to `unichar *` (unsigned int) and handing it
-  #    to String::operator<<, which calls g_ucs4_to_utf8. That is only ever
-  #    correct where wchar_t is 32-bit UCS-4. On Windows it is 16-bit UTF-16, so
-  #    two zhuyin letters are read as one code point far outside Unicode;
-  #    g_ucs4_to_utf8 fails, warns, and appends nothing — the preedit's phonetic
-  #    line comes up empty. Appending one code point at a time is equivalent on
-  #    Linux (every zhuyin letter is in the BMP, so the UTF-8 is identical) and
-  #    correct here. tests/pyzy/bopomofo_test.cc is what holds this honest.
-  file(READ "${_pyzy_dir}/BopomofoContext.cc" _bpmf_cc)
-  string(REPLACE
-    "m_buffer << (unichar *)m_pinyin[i]->bopomofo;"
-    [[/* Rewritten by libpathime's Windows port; see cmake/ports/pyzy for why.
-             * The original reinterpreted a UTF-16 wchar_t string as UCS-4. */
-            for (const wchar_t *bpmf_ = m_pinyin[i]->bopomofo; *bpmf_ != L'\0'; ++bpmf_)
-                m_buffer.appendUnichar ((unichar) *bpmf_);]]
-    _bpmf_cc_patched "${_bpmf_cc}")
-  if(_bpmf_cc_patched STREQUAL _bpmf_cc)
-    message(FATAL_ERROR
-      "pyzy: could not find BopomofoContext.cc's `m_buffer << (unichar *)...` "
-      "wchar_t-to-UCS-4 cast to correct — the vendored source has changed "
-      "shape. If upstream has fixed it, drop this rewrite.")
-  endif()
-  file(WRITE "${_pyzy_dir}/BopomofoContext.cc" "${_bpmf_cc_patched}")
-endif()
 
 # Anything that compiles against pyzy's *private* headers has to use the same
 # copies this library was built from — the mirror, never the submodule, since

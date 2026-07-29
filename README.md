@@ -36,9 +36,9 @@ composition model would all still be yours to write.
 
 ## Platforms
 
-Linux and Windows (MSVC and clang-cl). The vendored submodule trees are never
-edited: everything Windows needs comes from an in-tree compat layer or a
-configure-time generated copy. See **[BUILD.md](BUILD.md)**.
+Linux and Windows (MSVC and clang-cl). What Windows needs comes from an in-tree
+POSIX compat layer plus a short series of portability fixes carried as commits
+on each vendored library's `libpathime` branch. See **[BUILD.md](BUILD.md)**.
 
 ## Demo
 

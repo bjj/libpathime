@@ -13,10 +13,15 @@ rather than merely compiling.
 
 ## The rule
 
-Nothing under `engines/` — `libhangul/`, `anthy-unicode/`, `pyzy/` and the
-`ibus-table-chinese/` table sources — is ever edited. A vendored source that
-will not compile as it stands is handled by one of the three mechanisms below,
-never by a patch to the submodule tree.
+A vendored source that will not compile or behave as it stands is fixed **in
+the submodule**, as a titled commit on its `libpathime` branch — never by a
+rewrite applied while the build runs. `libhangul/` and the
+`ibus-table-chinese/` table sources need nothing; `anthy-unicode/` and `pyzy/`
+each carry a short series of portability fixes on that branch.
+
+What stays here is what is *not* a fix to anthy or pyzy: the compat layer
+below, the build files, and the one configure-time rewrite that expresses
+libpathime's own contract with anthy rather than a bug in it.
 
 ## 1. The compat layer
 
@@ -35,12 +40,13 @@ This is also where pyzy's UUID provider comes from: the shim forwards to
 
 ## 2. Generated source variants
 
-Where a vendored file is not valid on an MSVC-style compiler, or cannot be told
-something libpathime needs to tell it, the port compiles a fixed *copy* produced
-at configure time. Editing a submodule therefore needs a re-run of CMake for the
-change to reach the copy.
+Where a vendored library cannot be *told* something libpathime needs to tell
+it, the port compiles a fixed *copy* produced at configure time. Editing a
+submodule therefore needs a re-run of CMake for the change to reach the copy.
 
-Two of them are not Windows-specific and are generated on every platform:
+Both are about where a library finds its data, both apply on every platform,
+and neither is a bug in the library it rewrites — which is why they are here
+rather than in the submodule:
 
 - `engines/anthy-unicode/src-diclib/conf.c` expands `${NAME}` references inside every
   value stored, and reads its compiled-in conf file unconditionally. The copy
@@ -52,24 +58,14 @@ Two of them are not Windows-specific and are generated on every platform:
   take it from `pyzy_set_data_dir()` instead — `DataDir.h`, which the port adds
   to pyzy.
 
-The Windows-only ones:
-
-- `engines/anthy-unicode/src-diclib/alloc.c` casts heap pointers through `unsigned
-  long`, which is 32-bit under LLP64; the copy uses `uintptr_t`.
-- `engines/anthy-unicode/src-diclib/file_dic.c` walks paths POSIX-style and so cannot
-  create `%USERPROFILE%\.config\anthy`; the copy teaches it drive letters and
-  `\`. This is what lets `pathime_init_params_t::data_dir` name a multi-level
-  Windows path that does not exist yet.
-- `engines/anthy-unicode/src-diclib/filemap.c` opens the dictionary with the narrow
-  `open()`, which decodes its argument in the active code page; the copy
-  converts from UTF-8 and calls `_wopen`, so an install path outside that code
-  page still works.
-- `engines/pyzy/src/`'s Windows fixes ride on the same mirror as the data-directory
-  change above. `PinyinParserTable.h` uses GNU labelled-field initialisers;
-  `String.h` is missing `operator<<` overloads that only LP64 made unnecessary;
-  `PhraseEditor.h` forward-declares `class Config` where it is a `struct`,
-  which MSVC's mangling notices; and `BopomofoContext.cc` casts a
-  `const wchar_t *` to UCS-4, which is only correct where `wchar_t` is 32 bits.
+The portability fixes each library needs in order to compile and behave on
+Windows at all are commits on its submodule's `libpathime` branch, not
+rewrites: pointer arithmetic through `unsigned long` under LLP64, the
+POSIX-only path walk that cannot create `%USERPROFILE%\.config\anthy`, the
+narrow `open()` that decodes in the active code page, pyzy's GNU labelled-field
+initialisers, its missing `operator<<` overloads, its `class`/`struct`
+mismatch, and its `wchar_t`-as-UCS-4 cast. `git log` in each submodule is the
+list.
 
 Consumers of pyzy's headers must use `PYZY_EFFECTIVE_SRC_DIR` rather than
 `engines/pyzy/src`: the mirror is what the library was actually built from, on every
@@ -84,16 +80,15 @@ Generated text inputs are written with LF for the same reason — and it is why
 the tree itself must be checked out with LF endings (`core.autocrlf input`): a
 dictionary source converted to CRLF would leave stray CRs in parsed tokens.
 
-## Linkage: anthy is static, libhangul and pyzy are not
+## Linkage: anthy is one DLL, libhangul and pyzy are one each
 
-On Windows the anthy family is built **static** regardless of
-`BUILD_SHARED_LIBS`. The reason is anthy's own — cross-library global data — and
-is set out in `docs/anthy-mapping.md`, "Why the anthy family is built static on
-Windows", along with the constraint it imposes: **nothing that links
-`libpathime` may also link anthy.** That constraint is why nothing under
-`tests/api/` links a backend library; see `docs/testing.md`.
-
-libhangul and pyzy still produce DLLs under a shared build.
+All three backends produce DLLs under a shared build. anthy is the one that
+differs in *shape*: upstream packages it as six libraries that pass global data
+between them, so Windows builds the whole family as a **single** DLL rather
+than annotating those references. `docs/anthy-mapping.md`, "Why the anthy
+family is one library on Windows", has the reasoning; the target names
+`anthydic-unicode` and `anthyinput-unicode` survive as interfaces onto that
+one DLL, so nothing else in the tree links differently.
 
 ## Known runtime limitations
 

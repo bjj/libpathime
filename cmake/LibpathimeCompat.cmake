@@ -40,6 +40,13 @@ function(libpathime_add_win32_compat target)
       "${LIBPATHIME_COMPAT_WIN32_DIR}")
     target_compile_options(${target} PRIVATE
       "${LIBPATHIME_COMPAT_WIN32_PRELUDE_FLAG}")
+    if(MSVC)
+      # C4068 "unknown pragma": anthy silences a handful of GCC warnings with
+      # `#pragma GCC diagnostic`, which MSVC then warns about not knowing —
+      # noise from lines whose only purpose is to remove noise. Scoped to
+      # compat targets, so a stray pragma in our own code still gets flagged.
+      target_compile_options(${target} PRIVATE /wd4068)
+    endif()
     target_link_libraries(${target} PRIVATE libpathime::win32compat)
   endif()
 endfunction()

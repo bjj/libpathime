@@ -48,15 +48,12 @@
 # <pathime/pathime.h>, that is a finding about the header, not a reason to
 # reach around it.
 #
-# It is also the only linkage that works. anthy is built STATIC on Windows
-# whatever BUILD_SHARED_LIBS says, for reasons
-# cmake/ports/anthy-unicode/CMakeLists.txt sets out, so a shared libpathime
-# absorbs a private copy of it — and anthy's configuration and initialised-once
-# flags are process-global state. A test executable that also linked anthy
-# would get a *second*, independent copy, and would be configuring one while
-# libpathime used the other. (ELF hides this by resolving both to a single
-# definition, so the same mistake passes on Linux.) tests/anthy/ is unaffected:
-# those programs link anthy and nothing else, so they have exactly one copy.
+# A test that reached past the header would also stop being evidence about the
+# thing it is named for: that the header is complete, and that every symbol a
+# client touches is actually exported.
+#
+# tests/anthy/ and tests/pyzy/ are where a backend's own surface gets driven
+# directly, and they link that backend rather than libpathime.
 
 function(libpathime_add_api_test name source)
   add_executable(api_${name}_test "${source}")

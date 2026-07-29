@@ -1227,8 +1227,8 @@ representation and its own option carrier, each translated by an adapter that di
 nothing else — a second IME API invented purely so the first one could have
 something to wrap. The three real adapters exist because upstream imposed a shape
 on us; here nothing would have imposed it but the directory choice. `engines/`
-also means something specific in this tree — vendored, never edited — and this
-code is ours.
+also means something specific in this tree — upstream code we vendor rather
+than author — and this code is ours.
 
 What replaces the library boundary is a *header* boundary, and it is load-bearing
 rather than decorative: **`table_backend.cc` is the only file in the directory

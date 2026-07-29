@@ -17,9 +17,10 @@ modes) is in `TODO.md`.
 
 > **Build:** see `BUILD.md`. NOTE! If you are on Linux, you are in a sbx
 > environment on Windows: build in `/tmp` to avoid issues with symlinks and
-> case-insensitivity. The vendored submodule trees are **never edited** — a
-> source change needed for Windows goes through the compat headers or a
-> configure-time generated copy (`docs/windows-port.md`).
+> case-insensitivity. A source change a vendored library needs is a **commit on
+> that submodule's `libpathime` branch**, never a rewrite applied during the
+> build; what stays in the build is the compat layer and the two configure-time
+> copies that express our contract rather than fix a bug (`docs/windows-port.md`).
 
 ## Repository Structure
 
@@ -41,7 +42,8 @@ refs/                    # Local reference clones — gitignored, not submodules
   ibus-pinyin/           # C++ engine wrapping pyzy; most complex, Pinyin and Bopomofo
   ibus-table/            # Self-contained Python engine — the reference our table engine was specified from
 
-engines/                 # Vendored, never edited — three libraries and one data set
+engines/                 # Vendored — three libraries and one data set; anthy and pyzy
+                         # carry portability commits on a `libpathime` branch
   libhangul/             # Korean input library
   anthy-unicode/         # Japanese kana-kanji conversion library
   pyzy/                  # Chinese Pinyin/Bopomofo conversion library
@@ -116,8 +118,12 @@ same habits should carry into the implementation:
 - **The phone-keyboard target breaks ties.** Greedy left-to-right resolution,
   no segment navigation or resizing, and no exposure of anthy's multi-segment
   nature all follow from it.
-- **Never edit the vendored submodule trees.** Windows fixes go through the
-  compat headers or a configure-time generated copy; see `docs/windows-port.md`.
+- **A fix to a vendored library is a commit in that submodule**, on its
+  `libpathime` branch, narrowly scoped and titled — not a rewrite applied while
+  the build runs. Keep the upstream branch clean so a bump is a rebase. What
+  belongs in our build instead is anything that is *not* a fix to the library:
+  the compat layer, the build files, and the two configure-time copies that
+  express libpathime's contract with anthy and pyzy. See `docs/windows-port.md`.
 - **Write in the present tense; the library is unreleased.** Nothing has
   shipped, so there is no "used to", no "no longer does", no "was widened", and
   no dated changelog entry. A comment that explains the current shape by

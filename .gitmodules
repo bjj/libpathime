@@ -3,10 +3,12 @@
 	url = https://github.com/libhangul/libhangul
 [submodule "pyzy"]
 	path = engines/pyzy
-	url = https://github.com/openSUSE/pyzy
+	url = https://github.com/bjj/pyzy
+	branch = libpathime
 [submodule "anthy-unicode"]
 	path = engines/anthy-unicode
-	url = https://github.com/fujiwarat/anthy-unicode
+	url = https://github.com/bjj/anthy-unicode
+	branch = libpathime
 [submodule "demo/cpp-terminal"]
 	path = demo/cpp-terminal
 	url = https://github.com/jupyter-xeus/cpp-terminal

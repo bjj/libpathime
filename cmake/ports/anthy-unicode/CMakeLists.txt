@@ -5,6 +5,9 @@
 # installed shared libs, and — the interesting part — the four-stage build-time
 # pipeline that compiles the `anthy.dic` dictionary. Source lists are copied
 # verbatim from the per-directory meson.build files.
+#
+# Windows collapses those six libraries into one DLL; see "One library on
+# Windows" below for why, and what keeps the target names working either way.
 
 set(ANTHY_SRC "${CMAKE_SOURCE_DIR}/engines/anthy-unicode")
 
@@ -26,39 +29,41 @@ function(_anthy_setup tgt)
   libpathime_add_win32_compat(${tgt})
 endfunction()
 
-# On Windows the anthy family is always static, whatever BUILD_SHARED_LIBS says.
-# anthy's libraries share *global data* across the library boundary: the
-# splitter (src-splitter) reads `anthy_wt_all` / `anthy_wt_none`, which
-# src-worddic/wtype.c defines and anthy_init_wtypes() fills in at runtime.
-# ELF resolves that transparently; Windows cannot. A DLL data export is only
-# reachable through `__imp_`-prefixed indirection, which the consumer gets by
-# declaring the symbol `__declspec(dllimport)` — an annotation that would have
-# to go into the vendored <anthy/wtype.h>, and patching the submodules is
-# exactly what this port avoids. Duplicating wtype.c per DLL is not an option
-# either: each copy would need its own initialisation. Building the family
-# static sidesteps the whole question, and has the side benefit of making the
-# build-time codegen tools self-contained (no DLL to locate when they run).
+# --- One library on Windows, upstream's six on Linux ------------------------
+# anthy is packaged as three internal static libraries under three installed
+# shared ones, and the pieces share *global data* across those boundaries:
 #
-# The cost, stated rather than discovered twice: a shared libpathime absorbs a
-# private copy of anthy, and anthy's configuration and initialised-once flags
-# are process-global state (the conf database in src-diclib/conf.c, is_init_ok
-# in src-main/main.c, dic_init_count in src-worddic/word_dic.c). So on Windows
-# any *other* module in the process that links anthy gets a second, independent
-# anthy: its anthy_conf_override() calls are invisible to libpathime's copy and
-# vice versa. ELF hides this by resolving both to one definition, which is why
-# it can pass on Linux and fail on Windows with no source difference at all.
-# Consequence for us: nothing that links libpathime may also link anthy —
-# tests/api/CMakeLists.txt is where that bit, and the way around it.
-set(_anthy_public_kind "")   # empty => honour BUILD_SHARED_LIBS
-if(WIN32)
-  set(_anthy_public_kind STATIC)
+#   * src-splitter reads `anthy_wt_all` / `anthy_wt_none`, which
+#     src-worddic/wtype.c defines and anthy_init_wtypes() fills in at runtime;
+#   * src-diclib owns the conf database (conf.c) and the mapped dictionary
+#     (file_dic.c) that every other piece reaches through.
+#
+# ELF resolves all of it to one definition whatever the packaging. Windows
+# resolves neither for free: a data symbol read across a DLL boundary needs
+# `__declspec(dllimport)` at the *reference* to go through `__imp_`
+# indirection, and a static archive pulled into two DLLs gives each one a
+# private copy of that archive's state. Whether the second happens at all comes
+# down to how the linker resolves an archive member that an import library also
+# offers — GNU ld skips it, and a build that merely happens to link in the same
+# order under link.exe would fail silently, with two conf databases.
+#
+# So Windows compiles the whole family as a single DLL. Every cross-piece
+# reference then lands inside one module, and the process has exactly one conf
+# database, one mapped dictionary and one wtype pair no matter what links it.
+# The other five target names survive as interfaces onto it, so the rest of the
+# tree links exactly what it always did.
+#
+# Set LIBPATHIME_ANTHY_SINGLE_LIBRARY to exercise either shape on either
+# platform; it is how the combined build gets tested away from Windows.
+if(NOT DEFINED LIBPATHIME_ANTHY_SINGLE_LIBRARY)
+  set(LIBPATHIME_ANTHY_SINGLE_LIBRARY ${WIN32})
 endif()
 
-# Build one library from a directory + file list, applying the common setup.
-# _anthy_lib(<target> internal|public <dir> <file>...)
-# File names are relative to <dir> in the submodule; an absolute path is taken
-# as-is, which is how the generated Windows variants below get substituted in.
-function(_anthy_lib target kind dir)
+# Collect a directory's sources under a variable. File names are relative to
+# <dir> in the submodule; an absolute path is taken as-is, which is how the
+# generated conf.c gets substituted in.
+# _anthy_srcs(<var> <dir> <file>...)
+function(_anthy_srcs var dir)
   set(_srcs "")
   foreach(_f IN LISTS ARGN)
     if(IS_ABSOLUTE "${_f}")
@@ -67,41 +72,8 @@ function(_anthy_lib target kind dir)
       list(APPEND _srcs "${ANTHY_SRC}/${dir}/${_f}")
     endif()
   endforeach()
-  if(kind STREQUAL "internal")
-    add_library(${target} STATIC ${_srcs})   # always static, absorbed into the shared libs
-  else()
-    add_library(${target} ${_anthy_public_kind} ${_srcs})
-  endif()
-  _anthy_setup(${target})
+  set(${var} "${_srcs}" PARENT_SCOPE)
 endfunction()
-
-# --- LLP64 fix for the slab allocator ---------------------------------------
-# src-diclib/alloc.c round-trips heap pointers through `unsigned long` to do
-# header arithmetic: `(struct chunk *)((unsigned long)s - CHUNK_HEADER_SIZE)`,
-# and the same for the page-ownership search in anthy_sfree(). Under LP64 that
-# is lossless. Under Windows' LLP64 `unsigned long` is 32 bits, so every
-# allocation above the 4 GB line — which is to say all of them — has its high
-# half discarded and anthy_sfree() either abort()s on the page-magic check or
-# frees the wrong object. Compile a copy with the casts widened to uintptr_t;
-# every `unsigned long` in the file is one of these pointer casts.
-set(_anthy_alloc_c alloc.c)
-if(WIN32)
-  file(READ "${ANTHY_SRC}/src-diclib/alloc.c" _alloc_c)
-  string(REPLACE "(unsigned long)" "(uintptr_t)" _alloc_c_fixed "${_alloc_c}")
-  if(_alloc_c_fixed STREQUAL _alloc_c)
-    message(FATAL_ERROR
-      "anthy: src-diclib/alloc.c has no `(unsigned long)` pointer casts to "
-      "widen — the vendored source has changed shape.")
-  endif()
-  string(REPLACE "#include <stdio.h>" "#include <stdint.h>\n#include <stdio.h>"
-                 _alloc_c_fixed "${_alloc_c_fixed}")
-  set(_anthy_alloc_c "${CMAKE_CURRENT_BINARY_DIR}/src-win32/alloc.c")
-  file(WRITE "${_anthy_alloc_c}"
-    "/* Generated by libpathime's anthy port from ${ANTHY_SRC}/src-diclib/alloc.c:\n"
-    " * pointer casts widened from unsigned long to uintptr_t for LLP64.\n"
-    " * Do not edit; edit the submodule and re-run cmake. */\n"
-    "${_alloc_c_fixed}")
-endif()
 
 # --- Exact configuration through anthy_conf_override() ----------------------
 # anthy is configured entirely through its conf database, and libpathime sets
@@ -199,220 +171,79 @@ file(WRITE "${_anthy_conf_c}"
   " * Do not edit; edit the submodule and re-run cmake. */\n"
   "${_conf_c_patched2}")
 
-# --- Windows path handling for the profile directory ------------------------
-# src-diclib/file_dic.c carries a copy of glib's g_mkdir_with_parents() and the
-# two path helpers it leans on, and all three assume POSIX paths:
-#
-#   * ANTHY_IS_DIR_SEPARATOR() (diclib_inner.h) recognises only '/', but the
-#     home directory anthy gets on Windows comes from %USERPROFILE% via the
-#     getpwuid() shim — "C:\Users\someone", with no forward slash in it at all.
-#   * anthy_path_is_absolute() calls a path absolute only if it *starts* with a
-#     separator, so "C:/Users/..." is treated as relative and the parent walk
-#     begins at the first component, "C:". stat("C:") fails on Windows — a bare
-#     drive letter is not a path — so the code concludes that the component
-#     exists but is not a directory and gives up with ENOTDIR.
-#
-# Either way anthy_check_user_dir() cannot create $HOME/.config/anthy, and the
-# only trace is one line on the logger:
-#
-#     Failed to create profile directory: Not a directory
-#
-# after which the personal dictionary, the conversion history and prediction
-# are all silently unavailable — anthy keeps converting, so nothing looks
-# broken. tests/anthy/ covers this from three directions (anthy.dicutil,
-# anthy.segment, and upstream's checklib).
-#
-# The copy teaches the separator macro about '\' and both helpers about drive
-# prefixes. A drive prefix only counts when a separator follows it, so
-# is_absolute() and skip_root() agree: skip_root() must never return NULL for
-# a path is_absolute() accepted, or the walk dereferences it.
-set(_anthy_file_dic_c file_dic.c)
-if(WIN32)
-  file(READ "${ANTHY_SRC}/src-diclib/file_dic.c" _file_dic_c)
-  set(_fd "${_file_dic_c}")
-
-  set(_fd_prologue
-"#ifdef _WIN32
-#undef ANTHY_IS_DIR_SEPARATOR
-#define ANTHY_IS_DIR_SEPARATOR(c) ((c) == '/' || (c) == '\\\\')
-#define ANTHY_HAS_DRIVE_PREFIX(p) ((p)[0] && (p)[1] == ':' && ANTHY_IS_DIR_SEPARATOR ((p)[2]))
-#else
-#define ANTHY_HAS_DRIVE_PREFIX(p) 0
-#endif
-
-static int
-anthy_path_is_absolute (const char *file_name)")
-  string(REPLACE
-    "static int\nanthy_path_is_absolute (const char *file_name)"
-    "${_fd_prologue}"
-    _fd "${_fd}")
-
-  string(REPLACE
-    "  if (ANTHY_IS_DIR_SEPARATOR (file_name[0]))\n    return TRUE;\n"
-    "  if (ANTHY_IS_DIR_SEPARATOR (file_name[0]))\n    return TRUE;\n\n  if (ANTHY_HAS_DRIVE_PREFIX (file_name))\n    return TRUE;\n"
-    _fd "${_fd}")
-
-  string(REPLACE
-    "  if (ANTHY_IS_DIR_SEPARATOR (file_name[0]))\n    {\n"
-    "  if (ANTHY_HAS_DRIVE_PREFIX (file_name))\n    file_name += 2;\n  if (ANTHY_IS_DIR_SEPARATOR (file_name[0]))\n    {\n"
-    _fd "${_fd}")
-
-  # The copy lives in the build tree, so its one quote-form include no longer
-  # resolves relative to the source file. Absolutise it rather than putting
-  # src-diclib/ on the include path, which would expose its private headers to
-  # every other translation unit in the library.
-  string(REPLACE
-    "#include \"diclib_inner.h\""
-    "#include \"${ANTHY_SRC}/src-diclib/diclib_inner.h\""
-    _fd "${_fd}")
-
-  # Four edits, four chances for the vendored source to have moved on. Rather
-  # than diff the whole file, check that each one actually landed — a
-  # string(REPLACE) whose pattern no longer matches is silently a no-op, and
-  # this fix failing quietly would look exactly like the bug it removes.
-  foreach(_marker "#undef ANTHY_IS_DIR_SEPARATOR"
-                  "return TRUE;\n\n  if (ANTHY_HAS_DRIVE_PREFIX (file_name))"
-                  "if (ANTHY_HAS_DRIVE_PREFIX (file_name))\n    file_name += 2;"
-                  "#include \"${ANTHY_SRC}/src-diclib/diclib_inner.h\"")
-    string(FIND "${_fd}" "${_marker}" _found)
-    if(_found EQUAL -1)
-      message(FATAL_ERROR
-        "anthy: could not apply the Windows path fix to src-diclib/file_dic.c "
-        "— the vendored source has changed shape around\n  ${_marker}")
-    endif()
-  endforeach()
-
-  set(_anthy_file_dic_c "${CMAKE_CURRENT_BINARY_DIR}/src-win32/file_dic.c")
-  file(WRITE "${_anthy_file_dic_c}"
-    "/* Generated by libpathime's anthy port from ${ANTHY_SRC}/src-diclib/file_dic.c:\n"
-    " * the POSIX-only path walk taught about Windows drive letters and '\\\\'.\n"
-    " * Do not edit; edit the submodule and re-run cmake. */\n"
-    "${_fd}")
-endif()
-
-# --- Windows: open the dictionary by its real name --------------------------
-# src-diclib/filemap.c opens every file anthy maps — the dictionary above all —
-# with open(), whose Windows implementation decodes its argument in the
-# process's active code page. Paths in libpathime are UTF-8, so a dictionary
-# under a directory holding any character outside that code page cannot be
-# opened, and Japanese silently goes missing for the user whose install path
-# happens to contain their own name. The wide entry point has no such
-# restriction; the copy converts and calls that instead.
-#
-# The conversion needs <windows.h>, and where it goes is not free: it has to
-# precede the compat <unistd.h> this file already includes. See the header
-# comment the first replacement grafts on.
-set(_anthy_filemap_c filemap.c)
-if(WIN32)
-  file(READ "${ANTHY_SRC}/src-diclib/filemap.c" _filemap_c)
-
-  string(REPLACE
-[[#include <sys/types.h>
-#include <sys/mman.h>]]
-[[/* Grafted in by libpathime's anthy port; see cmake/ports/anthy-unicode.
- *
- * <windows.h> comes first on purpose, exactly as in the compat layer's own
- * posix_win.c: it drags in <winsock.h>, whose gethostname() declaration must
- * not meet the macro the compat <unistd.h> below would otherwise define (that
- * header stands down once winsock is present). Moving this include down past
- * <unistd.h> produces a page of errors inside <winsock.h>. */
-#include <windows.h>
-#include <io.h>       /* _wopen */
-
-#include <sys/types.h>
-#include <sys/mman.h>]]
-    _filemap_c_patched "${_filemap_c}")
-
-  string(REPLACE
-[[struct filemapping *
-anthy_mmap(const char *fn, int wr)]]
-[[/* Grafted in by libpathime's anthy port; see cmake/ports/anthy-unicode. */
-static int
-anthy_open_utf8(const char *fn, int flags, mode_t mode)
-{
-  int wlen, fd;
-  wchar_t *wfn;
-
-  wlen = MultiByteToWideChar(CP_UTF8, 0, fn, -1, NULL, 0);
-  if (wlen <= 0) {
-    return -1;
-  }
-  wfn = malloc(sizeof(wchar_t) * (size_t)wlen);
-  if (!wfn) {
-    return -1;
-  }
-  if (MultiByteToWideChar(CP_UTF8, 0, fn, -1, wfn, wlen) != wlen) {
-    free(wfn);
-    return -1;
-  }
-  fd = _wopen(wfn, flags, mode);
-  free(wfn);
-  return fd;
-}
-
-struct filemapping *
-anthy_mmap(const char *fn, int wr)]]
-    _filemap_c_patched "${_filemap_c_patched}")
-
-  string(REPLACE
-    "  fd = open(fn, flags, mode);"
-    "  fd = anthy_open_utf8(fn, flags, mode);"
-    _filemap_c_patched "${_filemap_c_patched}")
-
-  # Three replacements, three chances for the vendored source to have moved on;
-  # a string(REPLACE) whose pattern no longer matches is silently a no-op. The
-  # first marker is the load-bearing one: without it <windows.h> would still
-  # arrive, from the second replacement's position *after* the compat
-  # <unistd.h>, and the failure would surface as errors inside <winsock.h>.
-  foreach(_marker "#include <windows.h>\n#include <io.h>"
-                  "static int\nanthy_open_utf8"
-                  "fd = anthy_open_utf8(fn, flags, mode);")
-    string(FIND "${_filemap_c_patched}" "${_marker}" _found)
-    if(_found EQUAL -1)
-      message(FATAL_ERROR
-        "anthy: could not route src-diclib/filemap.c's open() through the wide "
-        "entry point — the vendored source has changed shape around\n  ${_marker}")
-    endif()
-  endforeach()
-
-  set(_anthy_filemap_c "${CMAKE_CURRENT_BINARY_DIR}/src-win32/filemap.c")
-  file(WRITE "${_anthy_filemap_c}"
-    "/* Generated by libpathime's anthy port from ${ANTHY_SRC}/src-diclib/filemap.c:\n"
-    " * open() routed through _wopen so that UTF-8 paths work.\n"
-    " * Do not edit; edit the submodule and re-run cmake. */\n"
-    "${_filemap_c_patched}")
-endif()
-
-# --- internal static libraries (meson: static_library) ----------------------
-_anthy_lib(anthy_diclib internal src-diclib
-  diclib.c ${_anthy_file_dic_c} ${_anthy_filemap_c} xstr.c xchar.c ${_anthy_alloc_c}
+# --- the libraries ----------------------------------------------------------
+# Source lists per directory, copied verbatim from the meson.build files.
+_anthy_srcs(_src_diclib src-diclib
+  diclib.c file_dic.c filemap.c xstr.c xchar.c alloc.c
   ${_anthy_conf_c} logger.c ruleparser.c)
-
-_anthy_lib(anthy_ordering internal src-ordering
+_anthy_srcs(_src_ordering src-ordering
   candswap.c candsort.c commit.c relation.c infosort.c candhistory.c)
-
-_anthy_lib(anthy_split internal src-splitter
+_anthy_srcs(_src_split src-splitter
   wordlist.c metaword.c depgraph.c splitter.c evalborder.c compose.c lattice.c segclass.c)
-target_link_libraries(anthy_split PUBLIC anthy_diclib)
-find_library(ANTHY_LIBM m)   # optional, like meson's cc.find_library('m', required:false)
-if(ANTHY_LIBM)
-  target_link_libraries(anthy_split PUBLIC ${ANTHY_LIBM})
-endif()
-
-# --- installed shared libraries ---------------------------------------------
-_anthy_lib(anthydic-unicode public src-worddic
+_anthy_srcs(_src_worddic src-worddic
   word_dic.c dic_util.c wtype.c texttrie.c textdict.c record.c word_lookup.c
   use_dic.c priv_dic.c mem_dic.c ext_ent.c matrix.c feature_set.c)
-target_link_libraries(anthydic-unicode PRIVATE anthy_diclib)
-set_target_properties(anthydic-unicode PROPERTIES VERSION 0.1.0 SOVERSION 0)
+_anthy_srcs(_src_main src-main main.c context.c)
+_anthy_srcs(_src_input src-util input.c rkconv.c rkhelper.c)
 
-_anthy_lib(anthy-unicode public src-main main.c context.c)
-target_link_libraries(anthy-unicode PRIVATE anthydic-unicode anthy_ordering anthy_split)
-set_target_properties(anthy-unicode PROPERTIES VERSION 0.1.0 SOVERSION 0)
+find_library(ANTHY_LIBM m)   # optional, like meson's cc.find_library('m', required:false)
 
-_anthy_lib(anthyinput-unicode public src-util input.c rkconv.c rkhelper.c)
-target_link_libraries(anthyinput-unicode PRIVATE anthy-unicode anthydic-unicode)
-set_target_properties(anthyinput-unicode PROPERTIES VERSION 0.0.0 SOVERSION 0)
+if(LIBPATHIME_ANTHY_SINGLE_LIBRARY)
+  add_library(anthy-unicode
+    ${_src_diclib} ${_src_ordering} ${_src_split}
+    ${_src_worddic} ${_src_main} ${_src_input})
+  _anthy_setup(anthy-unicode)
+  set_target_properties(anthy-unicode PROPERTIES VERSION 0.1.0 SOVERSION 0)
+  # anthy annotates nothing for export, so the DLL needs CMake to derive its
+  # .def from the objects. Set here rather than leaning on the project-wide
+  # CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS, which only applies when libpathime is the
+  # top-level project — this library must export whoever is building it.
+  set_target_properties(anthy-unicode PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+  if(ANTHY_LIBM)
+    target_link_libraries(anthy-unicode PUBLIC ${ANTHY_LIBM})
+  endif()
+
+  # Upstream's other five names, so every existing target_link_libraries() call
+  # in this tree keeps resolving. They carry no objects of their own.
+  foreach(_part anthy_diclib anthy_ordering anthy_split
+                anthydic-unicode anthyinput-unicode)
+    add_library(${_part} INTERFACE)
+    target_link_libraries(${_part} INTERFACE anthy-unicode)
+  endforeach()
+
+  set(_anthy_install_targets anthy-unicode)
+else()
+  # Internal static libraries (meson: static_library), absorbed into the
+  # installed shared ones below.
+  add_library(anthy_diclib   STATIC ${_src_diclib})
+  add_library(anthy_ordering STATIC ${_src_ordering})
+  add_library(anthy_split    STATIC ${_src_split})
+  foreach(_part anthy_diclib anthy_ordering anthy_split)
+    _anthy_setup(${_part})
+  endforeach()
+  target_link_libraries(anthy_split PUBLIC anthy_diclib)
+  if(ANTHY_LIBM)
+    target_link_libraries(anthy_split PUBLIC ${ANTHY_LIBM})
+  endif()
+
+  # Installed shared libraries.
+  add_library(anthydic-unicode ${_src_worddic})
+  _anthy_setup(anthydic-unicode)
+  target_link_libraries(anthydic-unicode PRIVATE anthy_diclib)
+  set_target_properties(anthydic-unicode PROPERTIES VERSION 0.1.0 SOVERSION 0)
+
+  add_library(anthy-unicode ${_src_main})
+  _anthy_setup(anthy-unicode)
+  target_link_libraries(anthy-unicode PRIVATE anthydic-unicode anthy_ordering anthy_split)
+  set_target_properties(anthy-unicode PROPERTIES VERSION 0.1.0 SOVERSION 0)
+
+  add_library(anthyinput-unicode ${_src_input})
+  _anthy_setup(anthyinput-unicode)
+  target_link_libraries(anthyinput-unicode PRIVATE anthy-unicode anthydic-unicode)
+  set_target_properties(anthyinput-unicode PROPERTIES VERSION 0.0.0 SOVERSION 0)
+
+  set(_anthy_install_targets anthy-unicode anthydic-unicode anthyinput-unicode)
+endif()
 
 add_library(libpathime::anthy ALIAS anthy-unicode)
 
@@ -591,12 +422,13 @@ if(LIBPATHIME_BUILD_TESTS)
   # src-splitter and src-worddic by relative path, so it must be compiled from
   # its original location in the submodule. Nothing but the test uses it, hence
   # the gate.
-  _anthy_lib(anthy_convdb internal src-util convdb.c)
+  add_library(anthy_convdb STATIC "${ANTHY_SRC}/src-util/convdb.c")
+  _anthy_setup(anthy_convdb)
   target_link_libraries(anthy_convdb PUBLIC anthy-unicode anthydic-unicode)
 endif()
 
 # --- install ----------------------------------------------------------------
-install(TARGETS anthy-unicode anthydic-unicode anthyinput-unicode
+install(TARGETS ${_anthy_install_targets}
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})

@@ -48,10 +48,10 @@ because the format is an interoperability contract and a table this repository
 invented would prove much less about it.
 
 **Nothing here may link a backend library.** The public header is the whole
-interface these tests are entitled to — and it is also the only linkage that
-works, since anthy is static on Windows and a test that linked it would get a
-second, independent copy of anthy's process-global state. See
-`docs/anthy-mapping.md`, "Why the anthy family is built static on Windows".
+interface these tests are entitled to; reaching past it would cost them the
+one thing they exist to show, which is that the header is complete and that
+everything a client touches is exported. `tests/anthy/` and `tests/pyzy/` are
+where a backend gets driven directly.
 
 ### `tests/core/` — `core.<name>`
 
