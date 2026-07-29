@@ -475,19 +475,11 @@ only described:
   path the suites do not walk, which is most of the demo.
 - **The table engine has only been exercised on Linux** beyond the suites,
   which do pass on Windows under both presets.
-- **`api.lifecycle` has failed intermittently, twice, and is not reproducible on
-  demand.** Both failures were the first `ctest` run against a freshly built
-  tree; it passed in isolation immediately afterwards and on every re-run, and a
-  deliberate attempt to reproduce it — fresh build directory, the suite run once
-  — did not. Seen twice in roughly ten full runs, on Linux, before and after the
-  coverage work, so it is neither new nor caused by the instrumentation.
-
-  The test creates a relative directory, initializes against it, shuts down and
-  removes it (`tests/api/lifecycle_test.c:204-212`), which makes leftover state
-  from a previous run the obvious suspect — but that reading predicts a failure
-  on the *second* run, not the first, so it does not fit. Left recorded rather
-  than chased: an intermittent failure nobody has written down is one that gets
-  rediscovered.
+- **The uninitialized-locals run has only been done on Linux.**
+  `docs/testing.md`, "Running with uninitialized locals made hostile", has the
+  configuration. MSVC's `/RTC1` fills uninitialized locals in debug builds but
+  is not equivalent — it does not apply to optimized builds and its pattern
+  differs — so a Windows-only instance of that class would not have been caught.
 
 ## Deferred, deliberately
 

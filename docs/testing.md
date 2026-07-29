@@ -56,6 +56,37 @@ it creates nor the library. It is vendored code testing vendored code, left as
 upstream wrote it. Everything else passes with leak detection on, and nothing
 reports a memory error or undefined behaviour.
 
+## Running with uninitialized locals made hostile
+
+Neither sanitizer above catches a *read of an uninitialized local* — that is
+MemorySanitizer's job, and MSan is unusable here because it reports false
+positives unless every library in the process is instrumented too, glibc
+included. The cheap substitute catches the same class:
+
+```bash
+cmake -S . -B build/uninit -G Ninja -DLIBPATHIME_BUILD_TESTS=ON \
+      -DCMAKE_C_FLAGS="-ftrivial-auto-var-init=pattern -g" \
+      -DCMAKE_CXX_FLAGS="-ftrivial-auto-var-init=pattern -g"
+cmake --build build/uninit
+ctest --test-dir build/uninit --output-on-failure
+```
+
+Every uninitialized local is filled with a repeating pattern instead of whatever
+the stack happened to hold, so a read of one stops being luck and becomes a
+consistent wrong answer — and an uninitialized *pointer* becomes a wild address
+that faults on the spot. The whole suite passes under it, and it is worth
+re-running after touching anything that fills a struct on the caller's behalf.
+
+**The case it exists for is `pathime_init_params_t`.** `struct_size == sizeof` is
+the caller's promise that every member of that layout is filled in, so
+`pathime_init()` reads all of them, and `resource_dir` is *dereferenced* to
+reject an empty one (`src/init.cc`). A caller that sets `struct_size` and
+`data_dir` and leaves the third member alone is passing a wild pointer whenever
+the stack beneath it is dirty — which depends on optimization level, on the
+environment block, and on what ran before, so it presents as an intermittent
+failure rather than a reliable one. Every caller of `pathime_init()` in this tree
+therefore zeroes the struct first, tests and demo alike.
+
 ## Measuring what the suites reach
 
 `LIBPATHIME_TEST_COVERAGE=ON` instruments the build; `pathime-test-coverage`

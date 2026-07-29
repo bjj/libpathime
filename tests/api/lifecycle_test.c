@@ -39,6 +39,7 @@
 
 #include <errno.h>
 #include <stddef.h>
+#include <string.h>
 
 #if defined(_WIN32)
 #  include <direct.h>
@@ -128,6 +129,7 @@ static void test_init_shutdown_pairing(void)
     PT_CHECK_STATUS(pathime_init(NULL), PATHIME_OK);
     {
         pathime_init_params_t bad;
+        memset(&bad, 0, sizeof bad);
         bad.struct_size = 0;
         bad.data_dir = NULL;
         PT_CHECK_STATUS(pathime_init(&bad), PATHIME_ERROR_INVALID_ARGUMENT);
@@ -161,6 +163,18 @@ static void test_shutdown_unpaired(void)
 static void test_init_params(void)
 {
     pathime_init_params_t params;
+
+    /*
+     * Zeroed first, and that is not decoration. `struct_size == sizeof` is the
+     * caller telling the library that every member of this layout is filled in,
+     * so the library reads all of them — including resource_dir, which it
+     * dereferences to reject an empty one (src/init.cc). Setting only the two
+     * members a case is about would leave that one holding whatever was on the
+     * stack: NULL on a lucky run, a wild pointer on an unlucky one. Every other
+     * caller of pathime_init() in this tree zeroes the struct for the same
+     * reason.
+     */
+    memset(&params, 0, sizeof params);
 
     /* struct_size set correctly with every other member at its default. NULL
      * data_dir is how "use the platform default" is spelled. */
@@ -215,6 +229,8 @@ static void test_init_params(void)
 static void test_failed_init_is_retryable(void)
 {
     pathime_init_params_t params;
+
+    memset(&params, 0, sizeof params);
 
     /*
      * "A call that failed leaves the library uninitialized, so it may simply be
