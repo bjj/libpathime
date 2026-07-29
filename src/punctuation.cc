@@ -201,4 +201,70 @@ std::string emit_text(char c, const WidthSettings &settings, PunctuationState *s
     return to_fullwidth(c);
 }
 
+namespace {
+
+/**
+ * Set @a next_is_open from the nearest of @a open / @a close in @a text, and
+ * report whether either was there at all.
+ *
+ * Searched from the end, and the *first* one found from that direction wins:
+ * the most recent mark is the one whose partner the next quote must be. Both
+ * are looked for in one pass rather than two so that "which came last" is
+ * answered without comparing two positions.
+ */
+bool last_quote_decides(std::string_view text, const char *open, const char *close,
+                        bool *next_is_open)
+{
+    const size_t open_at = text.rfind(open);
+    const size_t close_at = text.rfind(close);
+
+    if (open_at == std::string_view::npos && close_at == std::string_view::npos) {
+        return false;
+    }
+    /* An opening mark most recently means the next one closes it, and the
+     * other way round. npos compares below every real position, which is the
+     * right answer when only one kind is present. */
+    const bool open_is_later =
+        close_at == std::string_view::npos ||
+        (open_at != std::string_view::npos && open_at > close_at);
+    *next_is_open = !open_is_later;
+    return true;
+}
+
+}  // namespace
+
+void observe_document(std::string_view before_cursor, PunctuationState *state)
+{
+    if (before_cursor.empty()) {
+        /* Nothing visible: every tracked value stands. This is the no-snapshot
+         * case and the caret-at-the-start case, which are the same answer. */
+        return;
+    }
+
+    /*
+     * The digit look-behind, which needs exactly one scalar. Walking back over
+     * continuation bytes is what makes this correct for a document ending in a
+     * multi-byte character: 好 must not be mistaken for a digit because its
+     * last byte happens to fall in the ASCII digit range — it cannot, since
+     * continuation bytes are all >= 0x80, but the walk is what makes that a
+     * property of the code rather than of the encoding table.
+     */
+    size_t last = before_cursor.size() - 1;
+    while (last > 0 &&
+           (static_cast<unsigned char>(before_cursor[last]) & 0xC0u) == 0x80u) {
+        last--;
+    }
+    const bool one_byte = last == before_cursor.size() - 1;
+    const char c = before_cursor[last];
+    state->prev_was_digit = one_byte && c >= '0' && c <= '9';
+
+    /*
+     * The two alternations, each answered only if its own kind of mark is
+     * visible. They are independent: a document may show a “ and no ‘, and
+     * learning about one says nothing about the other.
+     */
+    last_quote_decides(before_cursor, "‘", "’", &state->quote_open);
+    last_quote_decides(before_cursor, "“", "”", &state->double_quote_open);
+}
+
 }  // namespace pathime

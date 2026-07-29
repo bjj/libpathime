@@ -57,7 +57,7 @@ are set per-context via `setProperty()` using the `PropertyName` enum and
 | **Auxiliary text** | Not a concept in this model — `pathime_composition_t` has no such field. pyzy's `auxiliaryText()` is read all the same, but as the *preedit*; see below. |
 | **Candidate list** | Accessed via `hasCandidate(size_t index)` and `getCandidate(size_t index, Candidate& output)`. `Candidate` is a struct with `std::string text` and `CandidateType type` (`NORMAL_PHRASE`, `USER_PHRASE`, `SPECIAL_PHRASE`). The list is unbounded and lazily populated. **`hasCandidate(i)` is not a const query** — it loops calling `PhraseEditor::fillCandidates()` until index `i` is reachable, materializing candidates as a side effect (`PhoneticContext.cc:231-250`). The flat index space is `special_phrases` first, then phrase-editor candidates: indices `[0, m_special_phrases.size())` are special phrases; indices `>= m_special_phrases.size()` map into the phrase editor via `i -= m_special_phrases.size()` (`PhoneticContext.cc:166-277`). `candidatesChanged(InputContext*)` is the notification callback. `getPreparedCandidatesSize()` returns how many entries have been materialized. |
 | **Select candidate** | `selectCandidate(size_t index)` — 0-origin absolute index into the current candidate list. Returns `bool`. If selecting the candidate exhausts the remaining input, pyzy fires `commitText` automatically. Otherwise it updates the three preedit segments and fires `preeditTextChanged`. |
-| **Surrounding text** | Not present. pyzy has no API to accept or use surrounding text from the client. |
+| **Surrounding text** | Not present. pyzy has no API to accept or use surrounding text from the client. The adapter uses the client's snapshot for the punctuation look-behinds, which are ours rather than pyzy's. |
 | **Commit text** | `Observer::commitText(InputContext*, const std::string&)` — fires when pyzy decides to emit finalized text. The caller can also force a commit by calling `InputContext::commit(CommitType)` directly (`TYPE_RAW`, `TYPE_PHONETIC`, or `TYPE_CONVERTED`). |
 | **Delete surrounding text** | Not present. pyzy never issues a delete-surrounding-text request. |
 | **Activation** | Not present. pyzy has no enable / disable callbacks, and no focus-in / focus-out ones either — part of why CONCEPTS.md has neither concept. |
@@ -466,8 +466,14 @@ context text, no API to request deletion of client text, and no
 reconversion facility.
 
 **Bridge required:** Any feature depending on surrounding text must be
-implemented entirely outside pyzy. The integrator must accept that pyzy
-cannot use surrounding context.
+implemented entirely outside pyzy, and one is. The punctuation layer
+(`src/punctuation.*`) is ours rather than pyzy's, and both of its rules are
+about the character before the insertion position — a full stop after a digit
+is a decimal point, a quotation mark alternates with the one before it. The
+adapter corrects them from the client's snapshot before each emitted key
+(`observe_document()`), falling back to what it emitted itself when no snapshot
+covers the position. pyzy is not involved either way; it never sees the
+characters this layer handles.
 
 ### 6. Focus and activation lifecycle: not present
 

@@ -78,11 +78,18 @@ it while the options panel has the keyboard.
   Press either with nothing composing and the log shows the call and no
   callbacks at all, which is why a client can call them without checking first.
 - **Type `1`, then `.` — then do it again after `Ctrl+O`.** Under a Chinese
-  engine the first `.` stays an ASCII period, because the engine can see it
-  follows a digit and `1.5` is a number. `Ctrl+O` is what a client does when
-  the user leaves the field — commit, then reset — and the reset is the half
-  that makes the engine forget what precedes the caret, so the next `.` becomes
-  。instead. That is the difference between the two calls, made visible.
+  engine the `.` stays an ASCII period, because the engine can see it follows a
+  digit and `1.5` is a number. `Ctrl+O` is what a client does when the user
+  leaves the field — commit, then reset — and the reset is the half that drops
+  what the engine remembered about the text before the caret.
+  
+  The period stays a period anyway, and that is the more interesting half: this
+  program supplies surrounding text after every dispatch, so the engine reads
+  the `1` out of the document rather than out of its own memory. Quotes behave
+  the same way — `"` alternates by looking at the last one in the document, not
+  by counting its own. Comment out the `refresh_surrounding_text()` call at the end of
+  `App::input_key()` and both rules fall back to the engine's memory, which is
+  where the difference shows.
 - **Set `hangul-preedit` to `none` in the options panel, then type `gks`.**
   This is the one mode where the document *is* the composition: each jamo is
   committed, then deleted and recommitted one component fuller. One

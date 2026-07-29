@@ -626,6 +626,41 @@ bool ContextSurroundingText::can_delete_before(size_t count) const
     return range_within_snapshot(ctx_, -static_cast<ptrdiff_t>(count), count);
 }
 
+std::string_view ContextSurroundingText::before_cursor() const
+{
+    /*
+     * Empty when there is no snapshot, and equally empty when there is one
+     * whose cursor sits at its start. Both mean the same thing to a caller —
+     * nothing before the insertion position is visible — so they are not
+     * distinguished, and the seam documents the reading: an adapter that finds
+     * nothing here has learned nothing.
+     *
+     * delete_surrounding_text is not consulted, unlike can_delete_before().
+     * That question is whether a request would be *dispatched*, which depends
+     * on the client implementing the callback; this one is only what the
+     * client has shown us, and a client may supply surrounding text without
+     * offering to delete any of it.
+     */
+    if (!ctx_->has_surrounding) {
+        return std::string_view();
+    }
+
+    const size_t bytes = utf8_byte_offset(ctx_->surrounding_text.c_str(),
+                                          ctx_->surrounding_text.size(),
+                                          ctx_->surrounding_cursor);
+    /*
+     * A cursor at the end of the snapshot answers the full length rather than
+     * kUtf8NoPosition, which is the ordinary case — a caret after the last
+     * character of the supplied fragment. Only a cursor *beyond* the end has
+     * no offset, and pathime_context_set_surrounding_text() already refuses
+     * those, so the guard is for a library bug rather than a client one.
+     */
+    if (bytes == kUtf8NoPosition) {
+        return std::string_view();
+    }
+    return std::string_view(ctx_->surrounding_text.c_str(), bytes);
+}
+
 void refresh_composition(pathime_context_t *ctx, bool force)
 {
     /*

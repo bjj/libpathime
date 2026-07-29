@@ -1624,3 +1624,71 @@ context, and the one whose absence nobody had complained about — the demo and
 every test reached the same effect by synthesizing Return. That is exactly why
 it is worth having: synthesizing a key means guessing which key the engine
 binds to commit, which is engine knowledge a client is not supposed to need.
+
+---
+
+## 9. The punctuation look-behinds read the document (2026-07-29)
+
+Follow-on from §8. Making reset a hard end raised the obvious question: what
+exactly is lost, and can a client give it back?
+
+**What is lost is three bools.** `PunctuationState` (`src/punctuation.h`) holds
+`quote_open`, `double_quote_open` and `prev_was_digit`, and that is the entire
+"context" any engine here carries about preceding text. Reset clears them;
+commit updates them.
+
+**Both are recoverable from surrounding text, and the derived answer is the
+better one.** The rules are claims about the *document* — a full stop after a
+digit is a decimal point, a quotation mark alternates with the one before it —
+while the tracked state answers a different question, "what did this engine
+emit". Those diverge whenever the document moves without the engine: a caret
+moved within the field, a paste, an undo, text present before the user ever
+typed, or one composition ending before another begins. The snapshot is the
+document, so where it can answer, it is simply right.
+
+- The digit look-behind reads one scalar and is O(1).
+- Each quote alternation scans back for the nearest curly mark of its own kind.
+  Parity counting was rejected: the snapshot may be a fragment whose start is
+  not a document boundary, so counting from its start is unsound. The most
+  recent mark encodes the state, because the engine's own output alternates.
+
+**The asymmetry is the whole design, and it runs one way.** Finding a thing in
+the snapshot is proof; not finding it is not proof of absence. So
+`observe_document()` never *clears* a tracked value on the strength of not
+finding one — a quotation mark ten words back may simply lie outside the
+fragment. `test_width_and_punctuation()` pins this down with a case that would
+pass under the naive reading: after the engine emits an opening quote, a
+snapshot containing no quote at all must leave the next one closing.
+
+**Ordering: oldest information first.** The snapshot describes the document as
+the client last reported it, so it predates anything the current dispatch does
+— but it is fresher than what the adapter tracked. So `observe_document()` runs
+first and any `note_commit()` from this dispatch lands after it. Reversing them
+reintroduces the bug in a new place: a composition ending in a Chinese
+character would be overruled by a snapshot still ending in a digit, and the
+following full stop would come out as a decimal point. Both adapters carry that
+reasoning at the call site.
+
+**Costs, stated.**
+
+- `SurroundingTextView` grew a second method. Its comment used to say "nothing
+  needs one... if a real consumer appears this is the place to widen", and one
+  appeared, so the widening was anticipated rather than a reversal.
+- There are now two sources of truth for the same three bools, with a
+  precedence rule between them. That is a real cost and the kind of thing that
+  rots; it is mitigated only by the rule being one sentence — believe the
+  snapshot for what it shows, keep the tracked value for what it does not.
+- Neither Chinese engine declares `PATHIME_REQUIRES_SURROUNDING_TEXT` for this.
+  Requiring a snapshot for a punctuation rule would be a large escalation for a
+  small win, and the fallback is correct until the document moves. This is the
+  first thing in the library that uses surrounding text *opportunistically*,
+  and `docs/CONCEPTS.md` now names that category.
+
+**What it changed in the contract.** §8 had reset leaving the engine knowing
+nothing about the caret. That now reads "nothing *of its own*" — a client
+supplying surrounding text gets it back, and gets a better answer than the
+memory would have been. The header and CONCEPTS.md also gained caret-movement
+guidance, which had been missing entirely: the model has no caret notification,
+so moving one is told to the engine by supplying surrounding text, and a
+composition in flight needs the same commit-or-reset decision that leaving the
+field does. To the model those are the same event.

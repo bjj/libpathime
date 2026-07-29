@@ -1064,7 +1064,33 @@ PATHIME_API pathime_status_t pathime_context_select_candidate(pathime_context_t 
  * the engine's own commit_text, but the update must happen outside the callback,
  * typically right after pathime_context_process_key() and any processing for
  * unhandled keypresses.
- * 
+ *
+ * The snapshot is also what an engine reads for the rules that depend on the
+ * character before the insertion position — the Chinese engines decide a full
+ * stop after a digit is a decimal point, and alternate a quotation mark with
+ * the one before it. Supplying surrounding text makes those correct across the
+ * things the engine cannot see: a caret moved, a paste, an undo, or a
+ * composition that ended. Without it the engine falls back to remembering what
+ * it emitted itself, which is right until one of those happens.
+ *
+ * That fallback is why the snapshot is read as evidence and never as the whole
+ * document. What it shows is believed; what it omits decides nothing, since
+ * @a text may be a fragment and the quotation mark that matters may lie before
+ * its start.
+ *
+ * MOVING THE CARET. The library is told about a caret only through this call,
+ * and a client that moves the insertion point without refreshing the snapshot
+ * leaves the engine describing the wrong place — a deletion request framed
+ * against text that has moved, and look-behind rules reading a character that
+ * is no longer there. What to do depends on where the caret went:
+ *
+ *   - Away from a composition in progress: decide what the composition was
+ *     worth. pathime_context_commit() keeps it, pathime_context_reset()
+ *     discards it. Doing neither leaves a preedit anchored to a position the
+ *     user has left.
+ *   - Within the same field, with nothing composing: refresh the snapshot.
+ *     Nothing else is needed, and the engine picks the new context up from it.
+ *
  * See also PATHIME_REQUIRES_SURROUNDING_TEXT.
  */
 PATHIME_API pathime_status_t pathime_context_set_surrounding_text(pathime_context_t *ctx,
@@ -1130,11 +1156,18 @@ PATHIME_API pathime_status_t pathime_context_commit(pathime_context_t *ctx);
  * no case in which calling this puts characters in the client's document. A
  * client that wants the text calls pathime_context_commit() first.
  *
- * The engine also stops knowing what precedes the insertion position, which is
- * the observable difference from a commit: a reset means the client is
- * starting somewhere else, so context-sensitive behaviour that depends on the
- * preceding text — quote alternation, the digit look-behind that keeps "1.5"
- * intact — begins again from nothing.
+ * The engine also stops remembering what precedes the insertion position,
+ * which is the observable difference from a commit: a reset means the client
+ * is starting somewhere else, so context-sensitive behaviour that depends on
+ * the preceding text — quote alternation, the digit look-behind that keeps
+ * "1.5" intact — has nothing of its own left to go on.
+ *
+ * A client that supplies surrounding text gets that back, and gets it right
+ * more often than the engine's own memory would have: those rules are claims
+ * about the document, and the snapshot is the document. So a reset followed by
+ * a refreshed snapshot leaves the engine correctly informed about a *new*
+ * position, which is exactly what leaving one field for another means. See
+ * pathime_context_set_surrounding_text().
  *
  * Produces a composition_changed callback unless the composition was already
  * empty. The callback is not a courtesy: it is how a client learns its view is

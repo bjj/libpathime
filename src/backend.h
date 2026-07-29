@@ -66,6 +66,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <string_view>
 
 #include <pathime/pathime.h>
 
@@ -146,10 +147,13 @@ public:
  * dispatch that drops the request, which runs after process_key() has already
  * decided what to commit.
  *
- * Why not a full document view: nothing needs one. Reading preceding context
- * is a Hanja feature and Hanja is out of scope, so exposing the text would be
- * a concept carried for no consumer. If a real one appears this is the place
- * to widen.
+ * The second question arrived with the punctuation look-behinds, which is the
+ * consumer this comment used to say did not exist. They are rules about what
+ * the *document* holds — a full stop after a digit is a decimal point, a
+ * quotation mark alternates with the one before it — and an adapter that
+ * answers them from its own record of what it committed is answering a
+ * different question, one that goes wrong the moment the user moves the caret,
+ * pastes, or ends a composition.
  */
 class SurroundingTextView {
 public:
@@ -165,6 +169,23 @@ public:
      * with nothing to revise is never blocked.
      */
     virtual bool can_delete_before(size_t count) const = 0;
+
+    /**
+     * The snapshot text preceding the cursor, empty when the client has
+     * supplied none or the cursor sits at its start.
+     *
+     * Borrowed for the duration of the call, like everything else at this
+     * seam. Valid UTF-8, because pathime_context_set_surrounding_text()
+     * validated it before storing it.
+     *
+     * Read it as evidence, never as the whole document. The snapshot may be a
+     * fragment, and its start is not a document boundary, so what this shows
+     * is true and what it omits is unknown — an adapter that finds nothing
+     * here has learned nothing, not learned that there is nothing. That
+     * asymmetry is the whole rule for using it: believe what you can see, and
+     * fall back to what you were tracking for what you cannot.
+     */
+    virtual std::string_view before_cursor() const = 0;
 };
 
 /**

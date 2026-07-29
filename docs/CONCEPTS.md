@@ -340,7 +340,22 @@ Surrounding text may be used for:
 
 This model does not expose a client text selection. It therefore has no selection anchor. The insertion position is included only to divide the supplied text into text before and after the point of input; it is not an IME display-caret concept.
 
+Because the supplied string may be a fragment, an engine reads it as evidence and never as the whole document. What the string shows is true; what it omits is unknown, and settles nothing. An engine that needs a preceding character and cannot find one in the supplied text has learned nothing, not learned that there is none.
+
 Availability of surrounding text is negotiated. A client that cannot or should not expose surrounding text simply does not supply it. An engine that cannot operate without it declares that as a requirement, and the pairing is rejected when the input context is created rather than failing silently later.
+
+An engine that uses surrounding text only to improve a decision it can otherwise make for itself does not declare a requirement. Punctuation decisions are the case in point: an engine can remember what it emitted, which is correct until the document moves without it, and the supplied text is what corrects that.
+
+### Moving the insertion position
+
+The client owns the insertion position, and the model has no separate notification for moving it. A client that moves the caret tells the engine by supplying surrounding text for the new position.
+
+What else is required depends on whether a composition is in progress:
+
+* With a composition in progress, the client decides what it was worth before moving: commit keeps it, reset discards it. Leaving it alone anchors a composition to a position the user has left.
+* With nothing in progress, supplying surrounding text is the whole of it.
+
+This is the same pair of choices as leaving the field entirely, because to the model they are the same event: the client is continuing somewhere the engine has not been told about.
 
 **IBus and Fcitx note:** Both IBus and Fcitx surrounding-text representations include a cursor position and a separate anchor position for representing selections. This model retains only one insertion position and ignores selection. ([Intelligent Input Bus][2])
 
@@ -432,7 +447,9 @@ Reset is a hard end. Everything the composition held is discarded, and after it 
 
 Reset never commits, and no engine is offered a way to make it commit. There is no case in which requesting a reset places text in the client's document. A client that wants the text requests a commit first.
 
-The engine also stops knowing what precedes the insertion position, which is the observable difference between the two. A reset means the client is starting somewhere else, so context-sensitive behavior that depends on preceding text begins again from nothing.
+The engine also stops remembering what precedes the insertion position, which is the observable difference between the two. A reset means the client is starting somewhere else, so context-sensitive behavior that depends on preceding text has nothing of its own left to go on.
+
+A client that supplies surrounding text restores that, and restores it more accurately than the engine's own memory: those rules are claims about the document, and the supplied text is the document. A reset followed by surrounding text for the new position leaves the engine correctly informed about where the client has gone.
 
 Reset does not destroy the input context. Negotiated information and other persistent per-context settings remain in effect.
 
@@ -610,6 +627,7 @@ The canonical terms used by this documentation are:
 | **Commit text**             | Insert finalized text into the client.                              |
 | **Delete surrounding text** | Delete client text using an offset and character count.             |
 | **Commit**                  | End the composition now, committing what it holds.                  |
+| **Moving the insertion position** | Client-owned; told to the engine by supplying surrounding text.|
 | **Reset**                   | Discard transient composition state without destroying the context. |
 | **Negotiation**             | Exchange capabilities, field information, options, and policies.    |
 

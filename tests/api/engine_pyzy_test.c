@@ -1127,6 +1127,88 @@ static void test_width_and_punctuation(pathime_engine_t *pinyin,
     check_str("a period after a committed character", log.commits, NI PERIOD_FW);
     pathime_context_destroy(ctx);
 
+    /* --- What the client's snapshot can put back -------------------------- */
+
+    /*
+     * Both rules above are claims about the document, and the engine's own
+     * record of them is only what the engine emitted. A client that supplies
+     * surrounding text is showing the engine the real answer, so the snapshot
+     * wins wherever it can see one — which is what makes the state survive a
+     * reset, a caret move, or a paste, none of which the engine can observe.
+     */
+    ctx = open_context(pinyin, &client, &log);
+    {
+        /* An opening quote sits behind the caret, so the next one closes it —
+         * even though this context has emitted nothing at all. */
+        const char *doc = QUOTE_OPEN "abc";
+        pathime_str_t text;
+        text.bytes = doc;
+        text.len = strlen(doc);
+        PT_CHECK_STATUS(pathime_context_set_surrounding_text(ctx, text, 4), PATHIME_OK);
+        log_reset(&log);
+        PT_CHECK(press(ctx, '"'));
+        check_str("the snapshot decides the quote", log.commits, QUOTE_CLOSE);
+    }
+    {
+        /*
+         * And it survives a reset, which is the whole point: the reset clears
+         * what the engine tracked, and the snapshot answers anyway.
+         *
+         * The document has to end on an *opening* quote for this to prove
+         * anything. A reset leaves the tracked state saying "the next one
+         * opens", so a document whose next quote also opens would pass whether
+         * or not the snapshot was consulted at all.
+         */
+        const char *doc = QUOTE_OPEN "abc" QUOTE_CLOSE "def" QUOTE_OPEN "gh";
+        pathime_str_t text;
+        text.bytes = doc;
+        text.len = strlen(doc);
+        PT_CHECK_STATUS(pathime_context_set_surrounding_text(ctx, text, 11), PATHIME_OK);
+        PT_CHECK_STATUS(pathime_context_reset(ctx), PATHIME_OK);
+        log_reset(&log);
+        PT_CHECK(press(ctx, '"'));
+        check_str("the snapshot survives a reset", log.commits, QUOTE_CLOSE);
+    }
+    {
+        /* The digit look-behind likewise, and this is the case tracking cannot
+         * reach at all: the 1 was never committed through this engine. */
+        const char *doc = "1";
+        pathime_str_t text;
+        text.bytes = doc;
+        text.len = strlen(doc);
+        PT_CHECK_STATUS(pathime_context_set_surrounding_text(ctx, text, 1), PATHIME_OK);
+        PT_CHECK_STATUS(pathime_context_reset(ctx), PATHIME_OK);
+        log_reset(&log);
+        PT_CHECK(press(ctx, '.'));
+        check_str("the snapshot restores the decimal point", log.commits, ".");
+    }
+    pathime_context_destroy(ctx);
+
+    /*
+     * And the asymmetry, which is the part that would be easy to get wrong:
+     * a snapshot showing no quote has *not* shown that there is none. The
+     * snapshot may be a fragment whose start is not a document boundary, so
+     * finding nothing settles nothing and what the engine tracked stands.
+     *
+     * Here the engine has just emitted an opening quote, so the next is a
+     * closing one. Supplying a fragment with no quote in it must not reset
+     * that to opening.
+     */
+    ctx = open_context(pinyin, &client, &log);
+    PT_CHECK(press(ctx, '"'));
+    check_str("opened", log.commits, QUOTE_OPEN);
+    {
+        const char *doc = "abc";
+        pathime_str_t text;
+        text.bytes = doc;
+        text.len = strlen(doc);
+        PT_CHECK_STATUS(pathime_context_set_surrounding_text(ctx, text, 3), PATHIME_OK);
+        log_reset(&log);
+        PT_CHECK(press(ctx, '"'));
+        check_str("a fragment with no quote settles nothing", log.commits, QUOTE_CLOSE);
+    }
+    pathime_context_destroy(ctx);
+
     /* --- Mid-composition: ended first, never lost ------------------------ */
 
     ctx = open_context(pinyin, &client, &log);

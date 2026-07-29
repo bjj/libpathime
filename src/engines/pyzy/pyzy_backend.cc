@@ -700,6 +700,25 @@ bool PyzyContext::process_key(const KeyEvent &key,
      */
     std::string emitted;
     if (!handled && emittable(key.keysym)) {
+        /*
+         * Oldest information first, newest last, which is what makes this
+         * safe to combine at all.
+         *
+         * The snapshot describes the document as the client last reported it,
+         * so it predates anything this dispatch is about to do — but it is
+         * still fresher than what this adapter tracked, which describes only
+         * what the adapter itself emitted and knows nothing of carets moved or
+         * text pasted since. So it is applied first.
+         *
+         * finish_composition() then commits any composition in flight and
+         * records it through note_commit(), and that must land *after* the
+         * snapshot, because it is the one thing here the snapshot cannot
+         * possibly know about. Reversing these two silently reintroduces the
+         * bug: a composition ending in a Chinese character would be overruled
+         * by a snapshot that still ends in a digit, and the full stop that
+         * follows would come out as a decimal point.
+         */
+        observe_document(doc.before_cursor(), &punctuation_);
         finish_composition(*model);
         emitted = emit_text(static_cast<char>(key.keysym), width_settings(options),
                             &punctuation_);

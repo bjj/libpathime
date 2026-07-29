@@ -164,6 +164,7 @@ class ContextSurroundingText : public SurroundingTextView {
 public:
     explicit ContextSurroundingText(const pathime_context_t *ctx) : ctx_(ctx) {}
     bool can_delete_before(size_t count) const override;
+    std::string_view before_cursor() const override;
 
 private:
     const pathime_context_t *ctx_;

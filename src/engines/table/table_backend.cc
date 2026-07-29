@@ -740,7 +740,11 @@ bool TableContext::take_backspace(const OptionReader &options)
 bool TableContext::process_key(const KeyEvent &key, const OptionReader &options,
                                const SurroundingTextView &doc, Composition *model, Output *out)
 {
-    (void)doc;  /* this engine composes in the preedit; the document is not involved */
+    /*
+     * @a doc is consulted only by the punctuation layer below, and only for
+     * the look-behind rules: this engine composes entirely in the preedit,
+     * so the document is never part of a composition here.
+     */
 
     if (!sync_table(options)) {
         return false;  /* no table: every key is the client's (header, TABLE_FILE) */
@@ -843,6 +847,7 @@ bool TableContext::process_key(const KeyEvent &key, const OptionReader &options,
          * Space as the convert key — so the only question left is the
          * negotiated width.
          */
+        observe_document(doc.before_cursor(), &punctuation_);
         return emit_converted(scalar, options, model, out);
     }
 
@@ -879,6 +884,14 @@ bool TableContext::process_key(const KeyEvent &key, const OptionReader &options,
         } else {
             ending = typed_run();
         }
+        /*
+         * Oldest information first: the client's snapshot describes the
+         * document before this dispatch, which is older than the commit below
+         * but newer than anything this adapter tracked on its own. The
+         * commit_phrase() that follows records what only this dispatch knows,
+         * and must therefore land after it.
+         */
+        observe_document(doc.before_cursor(), &punctuation_);
         commit_phrase(ending, ending_keys, options, out);
         /*
          * The character itself follows, at the negotiated width. The commit
@@ -894,7 +907,12 @@ bool TableContext::process_key(const KeyEvent &key, const OptionReader &options,
         return true;
     }
 
-    /* Nothing composing and not input: converted if the width says so. */
+    /*
+     * Nothing composing and not input: converted if the width says so. The
+     * snapshot corrects the look-behinds first, and nothing in this branch
+     * commits ahead of the emit, so there is no fresher record to preserve.
+     */
+    observe_document(doc.before_cursor(), &punctuation_);
     return emit_converted(scalar, options, model, out);
 }
 

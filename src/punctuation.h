@@ -80,6 +80,7 @@
 
 #include <cstdint>
 #include <string>
+#include <string_view>
 
 #include <pathime/pathime.h>
 
@@ -163,6 +164,41 @@ bool emittable(uint32_t keysym);
  * pyzy's own commits count towards it too and only the caller sees those.
  */
 std::string emit_text(char c, const WidthSettings &settings, PunctuationState *state);
+
+/**
+ * Correct @a state against what the client's document actually shows.
+ *
+ * Both rules in this layer are about the text before the insertion position —
+ * a full stop after a digit is a decimal point, a quotation mark alternates
+ * with the one before it — but PunctuationState answers them from what the
+ * *engine* emitted, which is a different question. It diverges whenever the
+ * document moved without the engine: a caret moved to somewhere else in the
+ * field, a paste, an undo, a commit that ended one composition before another
+ * began, or text that was in the field before the user ever typed into it.
+ *
+ * So where the snapshot can answer, it wins; where it cannot, the tracked
+ * value stands. The asymmetry is the whole design and it runs one way only:
+ * @a before_cursor showing a thing is proof, and @a before_cursor not showing
+ * it is not proof of absence — the snapshot may be a fragment whose start is
+ * not a document boundary, so a quotation mark ten words back may simply be
+ * outside it. Nothing here is ever *cleared* on the strength of not finding
+ * it.
+ *
+ * Concretely:
+ *
+ *   - The digit look-behind reads one scalar, the one immediately before the
+ *     cursor. Either the snapshot shows it, in which case the answer is
+ *     certain both ways, or the snapshot is empty and nothing is touched.
+ *   - Each quote alternation scans back for the nearest curly quote of its own
+ *     kind. Finding one settles the next form, because the engine's output
+ *     alternates and so the most recent mark encodes the state. Finding none
+ *     settles nothing.
+ *
+ * Cheap enough to call per emitted key: the digit half is O(1) and the scans
+ * stop at the first mark they find, which for the case that matters — a quote
+ * the user typed a moment ago — is immediate.
+ */
+void observe_document(std::string_view before_cursor, PunctuationState *state);
 
 }  // namespace pathime
 

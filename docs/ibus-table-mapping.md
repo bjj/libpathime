@@ -46,7 +46,7 @@ answer is the implementation.
 | **Commit text** | A committed phrase, a literal key run committed verbatim, or an optionally full-width-converted character. | §11.4, `src/punctuation.h` |
 | **Commit (forced)** | End the run, committing the literal keys plus any staged segments — the same text Return commits, and therefore not character-for-character what a char-prompt preedit displayed. | `table_backend.cc`, `commit()` |
 | **Reset** | Discard the current key run and pre-committed segments; produce empty composition data. Does not commit. | `table_backend.cc`, `reset()` |
-| **Surrounding text / Delete surrounding text** | Unused. ibus-table performs no reconversion from client context. | §12 |
+| **Surrounding text / Delete surrounding text** | No deletion, and no reconversion from client context. The snapshot is read for the shared punctuation look-behinds only. | §12 |
 | **Forward key event** | Unused. ibus-table declines keys it does not use (unhandled) rather than forwarding. | §12 |
 | **Focus / Activation** | Not in the model. ibus-table's lifecycle hooks carry no intrinsic commit or reset. | §12 |
 | **Negotiation** | Engine options carried in the table's definition (Chinese variant mode, full-width modes, pinyin/suggestion modes) plus the client-policy fields the engine ignores. | §3.1, §11 |
@@ -412,9 +412,12 @@ lookup and can be omitted from a minimal engine.
 
 Relative to `CONCEPTS.md`, ibus-table exercises only part of the interface:
 
-- **Surrounding text / delete surrounding text** — unused. ibus-table never reads client context or
-  requests deletion; there is no reconversion-from-context. A libpathime table engine can report
-  surrounding text unsupported.
+- **Surrounding text / delete surrounding text** — ibus-table never reads client context or
+  requests deletion, and neither does this engine for anything to do with composition: it composes
+  entirely in the preedit. The one use is the shared punctuation layer's look-behinds, which are
+  `src/punctuation.*` rather than anything ibus-table specifies. Deletion stays unsupported, and the
+  engine declares no surrounding-text requirement — the snapshot improves a decision it can
+  otherwise make for itself.
 - **Forward key event** — unused. Keys the engine does not use are reported **unhandled**; ibus-table
   does not synthesize forwarded events.
 - **Focus / Activation** — not in the model, and nothing is lost by their absence: ibus-table's
