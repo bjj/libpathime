@@ -97,10 +97,11 @@ which is not obvious and was hiding a real gap.
 
 Two things about the numbers themselves:
 
-- **Branch coverage sits far below line coverage** — around 57% against 83%.
-  That gap is where the untested cases mostly are, so a file at 90% lines is not
-  the reassurance it looks like. Read `index.html`, which marks partially taken
-  branches, rather than the summary.
+- **Branch coverage sits well below line coverage**, by twenty-odd points. That
+  gap is where the untested cases mostly are, so a file that looks green by line
+  is not the reassurance it appears to be: a line counts as covered the moment
+  it runs once, whichever way its conditions went. Read `index.html`, which
+  marks partially taken branches, rather than the summary.
 - **A file's number depends on the build's shape, not only on the suites.**
   `src/module_path.cc` reports the lowest figure in the tree, and most of the
   shortfall is its `/proc/self/exe` fallback, which exists for static builds and
@@ -161,7 +162,8 @@ where a backend gets driven directly.
 
 Compiles the internal sources under test directly into each executable, because
 internal helpers carry no `PATHIME_API` and a shared build does not export them.
-C++17, covering `utf8.*`, `composition.*`, `keys.*`, the options machinery, and
+C++17, covering `utf8.*`, `composition.*`, `keys.*`, `engines/anthy/romaji.*`,
+backend.h's inherited defaults, the options machinery, and
 the table engine's data layer at seams the public API cannot reach.
 
 `core.keys` is the clearest case of that reach. `key_event_from_public()`'s two

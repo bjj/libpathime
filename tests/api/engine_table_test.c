@@ -420,6 +420,98 @@ static void test_backspace(pathime_engine_t *engine)
 }
 
 /*
+ * A character that extends the run past every match is kept rather than
+ * discarded or handed back to the client, and backspace takes it off again.
+ *
+ * That is the repair path for a typo in the middle of a code: the user has
+ * typed four characters, the fourth was wrong, and what they expect from
+ * backspace is the three good ones back — not an empty composition and not a
+ * stray latin letter in their document. The engine holds the bad tail
+ * separately from the matching run for exactly this reason.
+ */
+static void test_backspace_removes_an_invalid_tail(pathime_engine_t *engine)
+{
+    client_log_t log;
+    pathime_context_t *ctx = open_context(engine, &log, "cangjie5");
+
+    if (ctx == NULL) {
+        return;
+    }
+
+    /* `vnd` is 好, the one row cangjie5 reaches with those three keys. */
+    PT_CHECK(press(ctx, 'v'));
+    PT_CHECK(press(ctx, 'n'));
+    PT_CHECK(press(ctx, 'd'));
+    PT_CHECK_SIZE(log.last_candidates, 1);
+
+    /*
+     * `q` extends it to something no row carries. It is absorbed — the client
+     * must not receive it as a keystroke — and nothing is committed.
+     *
+     * The matching run is left standing behind it: the candidate for `vnd` is
+     * still there, because the bad character was held apart rather than folded
+     * into the run. That is what makes the backspace below a repair instead of
+     * a re-type, and it is the visible difference from AUTO_SELECT, which
+     * settles the match instead of holding it.
+     */
+    PT_CHECK(press(ctx, 'q'));
+    PT_CHECK(log.commit_count == 0);
+    PT_CHECK_SIZE(log.last_candidates, 1);
+
+    /* Backspace removes the bad character and the run matches once more. */
+    PT_CHECK(press(ctx, PATHIME_KEY_BACKSPACE));
+    PT_CHECK(log.commit_count == 0);
+    PT_CHECK_SIZE(log.last_candidates, 1);
+
+    /* And the composition is exactly where it was, so it can be finished. */
+    PT_CHECK_STATUS(pathime_context_select_candidate(ctx, 0), PATHIME_OK);
+    PT_CHECK(log.commit_count == 1);
+
+    pathime_context_destroy(ctx);
+}
+
+/*
+ * PATHIME_OPT_TABLE_AUTO_SELECT: when the run stops matching, settle what it
+ * matched a moment ago and start a new run from the character that broke it.
+ *
+ * The alternative — holding the character as an invalid tail, which is what the
+ * test above shows with the option off — is right for a typo and wrong for a
+ * user typing continuously, who meant the new character as the start of the
+ * next code. The option is which of those two readings the table wants.
+ */
+static void test_auto_select_restarts_the_run(pathime_engine_t *engine)
+{
+    client_log_t log;
+    pathime_context_t *ctx = open_context(engine, &log, "cangjie5");
+
+    if (ctx == NULL) {
+        return;
+    }
+
+    PT_CHECK_STATUS(
+        pathime_context_set_option_bool(ctx, PATHIME_OPT_TABLE_AUTO_SELECT, true),
+        PATHIME_OK);
+
+    PT_CHECK(press(ctx, 'v'));
+    PT_CHECK(press(ctx, 'n'));
+    PT_CHECK(press(ctx, 'd'));
+    PT_CHECK_SIZE(log.last_candidates, 1);
+
+    /*
+     * `a` matches nothing after `vnd`, so 好 settles and `a` becomes the whole
+     * of a fresh run — which does match, since `a` is 日's code.
+     */
+    PT_CHECK(press(ctx, 'a'));
+    PT_CHECK(log.commit_count == 1);
+    PT_CHECK(strcmp(log.commits, "\xE5\xA5\xBD") == 0);   /* 好 */
+
+    /* The new run is live, not an invalid tail: it has candidates. */
+    PT_CHECK(log.last_candidates > 0);
+
+    pathime_context_destroy(ctx);
+}
+
+/*
  * Tier 3: a value the table declares, standing in for a client that expressed
  * no preference. cangjie5 declares LANGUAGE_FILTER = cm1, so the resolved
  * Chinese variant is traditional-only without anyone setting it — and a client
@@ -1593,6 +1685,8 @@ int main(void)
         test_punctuation_follows_table_variant(engine);
         test_return_commits_literal_keys(engine);
         test_backspace(engine);
+        test_backspace_removes_an_invalid_tail(engine);
+        test_auto_select_restarts_the_run(engine);
         test_table_declares_options(engine);
         test_z_wildcard(engine);
         test_declarations_available_before_typing(engine);

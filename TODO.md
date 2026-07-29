@@ -22,9 +22,10 @@ Status in one paragraph: the build (Linux and Windows), the core (all 44
 public entry points), **all four** adapters — hangul, anthy, pyzy and the
 table engine — options and negotiation including tier 3, the terminal demo
 client, the preedit rule, and the eager candidate strip are built and tested:
-36 suites, all passing on Linux with every backend enabled
-(`docs/testing.md`), and 33 on Windows under both presets — the two newest,
-`core.keys` and `core.table_compile`, have not been run there yet. The table engine
+39 suites, all passing on Linux with every backend enabled
+(`docs/testing.md`), and 33 on Windows under both presets — the four newest,
+`core.keys`, `core.table_compile`, `core.backend_defaults` and `core.romaji`,
+have not been run there yet. The table engine
 types real Chinese against tables compiled out of `ibus-table-chinese`, trimmed
 at build time to one of two checked-in glyph-coverage maps or to none.
 
@@ -301,8 +302,8 @@ One smaller thing from the same read, cheap:
 ## Test coverage: measured gaps
 
 Measured on Linux with every backend enabled (`LIBPATHIME_TEST_COVERAGE=ON`,
-then `pathime-test-coverage`; BUILD.md, "Test coverage"). **88.3% of lines in
-`src/`, 97.6% of functions, 62.4% of branches**, as of 2026-07-29 — up from
+then `pathime-test-coverage`; BUILD.md, "Test coverage"). **90.7% of lines in
+`src/`, 98.6% of functions, 64.8% of branches**, as of 2026-07-29 — up from
 82.9% / 95.7% / 56.8% at the first measurement the same day.
 
 Every item below is a line the suites never reach, with the file and line
@@ -355,50 +356,46 @@ any ordinary build — the reference tree and a Python interpreter are a
 developer's tools here, not the library's. The exit-77 skip protocol is the
 mechanism; a build that lacks either simply reports the suite skipped.
 
-### 3. Nothing exercises a backend's default vtable entries
+### 3. Four defaulted destructors, and why they stay uncovered
 
-`backend.h` reports 52% because all four backends override every optional
-method, so the base implementations are dead in this build:
-`set_cursor()` → `UNSUPPORTED` (`:288-295`), `declared_text()` → `nullptr`
-(`:401-406`), `prepare_string()` → `OK` (`:434-438`).
+`core.backend_defaults` covers the inherited vtable bodies with a backend that
+overrides nothing, and the core's rule that `UNSUPPORTED` from `set_cursor()`
+is a clean rejection while any other failure leaves the context indeterminate.
+`backend.h` went 52% to 81%.
 
-The caller's side is uncovered for the same reason: `candidates.cc:236-246`, the
-contract that `UNSUPPORTED` from `set_cursor()` means *rejected, composition
-intact* while any other failure means indeterminate, is asserted nowhere. That
-is a header promise with no test behind it.
+The four lines still reported are the `= default` virtual destructors of
+`OptionReader`, `SurroundingTextView`, `ContextBackend` and `EngineBackend`
+(`:114`, `:160`, `:201`, `:353`). They are exercised — the stub suite
+constructs and destroys all four — but gcov attributes an inlined defaulted
+destructor to its declaration and does not always count it. Not a gap; recorded
+so nobody spends an afternoon on it.
 
-A stub `ContextBackend` in `tests/core/` that overrides nothing covers both
-sides at once, and is the only way to check what a fifth backend would inherit.
+### 4. What is left of the option matrices
 
-### 4. Option matrices that are set but never swept
+The anthy styles and the pyzy arrangements are swept. core.romaji reads one
+buffer back under every period and symbol style, and `api.engine_pyzy` sets
+every `PATHIME_PINYIN_SCHEME_*` and `PATHIME_BOPOMOFO_LAYOUT_*` and types
+against the rebuilt context. `romaji.cc` went 71% to 91%, `pyzy_backend.cc`
+84% to 90%.
 
-Each of these is an option a client can set, whose effect is unmeasured:
+What remains in `romaji.cc` is the kana input method — `PATHIME_ANTHY_TYPING_KANA`
+and its 101kana table (`:1008`, `:1013`, `:1062-1065`, `:1085`) — which needs
+key *positions* rather than characters and so wants a table of expectations
+rather than a sweep.
 
-- **anthy's period and symbol styles.** `project_styles()`
-  (`romaji.cc:836-871`) has never run: no test sets
-  `PATHIME_ANTHY_PERIOD_FULLWIDTH` or any `PATHIME_ANTHY_SYMBOL_*` variant, so
-  the whole re-projection — the feature that makes an option change apply to
-  text already typed — is unverified.
-- **pyzy's layouts and schemes.** `bopomofo_schema()` and
-  `double_pinyin_schema()` (`pyzy_backend.cc:209-243`) keep most of their
-  `switch` arms untaken: `PATHIME_BOPOMOFO_LAYOUT_*` beyond the default, and
-  most of `PATHIME_PINYIN_SCHEME_DOUBLE_*`.
-- **The romaji dead-end rule** (`romaji.cc:948-969`) — the branch that emits an
-  unresolvable leading character as itself, and the one place libpathime
-  knowingly differs from ibus-anthy. The divergence is argued for in a comment
-  and pinned by nothing.
+### 5. What is left of the table engine's edit paths
 
-### 5. The table engine's edit paths
+The invalid-tail repair and the `AUTO_SELECT` commit-and-restart are covered by
+`api.engine_table`; `table_backend.cc` went 79% to 83%. Two remain, both needing
+a table that stages segments rather than committing them:
 
-`table_backend.cc` at 79%, concentrated in three places a user reaches by
-correcting themselves rather than by typing forward:
-
-- **`take_backspace()` unstaging** (`:699-733`) — backspacing an invalid-key
-  tail, and taking apart the most recent staged segment. The comment calls this
-  "what makes a mis-staged segment repairable"; nothing tests it.
-- **`PATHIME_OPT_TABLE_AUTO_SELECT`'s commit-and-restart** (`:682-693`),
-  including the one-level-deep recursion the comment argues is bounded.
-- **`PATHIME_OPT_TABLE_INVALID_INPUT = COMMIT_CANDIDATE`** (`:877-908`).
+- **Backspace unstaging a staged segment** (`:722-733`). `stage_segment()` runs
+  when a run reaches a `RULES` commit boundary, or `MAX_KEY_LENGTH` with
+  `AUTO_COMMIT` on — so this wants wubi-jidian86, whose `RULES` give it
+  boundaries, rather than cangjie5.
+- **`PATHIME_OPT_TABLE_INVALID_INPUT = COMMIT_CANDIDATE`** (`:877-908`), the
+  arm that settles the hovered candidate when an out-of-alphabet character
+  arrives mid-composition.
 
 ### 6. `module_path.cc` — mostly not a test gap
 

@@ -1456,6 +1456,100 @@ static void test_fuzzy_is_not_a_hangul_option(void)
  * mid-composition and re-derives its list, while leaving a context that
  * overrode the option — and a context belonging to another engine — alone.
  */
+/*
+ * Every value of the two phonetic-arrangement options, set and then typed
+ * against.
+ *
+ * Each enum value is a distinct pyzy keyboard constant, and the adapter maps
+ * them one at a time in a switch. A value that fell through to the default
+ * would not announce itself — the engine would keep working, just with the
+ * wrong arrangement, so a user of Eten or IBM would find their keys producing
+ * someone else's zhuyin. Nothing but a sweep catches that, and the sweep is
+ * cheap because the assertion is only "accepted, and the rebuilt context
+ * types".
+ *
+ * Both options reset the composition, so each iteration starts from an empty
+ * one by construction.
+ */
+static void test_phonetic_arrangements(pathime_engine_t *pinyin,
+                                       pathime_engine_t *bopomofo)
+{
+    static const int64_t kSchemes[] = {
+        PATHIME_PINYIN_SCHEME_FULL,
+        PATHIME_PINYIN_SCHEME_DOUBLE_MSPY,
+        PATHIME_PINYIN_SCHEME_DOUBLE_ZRM,
+        PATHIME_PINYIN_SCHEME_DOUBLE_ABC,
+        PATHIME_PINYIN_SCHEME_DOUBLE_ZGPY,
+        PATHIME_PINYIN_SCHEME_DOUBLE_PYJJ,
+        PATHIME_PINYIN_SCHEME_DOUBLE_XHE
+    };
+    static const int64_t kLayouts[] = {
+        PATHIME_BOPOMOFO_LAYOUT_STANDARD,
+        PATHIME_BOPOMOFO_LAYOUT_CHING_YEAH,
+        PATHIME_BOPOMOFO_LAYOUT_ETEN,
+        PATHIME_BOPOMOFO_LAYOUT_IBM
+    };
+
+    pathime_client_t client;
+    client_log_t log;
+    size_t i;
+
+    for (i = 0; i < sizeof kSchemes / sizeof kSchemes[0]; i++) {
+        int64_t read_back = -1;
+        pathime_context_t *ctx = open_context(pinyin, &client, &log);
+        if (ctx == NULL) {
+            return;
+        }
+
+        PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_PINYIN_SCHEME,
+                                                       kSchemes[i]),
+                        PATHIME_OK);
+        PT_CHECK_STATUS(pathime_context_get_option_int(ctx, PATHIME_OPT_PINYIN_SCHEME,
+                                                       &read_back),
+                        PATHIME_OK);
+        PT_CHECK(read_back == kSchemes[i]);
+
+        /* The rebuilt context is a working one under every scheme. */
+        PT_CHECK(press(ctx, 'n'));
+        PT_CHECK(pathime_context_composition(ctx)->candidate_count > 0);
+
+        pathime_context_destroy(ctx);
+    }
+
+    for (i = 0; i < sizeof kLayouts / sizeof kLayouts[0]; i++) {
+        int64_t read_back = -1;
+        pathime_context_t *ctx = open_context(bopomofo, &client, &log);
+        if (ctx == NULL) {
+            return;
+        }
+
+        PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_BOPOMOFO_LAYOUT,
+                                                       kLayouts[i]),
+                        PATHIME_OK);
+        PT_CHECK_STATUS(pathime_context_get_option_int(ctx, PATHIME_OPT_BOPOMOFO_LAYOUT,
+                                                       &read_back),
+                        PATHIME_OK);
+        PT_CHECK(read_back == kLayouts[i]);
+
+        /*
+         * A key is pressed to prove the rebuilt context is live, but what it
+         * produces is deliberately not asserted: `5` is a phonetic symbol on
+         * some arrangements and nothing at all on others, so requiring
+         * candidates here would be asserting one layout's key map against all
+         * four. Whether the engine absorbs it is the arrangement's business;
+         * that it answers rather than crashes is this test's.
+         */
+        press(ctx, '5');
+        PT_CHECK(pathime_context_composition(ctx) != NULL);
+
+        /* Reset leaves a usable context whatever the key did. */
+        PT_CHECK_STATUS(pathime_context_reset(ctx), PATHIME_OK);
+        PT_CHECK_SIZE(pathime_context_composition(ctx)->candidate_count, 0);
+
+        pathime_context_destroy(ctx);
+    }
+}
+
 static void test_interleaved_contexts(pathime_engine_t *pinyin, pathime_engine_t *bopomofo)
 {
     /* ㄋㄧˇ,ㄏㄠˇ — what "su3cl3" composes; see test_bopomofo. */
@@ -1625,6 +1719,7 @@ int main(void)
         test_options(pinyin, bopomofo);
         test_width_and_punctuation(pinyin, bopomofo);
         test_double_pinyin_preedit(pinyin);
+        test_phonetic_arrangements(pinyin, bopomofo);
         test_commit(pinyin);
         test_fuzzy_is_not_a_hangul_option();
         /* Last: it commits, and pyzy learns on commit into a user database
