@@ -325,8 +325,8 @@ every `sqlite3_prepare_v2` that returns non-OK (`:381-384`, `:394-398`,
 `:411-414`, `:423-427`), the transaction rollback (`:437`, `:442`), and the
 matching arms in `open()` and `lookup()` (`:474-482`, `:599`, `:611`, `:660`,
 `:697`). Reaching them needs a failing SQLite, which means fault injection —
-so this is the same decision as item 5 below, not a test someone can just sit
-down and write.
+and allocation-failure injection is decided against (see "Deferred,
+deliberately"), so these lines stay unreached on purpose.
 
 Two smaller things there *are* reachable:
 
@@ -339,7 +339,23 @@ Two smaller things there *are* reachable:
 - `to_text()`'s NULL-column path (`:119`) and `table_has_rows()`'s
   false answer (`:137`).
 
-### 2. Nothing exercises a backend's default vtable entries
+### 2. A differential test against ibus-table itself
+
+Nothing checks that a `.db` this library writes is one **ibus-table** can read.
+`core.table_compile` proves the writer and the reader agree with each other,
+which is a weaker claim than it sounds for a format whose whole purpose is
+interoperability: a matched pair of misreadings would pass. `refs/ibus-table`
+ships `ibus-table-createdb`, so compiling the same source both ways and
+diffing schema, row order and contents is the assertion that would settle it.
+
+**Constraint on how it may be built, decided 2026-07-29:** optional and
+**default OFF**, skipping cleanly when unavailable. It must add no build
+dependency and no configure-time complication to `ibus-table-chinese` or to
+any ordinary build — the reference tree and a Python interpreter are a
+developer's tools here, not the library's. The exit-77 skip protocol is the
+mechanism; a build that lacks either simply reports the suite skipped.
+
+### 3. Nothing exercises a backend's default vtable entries
 
 `backend.h` reports 52% because all four backends override every optional
 method, so the base implementations are dead in this build:
@@ -354,7 +370,7 @@ is a header promise with no test behind it.
 A stub `ContextBackend` in `tests/core/` that overrides nothing covers both
 sides at once, and is the only way to check what a fifth backend would inherit.
 
-### 3. Option matrices that are set but never swept
+### 4. Option matrices that are set but never swept
 
 Each of these is an option a client can set, whose effect is unmeasured:
 
@@ -372,7 +388,7 @@ Each of these is an option a client can set, whose effect is unmeasured:
   knowingly differs from ibus-anthy. The divergence is argued for in a comment
   and pinned by nothing.
 
-### 4. The table engine's edit paths
+### 5. The table engine's edit paths
 
 `table_backend.cc` at 79%, concentrated in three places a user reaches by
 correcting themselves rather than by typing forward:
@@ -383,19 +399,6 @@ correcting themselves rather than by typing forward:
 - **`PATHIME_OPT_TABLE_AUTO_SELECT`'s commit-and-restart** (`:682-693`),
   including the one-level-deep recursion the comment argues is bounded.
 - **`PATHIME_OPT_TABLE_INVALID_INPUT = COMMIT_CANDIDATE`** (`:877-908`).
-
-### 5. Allocation-failure rollback — needs a decision, not just a test
-
-`context.cc` keeps three recovery paths that no test can currently reach: the
-`std::bad_alloc` unwind during context registration (`:198-201`), the
-unregister-and-delete when `create_context()` fails (`:218-222`), and the
-surrounding-text setter clearing its snapshot on OOM (`:444-448`). All three are
-careful, all three are reasoned about in comments, and none has ever run.
-
-Reaching them needs an allocation-failure injection hook, which is a real
-addition to the library for testing's sake. **Either add one or record these as
-deliberately unreachable** — the current state, where they look like ordinary
-untested code, is the one option that teaches a future reader nothing.
 
 ### 6. `module_path.cc` — mostly not a test gap
 
@@ -483,6 +486,29 @@ only described:
 
 ## Deferred, deliberately
 
+- **Allocation-failure injection, and the tests it would enable.** Decided
+  against 2026-07-29. `context.cc` keeps three `std::bad_alloc` recovery paths
+  no test reaches — the unwind during context registration (`:198-201`), the
+  unregister-and-delete when `create_context()` fails (`:218-222`), and the
+  surrounding-text setter clearing its snapshot (`:444-448`) — and
+  `table_db.cc` keeps a matching set of SQLite failure branches. Reaching
+  either needs injection: a test-local `operator new` for the first (the
+  `tests/core` suites compile the sources in, so no library change is needed),
+  `sqlite3_config(SQLITE_CONFIG_MALLOC, …)` for the second.
+
+  Not worth it. An application that has run out of memory is generally not
+  going to survive whatever comes next regardless of how gracefully one library
+  unwinds, so the tests would buy confidence in a scenario nobody recovers
+  from. The recovery paths stay — they are cheap and correct — but they stay
+  **deliberately unreached**, which is what this entry records so the next
+  reader of the coverage report does not file them as an oversight.
+- **Fuzzing the table source parser.** Decided against 2026-07-29.
+  `parse_table_source()` is at 100% line coverage and reads third-party data,
+  which is normally the argument *for* fuzzing. The argument against is the
+  corpus: the tables are a fixed, checked-in set describing input methods for a
+  script that is not going to gain new ones, and essentially nobody writes or
+  edits a table. A fuzzer would be defending an input surface that in practice
+  has exactly thirteen inputs, all of them in the repository.
 - **Input purpose and hints** (text/name/email/URL/password, single- vs.
   multiline, assistance toggles) — deferred past v1, 2026-07-27. No backend
   consumes them, and the extension is additive when a consumer appears (most

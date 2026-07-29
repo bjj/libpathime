@@ -284,9 +284,27 @@ typedef struct pathime_str {
  * This is deliberately not an option in the sense of the Options section below.
  * Everything here is consumed once, while global state is being built, and
  * cannot be changed afterward without a full shutdown.
+ *
+ * Initialize it in the declaration, so that the members you do not care about
+ * are zeroed by the language rather than by you remembering to:
+ *
+ *     pathime_init_params_t params = { sizeof params };
+ *     params.data_dir = "/some/writable/path";
+ *
+ * That form matters more than it looks. Setting struct_size tells the library
+ * every member of this layout is filled in, so it reads all of them — see
+ * struct_size below.
  */
 typedef struct pathime_init_params {
-    /** Set to sizeof(pathime_init_params_t). */
+    /**
+     * Set to sizeof(pathime_init_params_t).
+     *
+     * Doing so asserts that *every* member below holds a value you chose, and
+     * the library reads each of them on that basis. Members left uninitialized
+     * are read anyway: a pointer member is dereferenced to validate it, so
+     * stack garbage there is a wild pointer rather than a default. Declaring
+     * the struct with an initializer, as above, is what makes that impossible.
+     */
     size_t struct_size;
 
     /**
@@ -340,8 +358,9 @@ typedef struct pathime_init_params {
  * because it opens on-disk dictionaries. It is still synchronous; a caller
  * that cares should invoke it off its UI thread before creating any context.
  *
- * @param params May be NULL, which is equivalent to a zero-initialized struct
- *               with only struct_size set: every default applies.
+ * @param params May be NULL, which is equivalent to `{ sizeof params }`: every
+ *               member at its default. A non-NULL struct must be initialized
+ *               in full — see pathime_init_params_t::struct_size.
  *
  * Calling it again after it has succeeded, without an intervening shutdown, is
  * PATHIME_ERROR_ALREADY_INITIALIZED and changes nothing — in particular it does

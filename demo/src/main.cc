@@ -142,10 +142,13 @@ int main(int argc, char **argv)
     if (data_dir.empty()) data_dir = PATHIME_DEMO_DATA_DIR;
 #endif
 
-    pathime_init_params_t params;
-    std::memset(&params, 0, sizeof(params));
-    params.struct_size = sizeof(params);
-    params.data_dir = data_dir.empty() ? nullptr : data_dir.c_str();
+    /* Initialized in the declaration, which is the idiom the header asks for:
+     * struct_size says every member is filled in, and the initializer is what
+     * makes that true of the ones this program has no opinion about. */
+    pathime_init_params_t params = {
+        sizeof params,
+        data_dir.empty() ? nullptr : data_dir.c_str(),
+    };
 
     /* The one call in the API that may take a perceptible amount of time: it
      * opens the on-disk dictionaries. A backend whose data is missing is not
