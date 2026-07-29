@@ -47,6 +47,23 @@ tables the build compiles out of `ibus-table-chinese` rather than a fixture,
 because the format is an interoperability contract and a table this repository
 invented would prove much less about it.
 
+`api.multicontext` is the one test that is not about a single engine. Every
+other program here creates contexts of one backend, so none of them can show
+that a client with a Korean field and a Japanese field open at once gets the
+same answer in each as it would with only one open — the claim
+`docs/CONCEPTS.md` makes when it says an engine may serve many contexts and
+requires only that calls be serialized. It is differential rather than
+expectation-based: each script is typed alone, then every context types its
+script again round-robin, and any difference is a leak. That is what lets it
+cover every engine at once without restating what the four engine tests pin.
+It prints the engines it interleaved, because the set depends on the
+configuration and a bare "passed" would not distinguish two from five, and it
+skips when fewer than two engines are usable. The four engine tests each carry
+an interleaving test of their own for what is specific to that backend — two
+romaji front ends holding a pending consonant at the same time, two contexts
+over one shared table database, an engine-level option reaching one context
+and not its neighbour.
+
 **Nothing here may link a backend library.** The public header is the whole
 interface these tests are entitled to; reaching past it would cost them the
 one thing they exist to show, which is that the header is complete and that
@@ -123,6 +140,11 @@ The other three all learn on commit — two of the shipped tables declare
 the run. Without them a run would be graded against whatever the previous run
 taught it.
 
+`api.multicontext` has a `data_dir` of its own for the same reason but no
+`.clean` fixture, because it never commits: its two phases have to produce
+identical results, which is only true of an engine that has not learned
+anything between them.
+
 ## Conditional registrations
 
 Before reading anything into a test's absence:
@@ -137,6 +159,10 @@ Before reading anything into a test's absence:
 - **`hangul.vendored.hangul`** needs iconv, which it uses only to print UCS-4 as
   UTF-8. glibc has it; on Windows it comes from vcpkg, which glib pulls in
   anyway.
+- **`api.multicontext`** is registered unconditionally and decides at runtime.
+  It asks `pathime_has_engine()` about each engine, drops the ones that answer
+  no — and the table engine if no table opens — and skips if fewer than two
+  survive, which is the one configuration where it has nothing to interleave.
 
 ## What is deliberately not tested
 

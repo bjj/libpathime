@@ -1358,6 +1358,159 @@ static void test_reset_and_focus(pathime_engine_t *engine)
     pathime_context_destroy(ctx);
 }
 
+/*
+ * Two contexts of the same engine, keyed alternately.
+ *
+ * This is the engine where interleaving has something to break. Anthy is
+ * reached through a per-context anthy_context_t, but the library around it
+ * carries the parts anthy has no representation for — the romaji state
+ * machine's pending latin, the hovered candidate, the materialized list — and
+ * every one of those is state that a shared implementation would get away with
+ * until a second context existed. The half-typed digraphs below are the point:
+ * two front ends both holding an unresolved consonant at the same time.
+ *
+ * The conversion half matters for a different reason. anthy's conversion
+ * machinery is process-global (docs/anthy-mapping.md), so converting in one
+ * context while another holds a live conversion is the sequence that would
+ * expose any of it leaking through the adapter.
+ */
+static void test_interleaved_contexts(pathime_engine_t *engine)
+{
+    client_log_t log_a, log_b;
+    pathime_client_t client_a, client_b;
+    /* Classic on both: prediction off is what makes "no candidates while
+     * typing" a checkable statement about the context that was *not* keyed. */
+    pathime_context_t *a = open_classic_context(engine, &client_a, &log_a);
+    pathime_context_t *b = open_classic_context(engine, &client_b, &log_b);
+    char a_cands[3][64];
+    char b_converted[64];
+    size_t i;
+
+    /* Both contexts have already been dispatched to once, by the option set
+     * open_classic_context() makes. Cleared here so the counts below are the
+     * keys' callbacks and nothing else. */
+    log_reset(&log_a);
+    log_reset(&log_b);
+
+    /* "kanji" into a and "nihon" into b, one key each in turn. Both front ends
+     * hold a pending consonant at the same time on the way through. */
+    PT_CHECK(press(a, 'k'));
+    check_str("a holds a pending k", preedit_of(a), "k");
+    check_str("b still empty", preedit_of(b), "");
+
+    PT_CHECK(press(b, 'n'));
+    check_str("a keeps its own pending k", preedit_of(a), "k");
+    check_str("b holds a pending n", preedit_of(b), "n");
+
+    PT_CHECK(press(a, 'a'));
+    check_str("a resolves to KA", preedit_of(a), KA);
+    check_str("b's pending n is untouched", preedit_of(b), "n");
+
+    PT_CHECK(press(b, 'i'));
+    check_str("a untouched", preedit_of(a), KA);
+    check_str("b resolves to NI", preedit_of(b), NI);
+
+    /* Both now carry an unresolved consonant at once, which is the state a
+     * single shared composer could not represent twice. */
+    PT_CHECK(press(a, 'n'));
+    check_str("a pends an n after KA", preedit_of(a), KA "n");
+    PT_CHECK(press(b, 'h'));
+    check_str("b pends an h after NI", preedit_of(b), NI "h");
+    check_str("a's pending n survives b's h", preedit_of(a), KA "n");
+
+    /* And each one's pending consonant resolves against its own next key. */
+    PT_CHECK(press(a, 'j'));
+    check_str("a's n becomes N before j", preedit_of(a), KA N "j");
+    PT_CHECK(press(b, 'o'));
+    check_str("b's h becomes HO", preedit_of(b), NI HO);
+
+    PT_CHECK(press(a, 'i'));
+    check_str("a finished", preedit_of(a), KANJI_KANA);
+    PT_CHECK(press(b, 'n'));
+    check_str("b finished", preedit_of(b), NIHON_PENDING);
+
+    /* Five keys each, five callbacks each, nothing committed by either. */
+    PT_CHECK(log_a.changed_count == 5);
+    PT_CHECK(log_b.changed_count == 5);
+    PT_CHECK_SIZE(strlen(log_a.commits), 0);
+    PT_CHECK_SIZE(strlen(log_b.commits), 0);
+
+    /* Convert a. b is still a kana buffer that has never been shown to anthy,
+     * and has to stay one. */
+    log_reset(&log_a);
+    log_reset(&log_b);
+    PT_CHECK(press(a, ' '));
+    check_str("a converted", preedit_of(a), KANJI);
+    PT_CHECK(pathime_context_composition(a)->candidate_count > 0);
+    check_str("b is not converted by a's space", preedit_of(b), NIHON_PENDING);
+    PT_CHECK_SIZE(pathime_context_composition(b)->candidate_count, 0);
+    PT_CHECK(log_b.changed_count == 0);
+
+    /* Keep a's list to compare against after b has converted. Copied out
+     * because the pointers belong to the context and this test is about to
+     * make the other context mutate. */
+    for (i = 0; i < 3; i++) {
+        const char *text = candidate_of(a, i);
+        PT_CHECK(strlen(text) < sizeof(a_cands[i]));
+        strncpy(a_cands[i], text, sizeof(a_cands[i]) - 1);
+        a_cands[i][sizeof(a_cands[i]) - 1] = '\0';
+    }
+
+    /*
+     * Now convert b while a's conversion is live. The expectation is stated
+     * relatively — b converts to *something* other than its reading — because
+     * what anthy makes of にほん is anthy's business; what this test is about
+     * is that a is unmoved by it.
+     */
+    PT_CHECK(press(b, ' '));
+    PT_CHECK(pathime_context_composition(b)->candidate_count > 0);
+    PT_CHECK(strcmp(preedit_of(b), NIHON_PENDING) != 0);
+    PT_CHECK(strlen(preedit_of(b)) < sizeof(b_converted));
+    strncpy(b_converted, preedit_of(b), sizeof(b_converted) - 1);
+    b_converted[sizeof(b_converted) - 1] = '\0';
+
+    check_str("a's conversion survives b's", preedit_of(a), KANJI);
+    for (i = 0; i < 3; i++) {
+        check_str("a's candidate list survives b's conversion",
+                  candidate_of(a, i), a_cands[i]);
+    }
+
+    /*
+     * Moving a's cursor moves a's preedit and nothing of b's. Against a's own
+     * second candidate rather than a named one: this test runs last, after
+     * every commit the file makes, so the list has learning in it by now and
+     * the identity being checked is cursor-against-preedit, not ranking.
+     */
+    PT_CHECK_STATUS(pathime_context_set_candidate_cursor(a, 1), PATHIME_OK);
+    check_str("a hovers its second candidate", preedit_of(a), a_cands[1]);
+    check_str("b unmoved by a's cursor", preedit_of(b), b_converted);
+
+    /*
+     * Back to the head of the list before committing. anthy learns what is
+     * committed, and this file's other tests assert positions in this very
+     * list — so the commit below has to reinforce the order rather than
+     * change it, whatever the fixture would have wiped anyway.
+     */
+    PT_CHECK_STATUS(pathime_context_set_candidate_cursor(a, 0), PATHIME_OK);
+    check_str("a back on its first candidate", preedit_of(a), a_cands[0]);
+    check_str("b unmoved again", preedit_of(b), b_converted);
+
+    /* And each commits its own text to its own client. */
+    log_reset(&log_a);
+    log_reset(&log_b);
+    PT_CHECK(press(a, PATHIME_KEY_RETURN));
+    check_str("a commits what a was showing", log_a.commits, a_cands[0]);
+    PT_CHECK(log_b.commit_count == 0);
+    check_str("b still converting", preedit_of(b), b_converted);
+
+    PT_CHECK(press(b, PATHIME_KEY_RETURN));
+    check_str("b commits what b was showing", log_b.commits, b_converted);
+    PT_CHECK(log_a.commit_count == 1);
+
+    pathime_context_destroy(b);
+    pathime_context_destroy(a);
+}
+
 int main(void)
 {
     pathime_engine_t *engine = NULL;
@@ -1401,6 +1554,10 @@ int main(void)
         test_prediction_strip(engine);
         test_options(engine);
         test_reset_and_focus(engine);
+        /* Last: it commits a non-default candidate, and anthy learns on
+         * commit. Every test above that pins a candidate position has already
+         * run by this point. */
+        test_interleaved_contexts(engine);
 
         pathime_engine_destroy(engine);
     }

@@ -70,6 +70,7 @@ libpathime_add_api_test(engine_hangul engine_hangul_test.c)
 libpathime_add_api_test(engine_anthy engine_anthy_test.c)
 libpathime_add_api_test(engine_pyzy engine_pyzy_test.c)
 libpathime_add_api_test(engine_table engine_table_test.c)
+libpathime_add_api_test(multicontext multicontext_test.c)
 
 # --- api.engine_table --------------------------------------------------------
 # Depends on the compiled tables being staged beside the library, which
@@ -178,3 +179,19 @@ if(LIBPATHIME_WITH_PYZY)
   add_test(NAME api.engine_pyzy_nodb COMMAND api_engine_pyzy_nodb_test)
   set_tests_properties(api.engine_pyzy_nodb PROPERTIES SKIP_RETURN_CODE 77)
 endif()
+
+# --- api.multicontext --------------------------------------------------------
+#
+# Contexts of different engines alive at once, so it needs whatever data the
+# engines present in this build need. It is registered unconditionally and
+# decides for itself: an engine that pathime_has_engine() denies is dropped,
+# and fewer than two usable engines is a skip.
+#
+# The data directory is its own for the same reason the engine tests' are, with
+# one difference — this test never commits, so nothing here learns and the
+# directory exists to keep any incidental cache out of the developer's home
+# rather than to be wiped between runs.
+set(_multicontext_home "${CMAKE_CURRENT_BINARY_DIR}/home/api_multicontext")
+file(MAKE_DIRECTORY "${_multicontext_home}")
+target_compile_definitions(api_multicontext_test PRIVATE
+  "MULTICONTEXT_TEST_DATA_DIR=\"${_multicontext_home}\"")

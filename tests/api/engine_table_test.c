@@ -91,6 +91,19 @@ static bool press(pathime_context_t *ctx, uint32_t keysym)
     return handled;
 }
 
+/*
+ * The current preedit as a NUL-terminated C string.
+ *
+ * Most tests here read log.last_preedit, which is the same string seen from
+ * the client's side. This one is for the places that need a context's preedit
+ * *while another context is the one being keyed*, where no callback has fired
+ * for the context being asked about.
+ */
+static const char *preedit_of(pathime_context_t *ctx)
+{
+    return pathime_context_composition(ctx)->preedit.bytes;
+}
+
 /* The candidate at @a index, as a NUL-terminated copy. */
 static void candidate_at(pathime_context_t *ctx, size_t index, char *out, size_t out_size)
 {
@@ -995,6 +1008,155 @@ static void test_reset_discards(pathime_engine_t *engine)
     pathime_context_destroy(ctx);
 }
 
+/*
+ * Two contexts of the same engine, keyed alternately — and the shared database
+ * underneath them.
+ *
+ * This engine shares more between contexts than the other three. A
+ * TableDatabase is opened once per table name and handed to every context that
+ * asks for that name, user database included, so two contexts on one table are
+ * two key runs over one set of rows and one set of learned frequencies. Two
+ * contexts on *different* tables are the opposite case: nothing shared but the
+ * engine handle, and a key run that means one thing in Cangjie and another in
+ * Stroke.
+ *
+ * Both halves are checked here because the two failure modes are opposite. A
+ * context leaking its key run into its neighbour would show in the first half;
+ * a per-context copy of what is meant to be shared learning would show in the
+ * second.
+ */
+static void test_interleaved_contexts(pathime_engine_t *engine)
+{
+    client_log_t log_a, log_b, log_c;
+    pathime_context_t *a = open_context(engine, &log_a, "cangjie5");
+    pathime_context_t *b = open_context(engine, &log_b, "stroke5");
+    pathime_context_t *c = NULL;
+    char candidate[64];
+    char target[64];
+    size_t before;
+    size_t after;
+    int round;
+
+    if (a == NULL || b == NULL) {
+        pathime_context_destroy(b);
+        pathime_context_destroy(a);
+        return;
+    }
+
+    /* --- different tables, one key at a time each ------------------------ */
+
+    PT_CHECK(press(a, 'a'));
+    PT_CHECK(strcmp(log_a.last_preedit, SUN) == 0);
+    PT_CHECK_SIZE(log_b.changed_count, 0);
+
+    /* 'm' is a stroke key in stroke5 and not an input character in cangjie5,
+     * so this key is only meaningful in the context it was sent to. */
+    PT_CHECK(press(b, 'm'));
+    PT_CHECK(strcmp(preedit_of(a), SUN) == 0);
+
+    PT_CHECK(press(a, 'b'));
+    PT_CHECK(strcmp(preedit_of(a), SUN MOON) == 0);
+    candidate_at(a, 0, candidate, sizeof(candidate));
+    PT_CHECK(strcmp(candidate, MING) == 0);
+
+    PT_CHECK(press(b, '/'));
+    PT_CHECK(press(b, 'm'));
+    PT_CHECK(pathime_context_composition(b)->candidate_count > 0);
+
+    /* a's lookup did not move while b was being typed into, and neither list
+     * is the other's. */
+    PT_CHECK(strcmp(preedit_of(a), SUN MOON) == 0);
+    candidate_at(a, 0, candidate, sizeof(candidate));
+    PT_CHECK(strcmp(candidate, MING) == 0);
+    candidate_at(b, 0, candidate, sizeof(candidate));
+    PT_CHECK(strcmp(candidate, MING) != 0);
+
+    /*
+     * Two tables, two preedits — the stroke table renders its keys with its
+     * own prompts, so these cannot coincide. And each context's own view
+     * agrees with what its client was handed, which is the same composition
+     * reached the other way round.
+     */
+    PT_CHECK(strcmp(preedit_of(a), preedit_of(b)) != 0);
+    PT_CHECK(strcmp(preedit_of(a), log_a.last_preedit) == 0);
+    PT_CHECK(strcmp(preedit_of(b), log_b.last_preedit) == 0);
+
+    /* Two keys into a and three into b, and that many callbacks into each
+     * client: a leak would show as a count as readily as as a string. */
+    PT_CHECK_SIZE(log_a.changed_count, 2);
+    PT_CHECK_SIZE(log_b.changed_count, 3);
+    PT_CHECK_SIZE(log_a.commit_count, 0);
+    PT_CHECK_SIZE(log_b.commit_count, 0);
+
+    /* --- the same table, and the learning both contexts share ------------- */
+
+    c = open_context(engine, &log_c, "stroke5");
+    if (c == NULL) {
+        pathime_context_destroy(b);
+        pathime_context_destroy(a);
+        return;
+    }
+
+    PT_CHECK(press(c, 'm'));
+    PT_CHECK(press(c, '/'));
+    PT_CHECK(press(c, 'm'));
+
+    /* Two contexts, one table, one answer — and c's answer is c's own, not the
+     * cangjie context's that is still standing beside it. */
+    PT_CHECK(strcmp(preedit_of(c), log_c.last_preedit) == 0);
+    PT_CHECK(strcmp(preedit_of(c), preedit_of(b)) == 0);
+    PT_CHECK(strcmp(preedit_of(c), preedit_of(a)) != 0);
+    {
+        size_t i;
+        const size_t count = pathime_context_composition(c)->candidate_count;
+        PT_CHECK_SIZE(pathime_context_composition(b)->candidate_count, count);
+        for (i = 0; i < count; i++) {
+            char from_b[64], from_c[64];
+            candidate_at(b, i, from_b, sizeof(from_b));
+            candidate_at(c, i, from_c, sizeof(from_c));
+            PT_CHECK(strcmp(from_c, from_b) == 0);
+        }
+    }
+
+    /*
+     * Teach one context, and read the other. The phrase is taken from the
+     * list rather than named, because api.engine_table's earlier tests have
+     * already taught this code and what matters here is that the position
+     * *moves*, not what it was.
+     */
+    candidate_at(c, 2, target, sizeof(target));
+    PT_CHECK(target[0] != '\0');
+    before = index_of(c, pathime_context_composition(c)->candidate_count, target);
+    PT_CHECK_SIZE(before, 2);
+
+    for (round = 0; round < 4; round++) {
+        const size_t at = index_of(b, pathime_context_composition(b)->candidate_count,
+                                   target);
+        PT_CHECK(at != (size_t)-1);
+        PT_CHECK_STATUS(pathime_context_select_candidate(b, at), PATHIME_OK);
+        PT_CHECK(press(b, 'm'));
+        PT_CHECK(press(b, '/'));
+        PT_CHECK(press(b, 'm'));
+    }
+
+    /* c looks the code up again, against the database b just wrote to. */
+    PT_CHECK_STATUS(pathime_context_reset(c), PATHIME_OK);
+    PT_CHECK(press(c, 'm'));
+    PT_CHECK(press(c, '/'));
+    PT_CHECK(press(c, 'm'));
+    after = index_of(c, pathime_context_composition(c)->candidate_count, target);
+    PT_CHECK(after != (size_t)-1);
+    PT_CHECK(after < before);
+
+    /* What b learned is not something c was told about: learning moves through
+     * the shared table, not through a callback. */
+    PT_CHECK_SIZE(log_c.commit_count, 0);
+
+    pathime_context_destroy(c);
+    pathime_context_destroy(b);
+    pathime_context_destroy(a);
+}
+
 int main(void)
 {
     pathime_engine_t *engine = NULL;
@@ -1050,6 +1212,9 @@ int main(void)
         test_learning(engine);
         test_learning_can_be_declined(engine);
         test_table_without_dynamic_adjust(engine);
+        /* Last: it learns, into the same user database test_learning wrote to.
+         * Its own assertions are relative for that reason. */
+        test_interleaved_contexts(engine);
     }
 
     pathime_engine_destroy(engine);

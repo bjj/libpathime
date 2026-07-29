@@ -1289,6 +1289,143 @@ static void test_fuzzy_is_not_a_hangul_option(void)
     pathime_engine_destroy(hangul);
 }
 
+/*
+ * Three contexts keyed alternately: two on the pinyin engine, one on bopomofo.
+ *
+ * pyzy is where the interleaving question has the most to say, because it is
+ * the engine with the most state that is *not* in the context the client holds
+ * — a lazily enumerated candidate list that mutates as it is walked, and the
+ * eagerly materialized copy this library keeps in front of it. A single shared
+ * copy would be invisible in every other test in this file and would show here
+ * on the first key.
+ *
+ * The second half is the engine-level broadcast against a live backend. The
+ * core suite proves the dispatch bookkeeping with hand-built contexts; what it
+ * cannot show is that an engine-level change reaches a context that is
+ * mid-composition and re-derives its list, while leaving a context that
+ * overrode the option — and a context belonging to another engine — alone.
+ */
+static void test_interleaved_contexts(pathime_engine_t *pinyin, pathime_engine_t *bopomofo)
+{
+    /* ㄋㄧˇ,ㄏㄠˇ — what "su3cl3" composes; see test_bopomofo. */
+    static const char kZhuyin[] =
+        "\xE3\x84\x8B\xE3\x84\xA7\xCB\x87,\xE3\x84\x8F\xE3\x84\xA0\xCB\x87";
+    static const char kPinyinKeys[] = "nihao";
+    static const char kZhuyinKeys[] = "su3cl3";
+
+    client_log_t log_a, log_b, log_z;
+    pathime_client_t client_a, client_b, client_z;
+    pathime_context_t *a = open_context(pinyin, &client_a, &log_a);
+    pathime_context_t *b = open_context(pinyin, &client_b, &log_b);
+    pathime_context_t *z = open_context(bopomofo, &client_z, &log_z);
+    char a_list[8][32], b_list[8][32], z_list[8][32];
+    size_t full_count;
+    size_t i;
+
+    /* One key to each context in turn, until each spelling is finished. */
+    for (i = 0; i < sizeof(kZhuyinKeys) - 1; i++) {
+        if (i < sizeof(kPinyinKeys) - 1) {
+            PT_CHECK(press(a, (uint32_t)(unsigned char)kPinyinKeys[i]));
+            PT_CHECK(press(b, (uint32_t)(unsigned char)kPinyinKeys[i]));
+        }
+        PT_CHECK(press(z, (uint32_t)(unsigned char)kZhuyinKeys[i]));
+    }
+
+    /* Each context composed its own spelling in its own script. */
+    check_str("a's preedit", preedit_of(a), PINYIN_NI_HAO);
+    check_str("b's preedit", preedit_of(b), PINYIN_NI_HAO);
+    check_str("z's preedit", preedit_of(z), kZhuyin);
+
+    /* One callback per key, to that key's client and no other. */
+    PT_CHECK(log_a.changed_count == (int)(sizeof(kPinyinKeys) - 1));
+    PT_CHECK(log_b.changed_count == (int)(sizeof(kPinyinKeys) - 1));
+    PT_CHECK(log_z.changed_count == (int)(sizeof(kZhuyinKeys) - 1));
+    PT_CHECK(log_a.commit_count == 0);
+    PT_CHECK(log_b.commit_count == 0);
+    PT_CHECK(log_z.commit_count == 0);
+
+    /*
+     * The same input interleaved with two other compositions reaches the same
+     * list it reaches alone — a and b are the same query typed alternately,
+     * and z is the same query reached through the other engine.
+     */
+    full_count = pathime_context_composition(a)->candidate_count;
+    PT_CHECK(full_count >= 8);
+    PT_CHECK_SIZE(pathime_context_composition(b)->candidate_count, full_count);
+    PT_CHECK_SIZE(pathime_context_composition(z)->candidate_count, full_count);
+
+    snapshot(a, 8, a_list);
+    snapshot(b, 8, b_list);
+    snapshot(z, 8, z_list);
+    for (i = 0; i < 8; i++) {
+        check_str("b's list matches a's", b_list[i], a_list[i]);
+        check_str("z's list matches a's", z_list[i], a_list[i]);
+    }
+
+    /* --- the engine-level broadcast, with all three mid-composition ------- */
+
+    /* b overrides the option for itself, which is what makes it immune below. */
+    PT_CHECK_STATUS(pathime_context_set_option_int(b, PATHIME_OPT_MAX_CANDIDATES, 5),
+                    PATHIME_OK);
+    PT_CHECK_SIZE(pathime_context_composition(b)->candidate_count, 5);
+
+    log_reset(&log_a);
+    log_reset(&log_b);
+    log_reset(&log_z);
+    PT_CHECK_STATUS(pathime_engine_set_option_int(pinyin, PATHIME_OPT_MAX_CANDIDATES, 3),
+                    PATHIME_OK);
+
+    /* a inherits, so a is re-derived and told about it. */
+    PT_CHECK_SIZE(pathime_context_composition(a)->candidate_count, 3);
+    PT_CHECK(log_a.changed_count == 1);
+    /* b set it itself: tier 1 already won, so nothing changed for b. */
+    PT_CHECK_SIZE(pathime_context_composition(b)->candidate_count, 5);
+    PT_CHECK(log_b.changed_count == 0);
+    /* z belongs to another engine handle entirely. */
+    PT_CHECK_SIZE(pathime_context_composition(z)->candidate_count, full_count);
+    PT_CHECK(log_z.changed_count == 0);
+
+    /* Raising the cap back appends rather than rebuilding: the entries a
+     * already showed are still at the indices it showed them at. */
+    PT_CHECK_STATUS(pathime_engine_reset_option(pinyin, PATHIME_OPT_MAX_CANDIDATES),
+                    PATHIME_OK);
+    PT_CHECK_SIZE(pathime_context_composition(a)->candidate_count, full_count);
+    for (i = 0; i < 8; i++) {
+        check_str("a's list after the cap is lifted", candidate_of(a, i), a_list[i]);
+    }
+
+    /* --- committing in one context leaves the others composing ----------- */
+
+    log_reset(&log_a);
+    log_reset(&log_b);
+    log_reset(&log_z);
+
+    /* Candidate 0 covers the whole input, so pyzy commits from inside
+     * selectCandidate() — the automatic commit, fired here while two other
+     * compositions are live. */
+    PT_CHECK_STATUS(pathime_context_select_candidate(a, 0), PATHIME_OK);
+    PT_CHECK(log_a.commit_count == 1);
+    check_str("a commits its own text", log_a.commits, NI_HAO);
+    check_str("a is finished", preedit_of(a), "");
+    PT_CHECK(log_b.commit_count == 0);
+    PT_CHECK(log_z.commit_count == 0);
+    check_str("b still composing", preedit_of(b), PINYIN_NI_HAO);
+    check_str("z still composing", preedit_of(z), kZhuyin);
+
+    /* Return means "what I typed", and what b typed is b's alone. */
+    PT_CHECK(press(b, PATHIME_KEY_RETURN));
+    check_str("b commits its raw input", log_b.commits, "nihao");
+    PT_CHECK(log_z.commit_count == 0);
+
+    PT_CHECK_STATUS(pathime_context_select_candidate(z, 0), PATHIME_OK);
+    PT_CHECK(log_z.commit_count == 1);
+    check_str("z commits its own text", log_z.commits, NI_HAO);
+
+    pathime_context_destroy(z);
+    pathime_context_destroy(b);
+    pathime_context_destroy(a);
+}
+
 int main(void)
 {
     pathime_engine_t *pinyin = NULL;
@@ -1338,6 +1475,10 @@ int main(void)
         test_width_and_punctuation(pinyin, bopomofo);
         test_double_pinyin_preedit(pinyin);
         test_fuzzy_is_not_a_hangul_option();
+        /* Last: it commits, and pyzy learns on commit into a user database
+         * shared by every context. Everything above that pins a candidate
+         * position has run by now. */
+        test_interleaved_contexts(pinyin, bopomofo);
     }
 
     pathime_engine_destroy(bopomofo);

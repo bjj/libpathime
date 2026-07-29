@@ -51,6 +51,10 @@ int main(void)
 #define A_VOWEL "\xE3\x85\x8F"
 #define NIEUN   "\xE3\x84\xB4"
 
+/* 그 U+ADF8 — 글 with its final jamo not yet typed, which is what the
+ * interleaving test watches the second context hold while the first is keyed. */
+#define GEU "\xEA\xB7\xB8"
+
 /*
  * What the client saw. Callbacks append to this in the order they arrive, so
  * the dispatch order the header fixes — every deletion before any commit,
@@ -733,6 +737,107 @@ static void test_context_requirements(pathime_engine_t *engine)
     pathime_context_destroy(ctx);
 }
 
+/*
+ * Two contexts of the same engine, keyed alternately.
+ *
+ * The model says an engine may serve many input contexts at once and that
+ * composition state belongs to the context, so a client with two text fields
+ * open keys them in whatever order the user clicks. Hangul is where that is
+ * cheapest to state and hardest to fake: a syllable is built jamo by jamo
+ * inside a HangulInputContext, so a shared one would show up immediately as
+ * one field's jamo landing in the other's syllable.
+ *
+ * Every step below asserts *both* preedits, not just the one that just
+ * changed. A key that leaked would otherwise be invisible until it happened to
+ * change the answer.
+ */
+static void test_interleaved_contexts(pathime_engine_t *engine)
+{
+    pathime_client_t client;
+    pathime_context_t *a = NULL;
+    pathime_context_t *b = NULL;
+    client_log_t log_a, log_b;
+
+    log_reset(&log_a);
+    log_reset(&log_b);
+    memset(&client, 0, sizeof(client));
+    client.struct_size = sizeof(client);
+    client.commit_text = on_commit;
+    client.delete_surrounding_text = on_delete;
+    client.composition_changed = on_changed;
+
+    PT_CHECK_STATUS(pathime_context_create(engine, &client, &log_a, &a), PATHIME_OK);
+    PT_CHECK_STATUS(pathime_context_create(engine, &client, &log_b, &b), PATHIME_OK);
+    if (a == NULL || b == NULL) {
+        pathime_context_destroy(b);
+        pathime_context_destroy(a);
+        return;
+    }
+
+    /* Both focused at once: focus is per-context and is not a claim on the
+     * engine, so nothing here has to hand it back and forth. */
+    PT_CHECK_STATUS(pathime_context_set_focused(a, true), PATHIME_OK);
+    PT_CHECK_STATUS(pathime_context_set_focused(b, true), PATHIME_OK);
+
+    /* g-k-s builds 한 in a, r-m-f builds 글 in b, one key each in turn. */
+    PT_CHECK(press(a, 'g'));
+    check_str("a after g", preedit_of(a), HIEUH);
+    check_str("b untouched by a's g", preedit_of(b), "");
+
+    PT_CHECK(press(b, 'r'));
+    check_str("a untouched by b's r", preedit_of(a), HIEUH);
+    check_str("b after r", preedit_of(b), GIYEOK);
+
+    PT_CHECK(press(a, 'k'));
+    check_str("a after k", preedit_of(a), HA);
+    check_str("b untouched by a's k", preedit_of(b), GIYEOK);
+
+    PT_CHECK(press(b, 'm'));
+    check_str("a untouched by b's m", preedit_of(a), HA);
+    check_str("b after m", preedit_of(b), GEU);
+
+    PT_CHECK(press(a, 's'));
+    check_str("a after s", preedit_of(a), HAN);
+    check_str("b untouched by a's s", preedit_of(b), GEU);
+
+    PT_CHECK(press(b, 'f'));
+    check_str("a untouched by b's f", preedit_of(a), HAN);
+    check_str("b after f", preedit_of(b), GEUL);
+
+    /*
+     * Three keys each, three callbacks each. The counts are what rules out the
+     * other half of a leak: a context could hold the right text and still be
+     * dispatching to the wrong client.
+     */
+    PT_CHECK(log_a.changed_count == 3);
+    PT_CHECK(log_b.changed_count == 3);
+    check_str("a's callback order", log_a.order, "xxx");
+    check_str("b's callback order", log_b.order, "xxx");
+    PT_CHECK_SIZE(strlen(log_a.commits), 0);
+    PT_CHECK_SIZE(strlen(log_b.commits), 0);
+
+    /* Closing a's composition is a's business alone. */
+    log_reset(&log_a);
+    log_reset(&log_b);
+    PT_CHECK(!press(a, ' '));
+    check_str("a commits its own syllable", log_a.commits, HAN);
+    PT_CHECK(log_b.commit_count == 0);
+    PT_CHECK(log_b.changed_count == 0);
+    check_str("b still composing", preedit_of(b), GEUL);
+
+    /*
+     * And destroying one context mid-composition leaves the other's alone —
+     * the case a client hits every time a window closes while another is still
+     * being typed into.
+     */
+    pathime_context_destroy(a);
+    log_reset(&log_b);
+    PT_CHECK(!press(b, ' '));
+    check_str("b commits after a is gone", log_b.commits, GEUL);
+
+    pathime_context_destroy(b);
+}
+
 static void test_preedit_none_builds_in_document(pathime_engine_t *engine)
 {
     pathime_client_t client;
@@ -978,6 +1083,7 @@ int main(void)
         test_key_position_and_shift(engine);
         test_reset_and_focus(engine);
         test_context_requirements(engine);
+        test_interleaved_contexts(engine);
         test_layout_option(engine);
         test_preedit_none_builds_in_document(engine);
         test_preedit_none_backspace(engine);
