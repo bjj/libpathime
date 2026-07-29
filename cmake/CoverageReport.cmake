@@ -83,6 +83,15 @@ set(_gcovr_args
   --object-directory "${BINARY_DIR}"
   --filter src/
   --exclude-unreachable-branches
+  # Without this the branch figure is mostly noise. gcov counts the implicit
+  # exception-unwind edge out of every statement that can throw — every
+  # std::string construction, every push_back — as a branch, and none of them is
+  # ever taken, because reaching one means an allocation failed. In this tree
+  # that is 846 of 4294 "branches", enough to move the reported figure by
+  # sixteen points and to bury the conditions a test could actually cover.
+  # Allocation-failure injection is a decision that was made and declined; the
+  # report should not keep relitigating it as a coverage gap.
+  --exclude-throw-branches
   --print-summary
   --txt "${OUTPUT_DIR}/coverage.txt"
   --html-details "${OUTPUT_DIR}/index.html"

@@ -22,10 +22,10 @@ Status in one paragraph: the build (Linux and Windows), the core (all 44
 public entry points), **all four** adapters — hangul, anthy, pyzy and the
 table engine — options and negotiation including tier 3, the terminal demo
 client, the preedit rule, and the eager candidate strip are built and tested:
-39 suites, all passing on Linux with every backend enabled
-(`docs/testing.md`), and 33 on Windows under both presets — the four newest,
-`core.keys`, `core.table_compile`, `core.backend_defaults` and `core.romaji`,
-have not been run there yet. The table engine
+40 suites, all passing on Linux with every backend enabled
+(`docs/testing.md`), and 33 on Windows under both presets — the five newest,
+`core.keys`, `core.table_compile`, `core.backend_defaults`, `core.romaji` and
+`core.punctuation`, have not been run there yet. The table engine
 types real Chinese against tables compiled out of `ibus-table-chinese`, trimmed
 at build time to one of two checked-in glyph-coverage maps or to none.
 
@@ -303,8 +303,17 @@ One smaller thing from the same read, cheap:
 
 Measured on Linux with every backend enabled (`LIBPATHIME_TEST_COVERAGE=ON`,
 then `pathime-test-coverage`; BUILD.md, "Test coverage"). **90.7% of lines in
-`src/`, 98.6% of functions, 64.8% of branches**, as of 2026-07-29 — up from
-82.9% / 95.7% / 56.8% at the first measurement the same day.
+`src/`, 98.6% of functions, 81.2% of branches**, as of 2026-07-29 — up from
+82.9% / 95.7% at the first measurement the same day.
+
+The branch figure is not comparable with that first one, and the difference is
+worth knowing rather than reconciling: it now excludes exception-unwind edges
+(`docs/testing.md`, "Measuring what the suites reach"). Those were 846 of 4294
+counted "branches" — the implicit throw edge out of every allocating statement —
+so the early readings of "56.8%" and "62.4%" were reporting the
+allocation-failure paths this project decided against testing as though they
+were a gap. Excluding them, the real decision-coverage gap against lines is
+about ten points rather than twenty-six.
 
 Every item below is a line the suites never reach, with the file and line
 numbers the report gave. They are listed in the order they are worth doing, and
@@ -409,12 +418,24 @@ What is a real gap is small: `parent_of()`'s no-separator and root-directory
 cases (`:54`, `:59`), the second of which exists because losing it "turns an
 absolute path into a relative one".
 
-### The number that is not in the list
+### Where the branch report still points
 
-**Branch coverage is 56.8% against 82.9% of lines**, and no item above is
-derived from it. Line coverage says a statement ran; the 26-point gap is where
-statements ran down one side only. Nothing has been read against the branch
-report yet, and it is the most likely place for a found bug.
+Working it produced `core.punctuation` (the quote alternation had only ever
+opened, never closed), the CRLF case in `core.table` (the parser trims `\r`,
+which is what makes a table checked out on Windows parse — and BUILD.md warns
+about exactly that), and the client-struct versioning cases in
+`api.engine_hangul`.
+
+What it still points at, in descending order of partially-taken conditions:
+`table_backend.cc` (78), `table_db.cc` (63), `anthy_backend.cc` (55),
+`table_properties.cc` (38), `pyzy_backend.cc` (35), `options.cc` (32).
+
+Two cautions for whoever picks it up. Many of the remaining conditions in
+`table_db.cc` and `context.cc` are the SQLite and allocation failure arms that
+are declined above, so the honest ceiling is well under 100%. And a partial
+branch on a line with no conditional at all is an artifact rather than a gap —
+if the throw-branch exclusion ever comes off, that is what the report fills
+with.
 
 ## Decisions wanted
 

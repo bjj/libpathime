@@ -208,6 +208,67 @@ void test_parser_edge_forms()
     }
 }
 
+/*
+ * A source file with CRLF line endings parses identically to one with LF.
+ *
+ * This is the platform hazard BUILD.md warns about in as many words — a tree
+ * checked out with `core.autocrlf=true` leaves "stray CRs in parsed tokens" —
+ * and the parser defends against it by trimming `\r` along with the other
+ * whitespace. `std::getline` removes the `\n` and leaves the `\r` behind, so
+ * every line of a CRLF file arrives with one attached: on a declaration line it
+ * would land in the value, and on a table row in the frequency column, where it
+ * would fail to parse and the row would be silently skipped.
+ *
+ * Asserted as an equivalence rather than against literals, because the claim is
+ * exactly that the two are the same rather than that either is anything in
+ * particular.
+ */
+void test_crlf_line_endings_parse_identically()
+{
+    const char *const kLf =
+        "BEGIN_DEFINITION\n"
+        "NAME = CRLF\n"
+        "MAX_KEY_LENGTH = 3\n"
+        "VALID_INPUT_CHARS = abc\n"
+        "END_DEFINITION\n"
+        "BEGIN_TABLE\n"
+        "a\tX\t100\n"
+        "ab\tY\t200\n"
+        "END_TABLE\n";
+
+    std::string crlf;
+    for (const char *p = kLf; *p != '\0'; ++p) {
+        if (*p == '\n') {
+            crlf += '\r';
+        }
+        crlf += *p;
+    }
+
+    const TableSource lf_source = parse(kLf);
+    const TableSource crlf_source = parse(crlf);
+
+    PT_CHECK_STR(crlf_source.properties.name, lf_source.properties.name);
+    PT_CHECK_STR(crlf_source.properties.name, "CRLF");
+    PT_CHECK(crlf_source.properties.max_key_length == lf_source.properties.max_key_length);
+    PT_CHECK(crlf_source.properties.max_key_length == 3);
+
+    /* The rows survive with their frequencies, which is the column a stray CR
+     * would have landed in. */
+    PT_CHECK(crlf_source.skipped_rows == 0);
+    PT_CHECK(crlf_source.phrases.size() == lf_source.phrases.size());
+    if (crlf_source.phrases.size() == 2) {
+        PT_CHECK_STR(crlf_source.phrases[0].phrase, "X");
+        PT_CHECK(crlf_source.phrases[0].freq == 100);
+        PT_CHECK_STR(crlf_source.phrases[1].tabkeys, "ab");
+        PT_CHECK(crlf_source.phrases[1].freq == 200);
+    }
+
+    /* VALID_INPUT_CHARS is a scalar set built from the value, so a trailing CR
+     * there would make carriage return an input character. */
+    PT_CHECK(crlf_source.properties.is_input_char(U'a'));
+    PT_CHECK(!crlf_source.properties.is_input_char(U'\r'));
+}
+
 void test_char_prompts()
 {
     const TableSource source = parse(
@@ -607,6 +668,7 @@ int main(void)
     test_nosymbol_and_extra_column();
     test_malformed_rows_are_skipped();
     test_parser_edge_forms();
+    test_crlf_line_endings_parse_identically();
     test_char_prompts();
     test_goucima_derivation();
     test_rules();

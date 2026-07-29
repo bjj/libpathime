@@ -95,13 +95,21 @@ clears the counters, runs the suites and writes an annotated report. BUILD.md,
 requires; it is worth reading once for the reason the counters are cleared,
 which is not obvious and was hiding a real gap.
 
-Two things about the numbers themselves:
+Three things about the numbers themselves:
 
-- **Branch coverage sits well below line coverage**, by twenty-odd points. That
-  gap is where the untested cases mostly are, so a file that looks green by line
-  is not the reassurance it appears to be: a line counts as covered the moment
-  it runs once, whichever way its conditions went. Read `index.html`, which
-  marks partially taken branches, rather than the summary.
+- **Branch coverage sits below line coverage by about ten points**, and that gap
+  is where the untested cases mostly are: a line counts as covered the moment it
+  runs once, whichever way its conditions went. Read `index.html`, which marks
+  partially taken branches, rather than the summary — several suites here exist
+  because a file was line-green while half its conditions had never been
+  evaluated, `core.punctuation` most clearly.
+- **The branch figure excludes exception-unwind edges**, via gcovr's
+  `--exclude-throw-branches`. Without that, gcov counts the implicit throw edge
+  out of every statement that can allocate — every `std::string`, every
+  `push_back` — as an untaken branch. Those are 846 of 4294 here, enough to move
+  the reported figure by sixteen points, and reaching one means an allocation
+  failed. Counting them would report a decision made and declined as a coverage
+  gap, every time.
 - **A file's number depends on the build's shape, not only on the suites.**
   `src/module_path.cc` reports the lowest figure in the tree, and most of the
   shortfall is its `/proc/self/exe` fallback, which exists for static builds and
@@ -162,7 +170,8 @@ where a backend gets driven directly.
 
 Compiles the internal sources under test directly into each executable, because
 internal helpers carry no `PATHIME_API` and a shared build does not export them.
-C++17, covering `utf8.*`, `composition.*`, `keys.*`, `engines/anthy/romaji.*`,
+C++17, covering `utf8.*`, `composition.*`, `keys.*`, `punctuation.*`,
+`engines/anthy/romaji.*`,
 backend.h's inherited defaults, the options machinery, and
 the table engine's data layer at seams the public API cannot reach.
 

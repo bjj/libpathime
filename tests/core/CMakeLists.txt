@@ -129,6 +129,13 @@ if(LIBPATHIME_WITH_ANTHY)
     "${PROJECT_SOURCE_DIR}/src/utf8.cc")
 endif()
 
+# core.punctuation exists because of the branch report rather than the line
+# report: punctuation.cc was already line-green while several of its conditions
+# had only ever gone one way, the quote alternation among them.
+libpathime_add_core_test(punctuation SOURCES
+  "${PROJECT_SOURCE_DIR}/src/punctuation.cc"
+  "${PROJECT_SOURCE_DIR}/src/utf8.cc")
+
 libpathime_add_core_test(composition SOURCES
   "${PROJECT_SOURCE_DIR}/src/composition.cc"
   "${PROJECT_SOURCE_DIR}/src/utf8.cc")

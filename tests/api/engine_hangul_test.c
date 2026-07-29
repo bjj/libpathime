@@ -19,6 +19,7 @@
  * Korean: typing g-k-s on the two-set layout composes 한, one jamo at a time.
  */
 
+#include <stddef.h>   /* offsetof, for the client-struct versioning test */
 #include <string.h>
 
 #include "api_test_util.h"
@@ -872,6 +873,89 @@ static void test_interleaved_contexts(pathime_engine_t *engine)
     pathime_context_destroy(b);
 }
 
+/*
+ * pathime_client_t's own versioning, and the surrounding-text setter's
+ * argument check. Neither is Hangul's business, but context creation is where
+ * both live and this is the suite that already exercises it — the rejection
+ * above is the same entry point saying no for a different reason.
+ *
+ * Exactly one layout is recognized today — kClientStructSizes holds a single
+ * entry — so every other value is refused, smaller as well as larger. The
+ * has_member() machinery beside it, which would let an older client's missing
+ * callbacks read as absent, cannot run until a second layout is added to that
+ * list; it is forward-looking code, and this test is where that is written
+ * down rather than left to look like an untested path.
+ */
+static void test_client_struct_versioning(pathime_engine_t *engine)
+{
+    client_log_t log;
+    pathime_client_t client;
+    pathime_context_t *ctx = NULL;
+
+    log_reset(&log);
+    memset(&client, 0, sizeof(client));
+    client.struct_size = sizeof(client);
+    client.commit_text = on_commit;
+    client.composition_changed = on_changed;
+
+    /* A struct_size the library does not recognize is refused, and the
+     * out-parameter is left alone rather than written with NULL. */
+    {
+        pathime_client_t bad = client;
+        pathime_context_t *out = (pathime_context_t *)(void *)&bad;  /* a sentinel */
+
+        bad.struct_size = 0;
+        PT_CHECK_STATUS(pathime_context_create(engine, &bad, &log, &out),
+                        PATHIME_ERROR_INVALID_ARGUMENT);
+        PT_CHECK(out == (pathime_context_t *)(void *)&bad);
+
+        bad.struct_size = sizeof(bad) + 8;
+        PT_CHECK_STATUS(pathime_context_create(engine, &bad, &log, &out),
+                        PATHIME_ERROR_INVALID_ARGUMENT);
+        PT_CHECK(out == (pathime_context_t *)(void *)&bad);
+    }
+
+    /*
+     * A struct that stops after commit_text would be an older client, and one
+     * day will be accepted. Today it is not: a size that is merely *plausible*
+     * is still not one this library knows, and guessing would mean reading
+     * members the caller never wrote.
+     */
+    {
+        pathime_client_t truncated = client;
+        pathime_context_t *out = NULL;
+
+        truncated.struct_size =
+            offsetof(pathime_client_t, commit_text) + sizeof(client.commit_text);
+        PT_CHECK_STATUS(pathime_context_create(engine, &truncated, &log, &out),
+                        PATHIME_ERROR_INVALID_ARGUMENT);
+        PT_CHECK(out == NULL);
+    }
+
+    /*
+     * The surrounding-text setter's own check: a null pointer with a nonzero
+     * length is a client that has miscounted, and it is refused rather than
+     * read. A null pointer with zero length is the ordinary "I have nothing to
+     * show you" and is accepted.
+     */
+    PT_CHECK_STATUS(pathime_context_create(engine, &client, &log, &ctx), PATHIME_OK);
+    if (ctx != NULL) {
+        pathime_str_t bad_text;
+        pathime_str_t empty;
+
+        bad_text.bytes = NULL;
+        bad_text.len = 5;
+        PT_CHECK_STATUS(pathime_context_set_surrounding_text(ctx, bad_text, 0),
+                        PATHIME_ERROR_INVALID_ARGUMENT);
+
+        empty.bytes = NULL;
+        empty.len = 0;
+        PT_CHECK_STATUS(pathime_context_set_surrounding_text(ctx, empty, 0), PATHIME_OK);
+
+        pathime_context_destroy(ctx);
+    }
+}
+
 static void test_preedit_none_builds_in_document(pathime_engine_t *engine)
 {
     pathime_client_t client;
@@ -1238,6 +1322,7 @@ int main(void)
         test_context_requirements(engine);
         test_interleaved_contexts(engine);
         test_layout_option(engine);
+        test_client_struct_versioning(engine);
         test_preedit_none_builds_in_document(engine);
         test_preedit_none_backspace(engine);
         test_preedit_none_end_composition(engine);
