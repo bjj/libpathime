@@ -77,6 +77,12 @@ it while the options panel has the keyboard.
   and `Ctrl+R` throws it away, with only the `composition_changed` beneath it.
   Press either with nothing composing and the log shows the call and no
   callbacks at all, which is why a client can call them without checking first.
+- **Type `1`, then `.` — then do it again after `Ctrl+O`.** Under a Chinese
+  engine the first `.` stays an ASCII period, because the engine can see it
+  follows a digit and `1.5` is a number. `Ctrl+O` is what a client does when
+  the user leaves the field — commit, then reset — and the reset is the half
+  that makes the engine forget what precedes the caret, so the next `.` becomes
+  。instead. That is the difference between the two calls, made visible.
 - **Set `hangul-preedit` to `none` in the options panel, then type `gks`.**
   This is the one mode where the document *is* the composition: each jamo is
   committed, then deleted and recommitted one component fuller. One

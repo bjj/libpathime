@@ -516,6 +516,35 @@ static void test_no_table_is_inert(pathime_engine_t *engine)
                     PATHIME_OK);
     PT_CHECK(!press(ctx, 'a'));
 
+    /*
+     * Setting an unrelated option on a context with no table.
+     *
+     * This is the one thing an inert context was never asked to survive, and
+     * it crashed: an option change republishes the composition, and publishing
+     * reads the table's properties for the char prompts. Every other entry
+     * point had learned to check for the missing table; this path reached it
+     * through options_changed() -> publish() -> displayed_run() and did not.
+     *
+     * It is reachable by any client, not only by a build that shipped no
+     * tables: naming a table that does not exist leaves a context in exactly
+     * this state, having been told so by PATHIME_ERROR_BACKEND above, and a
+     * client is entitled to carry on configuring it.
+     */
+    PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_MAX_CANDIDATES, 5),
+                    PATHIME_OK);
+    PT_CHECK(pathime_context_composition(ctx)->preedit.len == 0);
+    PT_CHECK(pathime_context_composition(ctx)->candidate_count == 0);
+    PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_CHINESE_VARIANT,
+                                                   PATHIME_CHINESE_TRADITIONAL_ONLY),
+                    PATHIME_OK);
+    PT_CHECK(!press(ctx, 'a'));
+    PT_CHECK(log.commit_count == 0);
+
+    /* Commit and reset are equally inert, and equally must not crash. */
+    PT_CHECK_STATUS(pathime_context_commit(ctx), PATHIME_OK);
+    PT_CHECK(log.commit_count == 0);
+    PT_CHECK_STATUS(pathime_context_reset(ctx), PATHIME_OK);
+
     pathime_context_destroy(ctx);
 }
 
@@ -1221,6 +1250,34 @@ int main(void)
     PT_CHECK_STATUS(pathime_engine_create(PATHIME_ENGINE_TABLE, &engine), PATHIME_OK);
     PT_CHECK(engine != NULL);
     PT_CHECK(pathime_engine_id(engine) == PATHIME_ENGINE_TABLE);
+
+    /*
+     * The engine being available is not the same question as this suite having
+     * something to type into, and pathime_has_engine() answers the first one
+     * deliberately: the table engine reports itself available whenever names
+     * can be resolved at all, because a client naming an absolute path needs
+     * no shipped tables. A build configured with LIBPATHIME_TABLES="" is
+     * exactly that case, and every expectation below is written against the
+     * real compiled `cangjie5.db`.
+     *
+     * So the gate is what the library says it installed. Asking it, rather
+     * than assuming the default table set, is also what keeps this honest for
+     * a build that ships a different selection.
+     */
+    if (engine != NULL) {
+        pathime_option_info_t tables;
+        memset(&tables, 0, sizeof(tables));
+        tables.struct_size = sizeof(tables);
+        PT_CHECK_STATUS(
+            pathime_engine_option_info(engine, PATHIME_OPT_TABLE_FILE, &tables),
+            PATHIME_OK);
+        if (tables.valid_value_count == 0) {
+            pathime_engine_destroy(engine);
+            pathime_shutdown();
+            return pt_skip("api.engine_table",
+                           "this build installed no tables (LIBPATHIME_TABLES is empty)");
+        }
+    }
 
     /* Nothing about a table engine needs surrounding text: it never revises
      * text it already committed. */

@@ -274,6 +274,34 @@ bool App::hotkey(const Term::Key &key)
         return true;
     }
 
+    case Term::Key::Ctrl_O: {
+        /*
+         * What a real client does when the user leaves this field for another
+         * one, and the reason the two calls are separate rather than one.
+         *
+         * Commit first, because the half-typed text belongs to the field being
+         * left and should survive in it. Reset second, because what the engine
+         * knows about the text around the caret describes *this* field, and
+         * carrying it into the next one is how a quotation mark opens twice or
+         * a "1.5" is punctuated as a sentence end. Neither call alone is the
+         * behaviour: commit without reset keeps stale context, reset without
+         * commit loses the user's text.
+         *
+         * There is no focus concept in the library, so this is not a
+         * notification — it is the client doing the two things a focus-out
+         * would otherwise have had to mean, at the moment it decides they
+         * apply.
+         */
+        const std::uint64_t commit = note_call("context_commit   (leaving the field)");
+        note_result(commit, pathime_context_commit(ctx()));
+        const std::uint64_t reset = note_call("context_reset    (leaving the field)");
+        note_result(reset, pathime_context_reset(ctx()));
+        page_ = 0;
+        refresh_surrounding_text();
+        note_info("field left: text kept, engine context forgotten");
+        return true;
+    }
+
     case Term::Key::Ctrl_D:
         document_.clear();
         refresh_surrounding_text();

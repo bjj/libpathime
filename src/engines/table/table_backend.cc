@@ -241,7 +241,30 @@ private:
      */
     bool sync_table(const OptionReader &options);
 
-    const TableProperties &properties() const { return table_->properties(); }
+    /**
+     * The loaded table's properties, or a default-constructed set when no
+     * table is loaded.
+     *
+     * A context whose table is missing is inert — every key unhandled, every
+     * candidate list empty — and that state is reachable by any client, not
+     * just an unlucky one: PATHIME_OPT_TABLE_FILE naming a table that does not
+     * exist leaves the context exactly here, having returned
+     * PATHIME_ERROR_BACKEND. The client is then free to carry on setting
+     * options, and options_changed() republishes the composition when it does.
+     *
+     * So the null table is answered once, here, rather than at each of the ten
+     * call sites. Two of them used to guard it by hand and the rest did not,
+     * which is the arrangement that produced a null dereference through
+     * options_changed() -> publish() -> displayed_run(). The defaults describe
+     * an inert table honestly: no prompts, no input characters, not CJK, so
+     * every predicate above answers the way it should for a context that
+     * cannot compose.
+     */
+    const TableProperties &properties() const
+    {
+        static const TableProperties kNoTable;
+        return table_ != nullptr ? table_->properties() : kNoTable;
+    }
 
     /* ---- State ---- */
 
