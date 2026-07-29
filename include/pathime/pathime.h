@@ -1,5 +1,5 @@
 /*
- * libpathime — public C API: core input loop and options
+ * libpathime — public C API
  *
  * This header is the client-facing boundary described in docs/CONCEPTS.md.
  * Terminology (engine, input context, composition data, handled, ...) is used
@@ -291,30 +291,15 @@ typedef struct pathime_init_params {
     size_t struct_size;
 
     /**
+     * This is the whole of the library's persistent-storage surface.
+     *
      * A directory the library may read and write, holding every piece of
      * per-user state any engine accumulates: learned word frequencies,
      * user-defined phrases, personal dictionaries, and backend caches. The
      * client owns this path and controls its lifetime; the library creates the
      * directory and whatever structure it needs beneath it.
      *
-     * This is the whole of the library's persistent-storage surface. The
-     * backends would each otherwise pick their own location from the
-     * environment — anthy from HOME or XDG_CONFIG_HOME plus a "personality"
-     * name, pyzy from XDG_CACHE_HOME and XDG_CONFIG_HOME, and the table engine
-     * from wherever its user database lives. All of them are redirected here
-     * instead, so a client that wants a second independent profile supplies a
-     * second directory rather than reaching for a per-engine identity setting.
-     *
-     * Notably this is what lets anthy's "personality" disappear from the API.
-     * It is process-global and write-once in anthy's public interface; by
-     * making the directory the identity we set it once, to a fixed name, and
-     * never contend with that restriction.
-     *
-     * A NUL-terminated filesystem path, in UTF-8 on every platform. This is the
-     * one string in the API that is not a (pointer, length) pair: it names a
-     * file rather than carrying text, and no caller has a reason to pass a
-     * slice of one. NULL selects a platform-appropriate default beneath the
-     * user's configuration directory. Borrowed for the duration of the call.
+     * A NUL-terminated filesystem path, in UTF-8 on every platform.
      *
      * The empty string is PATHIME_ERROR_INVALID_ARGUMENT rather than a second
      * spelling of NULL, so that a caller who built the path and got nothing is
@@ -338,10 +323,7 @@ typedef struct pathime_init_params {
      * client whose layout separates the two — a system package with the code
      * in a library directory and the data under a shared one, say.
      *
-     * A NUL-terminated filesystem path in UTF-8, with the same conventions as
-     * @a data_dir. Any path the platform accepts works: spaces, non-ASCII
-     * characters and shell metacharacters are all carried through to the
-     * backends verbatim.
+     * A NUL-terminated filesystem path, in UTF-8 on every platform.
      *
      * An engine whose data is not found is reported unavailable by
      * pathime_has_engine(); it does not fail pathime_init() or affect the
@@ -402,8 +384,7 @@ PATHIME_API void pathime_shutdown(void);
  * only in the table loaded, and which table that is is an option
  * (PATHIME_OPT_TABLE_FILE) rather than a separate id. Its implementation lives
  * in this library — see docs/ibus-table-mapping.md — rather than in a vendored
- * one, because the reference implementation is Python and cannot be linked
- * against.
+ * one, because the reference implementation is Python.
  *
  * Values are assigned explicitly and are part of the ABI: new engines are
  * appended, never inserted.
@@ -466,10 +447,9 @@ enum {
      * The engine cannot work correctly unless the client keeps
      * pathime_context_set_surrounding_text() up to date.
      *
-     * "Up to date" is a stronger obligation than it sounds, and this is the
-     * place to understand it: the snapshot the client last supplied is the only
-     * text the engine can see, and every commit_text the engine performs
-     * invalidates it. An engine that must revise text it has already inserted
+     * "Up to date" is a stronger obligation than it sounds: the snapshot
+     * the client last supplied is the only text the engine can see, and every
+     * commit_text the engine performs invalidates it. The engine
      * therefore depends on the client refreshing the snapshot after each
      * dispatch — not merely when the user moves the caret. A client that
      * refreshes only on caret movement will find the engine progressively
@@ -822,12 +802,7 @@ typedef struct pathime_client {
      * delete_surrounding_text arrives before any commit_text, so the deletion
      * is always relative to the document as the engine last saw it.
      *
-     * At most one delete_surrounding_text arrives per dispatch. This is worth
-     * stating because the alternative is expensive for every client: several
-     * deletions would all be expressed against the same snapshot, so applying
-     * the first would move the text the second describes, and each client
-     * would have to collect them and apply them back to front. It never has
-     * to. One request, applied where it says.
+     * At most one delete_surrounding_text arrives per dispatch.
      *
      * The engine's own commits are what most often move the document out from
      * under this frame of reference: a commit_text invalidates the snapshot
@@ -912,23 +887,9 @@ PATHIME_API pathime_engine_t *pathime_context_engine(const pathime_context_t *ct
 PATHIME_API void *pathime_context_user_data(const pathime_context_t *ctx);
 
 /**
- * What one context needs from its client, as a bitwise OR of PATHIME_REQUIRES_*
- * — the same bits pathime_engine_requirements() returns, resolved against this
+ * What one context needs from its client, as a bitwise OR of PATHIME_REQUIRES_*: 
+ * the same bits pathime_engine_requirements() returns, resolved against this
  * context's own settings rather than the engine's.
- *
- * This is the form a client displays. A settings interface built by walking
- * pathime_option_count() has no per-option knowledge to fall back on, and an
- * engine-level answer goes stale the moment a context overrides the option
- * behind it: a context switched to PATHIME_HANGUL_PREEDIT_NONE requires both
- * callbacks while its engine, left at the default, still reports none.
- *
- * The two calls differ in one further respect, and it is deliberate rather
- * than an inconsistency. This one reports the *effective* value — what the
- * context is actually doing, after any capping against what its client can
- * serve. pathime_engine_requirements() reports the configured value uncapped,
- * because that is what pathime_context_create() must test a new client
- * against. A client asking this question has already supplied what it has, so
- * the honest answer to "what do you need from me" is what is in force.
  *
  * Zero for NULL. Callback-safe.
  */
@@ -978,9 +939,7 @@ PATHIME_API uint32_t pathime_context_requirements(const pathime_context_t *ctx);
  *
  *   Because no engine previews an unchosen conversion, Return commits the
  *   preedit the client was last shown, subject only to the commit-time
- *   normalizations named at pathime_composition_t::preedit. A client never has
- *   to warn a user that Return will produce something other than what is on
- *   screen.
+ *   normalizations named at pathime_composition_t::preedit.
  *
  * A key that starts no composition may still be handled. An engine that emits
  * punctuation or full-width text of its own — see PATHIME_OPT_LATIN_WIDTH and
@@ -1011,12 +970,7 @@ PATHIME_API const pathime_composition_t *pathime_context_composition(const pathi
  * @param out   Receives a borrowed slice, invalidated by the next mutating
  *              call.
  *
- * A candidate is text and nothing else. Per-candidate annotations — a reading
- * or gloss beside the entry, an author's flag on a table phrase — were
- * considered for this release and deliberately left out: no engine shipping in
- * it has one to carry. Should that change, the extension is additive and does
- * not disturb this function: a pathime_context_candidate_info() returning a
- * struct_size-versioned struct, in the manner of pathime_option_info_t.
+ * A candidate is text. There are no labels or annotations in this API.
  *
  * Callback-safe: candidates are fully materialized before composition_changed
  * is dispatched, so this reads an array and never re-enters a backend.
@@ -1110,8 +1064,12 @@ PATHIME_API pathime_status_t pathime_context_select_candidate(pathime_context_t 
  * The library copies what it needs. This call also establishes the frame of
  * reference for delete_surrounding_text: requests are expressed relative to
  * @a cursor and bounded by @a text, so a client that supplies surrounding text
- * must refresh it whenever the document changes — including when the change was
- * the engine's own commit_text. See PATHIME_REQUIRES_SURROUNDING_TEXT.
+ * must refresh it whenever the document changes. This includes changes from
+ * the engine's own commit_text, but the update must happen outside the callback,
+ * typically right after pathime_context_process_key() and any processing for
+ * unhandled keypresses.
+ * 
+ * See also PATHIME_REQUIRES_SURROUNDING_TEXT.
  */
 PATHIME_API pathime_status_t pathime_context_set_surrounding_text(pathime_context_t *ctx,
                                                                   pathime_str_t text,
