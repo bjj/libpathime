@@ -1540,3 +1540,87 @@ does the same for the model. Every suite lost its `set_focused(ctx, true)`
 boilerplate, and `App::set_active()` in the demo lost both calls — switching
 engines is now nothing but a change of which context gets the next key, and the
 log's silence across a switch is what shows it.
+
+---
+
+## 8. Reset made a hard end, and commit given a call of its own (2026-07-29)
+
+Two halves of one question: what `pathime_context_reset()` is allowed to do,
+and how a client keeps half-typed text without pressing a key on the user's
+behalf.
+
+### The reset half
+
+**The documentation said something the code never did.** The header promised
+that reset "does not commit preedit text; an engine that must preserve text
+commits it explicitly as part of handling the reset," and
+`ContextBackend::reset()` took an `Output *` to make that possible. No adapter
+ever used it. All four say so explicitly — hangul `(void)out`, pyzy "`@a model`
+and `@a out` are untouched on purpose", table `(void)out`, and anthy going
+furthest: "The header's 'must not commit implicitly' is not a rule we have to
+work around here — it is already what cancelling a composition means for this
+engine."
+
+So the escape hatch existed only in prose, and prose describing an escape hatch
+is what makes a reader unsure whether reset can put characters in their
+document. The fix was to delete the channel rather than re-describe it:
+`reset()` now takes only a `Composition *`, and "reset cannot commit" is a fact
+about the signature instead of a rule an adapter has to be trusted to follow.
+
+**One real bug fell out.** Under `PATHIME_HANGUL_PREEDIT_NONE` the adapter
+tracks the provisional syllable it wrote into the client's document
+(`in_document_`), so the next key can delete it and write a fuller form.
+`reset()` cleared libhangul's state but not that tracking, so the adapter still
+believed it owned text the client had been given and settled — and the *next*
+keystroke issued a deletion for it. Reset now forgets it, which is the same
+thing `end_composition()` and the stale-snapshot recovery already did.
+`test_preedit_none_reset()` pins it down one key after the reset, where the
+damage actually showed.
+
+### The commit half
+
+**The semantics were already settled; only the entry point was missing.**
+`pathime_composition_t::preedit` is documented as "the text that would be
+committed if the composition ended right now", and all four adapters already
+implement exactly that for Return — anthy "what is on screen, exactly", pyzy
+"Return means 'give me what I typed'", table "the literal input... without
+applying a conversion the user did not choose". So `pathime_context_commit()`
+did not need a new rule invented for it. It needed to be routed to the code
+that already had one, which is why every adapter's `commit()` is a call into
+the path its own commit key takes.
+
+**It is not reset-with-a-prior-commit, and the difference is observable.** That
+was the tempting reading and it is wrong. Every commit path calls
+`punctuation_.note_commit(text)` — the engine records what it just put in the
+document — while both reset paths call `punctuation_.clear()`. A
+commit-then-reset would emit 你好 and immediately forget having done so, after
+which the next `"` would open rather than close and the digit look-behind that
+keeps "1.5" intact (`src/punctuation.h:134-145`) would be disarmed wrongly.
+
+The two calls therefore divide like this, and the header says so in these
+terms:
+
+- **reset** — composition gone, nothing committed, and the engine no longer
+  knows what precedes the caret. *The client is starting somewhere else.*
+- **commit** — composition gone, its text committed, and the engine knows that
+  text is what now precedes the caret. *The client is continuing in the same
+  place.*
+
+**Empty commits nothing and dispatches nothing**, returning `PATHIME_OK`. The
+alternative — `PATHIME_ERROR_UNSUPPORTED` — would have forced every client
+leaving a field to read the composition first to find out whether it needed to
+call, which is a guard the API exists to remove.
+
+**Two implementation notes worth not rediscovering.** pyzy's `commit()` must
+end with the same `harvest()` that `process_key()` does: `commit_preedit()`
+calls pyzy's `reset()`, which speaks only by setting the observer's dirty
+flags, so without the harvest the preedit survives its own commit. That was
+caught by the test rather than by reading. And `TableContext`'s existing
+private `commit(text, chosen_keys, options, out)` was renamed `commit_phrase()`
+so the virtual does not overload it — legal C++, unreadable diff.
+
+**Cost.** `pathime_context_commit()` is a fifth thing a client can do to a
+context, and the one whose absence nobody had complained about — the demo and
+every test reached the same effect by synthesizing Return. That is exactly why
+it is worth having: synthesizing a key means guessing which key the engine
+binds to commit, which is engine knowledge a client is not supposed to need.

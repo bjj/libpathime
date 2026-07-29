@@ -1007,6 +1007,43 @@ static void test_reset_discards(pathime_engine_t *engine)
 }
 
 /*
+ * Commit ends the run, keeping the literal keys — the one engine where what is
+ * committed is deliberately not what the preedit showed.
+ *
+ * Cangjie supplies char prompts, so `ab` renders as 日月 and commits as `ab`.
+ * That is the documented inexactness in pathime_composition_t::preedit's
+ * "would be committed right now" guarantee, and a forced commit inherits it
+ * rather than inventing a second answer: it is exactly what Return does.
+ */
+static void test_commit(pathime_engine_t *engine)
+{
+    client_log_t log;
+    pathime_context_t *ctx = open_context(engine, &log, "cangjie5");
+
+    if (ctx == NULL) {
+        return;
+    }
+
+    PT_CHECK(press(ctx, 'a'));
+    PT_CHECK(press(ctx, 'b'));
+    PT_CHECK(strcmp(log.last_preedit, SUN MOON) == 0);
+
+    PT_CHECK_STATUS(pathime_context_commit(ctx), PATHIME_OK);
+    PT_CHECK(log.commit_count == 1);
+    PT_CHECK(strcmp(log.commits, "ab") == 0);
+    PT_CHECK(strcmp(log.last_preedit, "") == 0);
+
+    /* Nothing composing: no-op, no callbacks. */
+    log.commit_count = 0;
+    log.changed_count = 0;
+    PT_CHECK_STATUS(pathime_context_commit(ctx), PATHIME_OK);
+    PT_CHECK(log.commit_count == 0);
+    PT_CHECK(log.changed_count == 0);
+
+    pathime_context_destroy(ctx);
+}
+
+/*
  * Two contexts of the same engine, keyed alternately — and the shared database
  * underneath them.
  *
@@ -1205,6 +1242,7 @@ int main(void)
         test_enumeration(engine);
         test_max_candidates(engine);
         test_engine_cap(engine);
+        test_commit(engine);
         test_reset_discards(engine);
         test_frequency_augmented_order(engine);
         test_learning(engine);

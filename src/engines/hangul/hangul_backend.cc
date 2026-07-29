@@ -153,7 +153,10 @@ public:
                      Composition *model,
                      Output *out) override;
 
-    void reset(Composition *model, Output *out) override;
+    void reset(Composition *model) override;
+    void commit(const OptionReader &options,
+                Composition *model,
+                Output *out) override;
 
     pathime_status_t select_candidate(size_t index,
                                       const OptionReader &options,
@@ -547,11 +550,35 @@ bool HangulContextBackend::process_key(const KeyEvent &key,
  * to commit, which is the behaviour the header rules out. Clearing is left to
  * the caller, which clears the model regardless.
  */
-void HangulContextBackend::reset(Composition *model, Output *out)
+void HangulContextBackend::reset(Composition *model)
 {
     (void)model;
-    (void)out;
     hangul_ic_reset(hic_.get());
+
+    /*
+     * Whatever this adapter wrote into the client's document under
+     * PATHIME_HANGUL_PREEDIT_NONE is left standing and simply forgotten. A
+     * reset does not reach into the document to take text back — it ends the
+     * composition's claim on it, and what is already there is the client's.
+     */
+    in_document_.clear();
+}
+
+/**
+ * hangul_ic_flush(), which is the call reset() deliberately is not.
+ *
+ * end_composition() is the whole of it: it is what a key that libhangul
+ * declines already does, so a client asking for the composition to end lands
+ * exactly where a word boundary would have put it. Under
+ * PATHIME_HANGUL_PREEDIT_NONE it commits nothing, because the syllable is
+ * already in the document — the same reasoning end_composition() carries.
+ */
+void HangulContextBackend::commit(const OptionReader &options,
+                                  Composition *model,
+                                  Output *out)
+{
+    (void)options;
+    end_composition(model, out);
 }
 
 /**

@@ -44,6 +44,7 @@ answer is the implementation.
 | **Candidate list** | The full sorted result of the lookup query, capped at 100. Complete and unpaged. | §8 |
 | **Select candidate** | Commit the phrase at an absolute index, apply learning, and continue or clear composition. Paging and selection keys are client policy. | `table_backend.cc`, `select_candidate()` |
 | **Commit text** | A committed phrase, a literal key run committed verbatim, or an optionally full-width-converted character. | §11.4, `src/punctuation.h` |
+| **Commit (forced)** | End the run, committing the literal keys plus any staged segments — the same text Return commits, and therefore not character-for-character what a char-prompt preedit displayed. | `table_backend.cc`, `commit()` |
 | **Reset** | Discard the current key run and pre-committed segments; produce empty composition data. Does not commit. | `table_backend.cc`, `reset()` |
 | **Surrounding text / Delete surrounding text** | Unused. ibus-table performs no reconversion from client context. | §12 |
 | **Forward key event** | Unused. ibus-table declines keys it does not use (unhandled) rather than forwarding. | §12 |

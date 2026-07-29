@@ -297,6 +297,7 @@ std::vector<std::string> help_page()
     lines.push_back("");
     lines.push_back("   Tab             move between the text field and the options");
     lines.push_back("   Ctrl+E / F2..   next input method / pick one directly");
+    lines.push_back("   Ctrl+T          commit: end the composition, keep the text");
     lines.push_back("   Ctrl+R          reset: discard the composition, commit nothing");
     lines.push_back("   Ctrl+D  Ctrl+L  clear the document / clear the event log");
     lines.push_back("   Ctrl+Y          copy the document to the clipboard (OSC 52)");

@@ -1082,8 +1082,9 @@ PATHIME_API pathime_status_t pathime_context_set_surrounding_text(pathime_contex
  * it to change — the model already fixes that leaving a field neither commits
  * nor discards, so a transition would carry no work, and no backend has a
  * focus entry point to be told about one. The client owns what happens when
- * the user leaves a field: pathime_context_reset() to discard, or finalize
- * first, and then simply stop offering keys.
+ * the user leaves a field: pathime_context_commit() to keep the half-typed
+ * text or pathime_context_reset() to throw it away, and then simply stop
+ * offering keys.
  *
  * A client with several fields keeps a context per field and routes to the
  * right one. The library cannot check that routing for it — knowing which
@@ -1092,11 +1093,52 @@ PATHIME_API pathime_status_t pathime_context_set_surrounding_text(pathime_contex
  */
 
 /**
+ * End the composition now, committing what it holds.
+ *
+ * What arrives through commit_text is exactly what
+ * pathime_composition_t::preedit says would be committed if the composition
+ * ended right now — the same text, and the same two documented departures from
+ * it, as pressing the engine's own commit key. No conversion the user did not
+ * choose is applied: an engine showing a preview commits what is on screen,
+ * not the candidate it happens to be hovering.
+ *
+ * This is what a client calls when the user leaves a text field and the
+ * half-typed text should be kept. It is an ordinary commit that the client
+ * asked for rather than a key did, which is what distinguishes it from
+ * pathime_context_reset(): the engine ends up knowing that the committed text
+ * is what now precedes the insertion position, so the next key is interpreted
+ * in its light. A reset instead leaves the engine knowing nothing about what
+ * the document holds, because after one it genuinely does not.
+ *
+ * An empty composition commits nothing and dispatches no callbacks, returning
+ * PATHIME_OK. A client leaving a field can therefore call this unconditionally
+ * rather than reading the composition first to find out whether it needs to.
+ *
+ * Otherwise commit_text is dispatched, then composition_changed reporting the
+ * now-empty composition, in the library's usual order.
+ */
+PATHIME_API pathime_status_t pathime_context_commit(pathime_context_t *ctx);
+
+/**
  * Discard transient composition state and return to a neutral state, without
- * destroying the context or its settings. Does not commit preedit text; an
- * engine that must preserve text commits it explicitly as part of handling the
- * reset. Produces a composition_changed callback unless the composition was
- * already empty.
+ * destroying the context or its settings.
+ *
+ * This is a hard end. Everything the composition held is gone: the preedit,
+ * the candidate list, any settled-but-uncommitted text, and whatever the
+ * backing library was holding behind them. Nothing is committed and nothing
+ * can be — no engine is offered a way to emit text from a reset, so there is
+ * no case in which calling this puts characters in the client's document. A
+ * client that wants the text calls pathime_context_commit() first.
+ *
+ * The engine also stops knowing what precedes the insertion position, which is
+ * the observable difference from a commit: a reset means the client is
+ * starting somewhere else, so context-sensitive behaviour that depends on the
+ * preceding text — quote alternation, the digit look-behind that keeps "1.5"
+ * intact — begins again from nothing.
+ *
+ * Produces a composition_changed callback unless the composition was already
+ * empty. The callback is not a courtesy: it is how a client learns its view is
+ * obsolete, so that redrawing after a reset needs no special case.
  *
  * This is also the recovery path after a failure status: it restores a context
  * whose composition state was left indeterminate to a known-empty one. On that

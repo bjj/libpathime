@@ -241,13 +241,36 @@ bool App::hotkey(const Term::Key &key)
         return true;
 
     case Term::Key::Ctrl_R: {
-        /* Discards composition state without committing it. Not the same as
-         * Return, which ends a composition by keeping what was typed. */
+        /* Discards composition state without committing it, and the engine
+         * stops knowing what precedes the caret. The other half of the pair is
+         * Ctrl+T. */
         const std::uint64_t call = note_call("context_reset");
         const pathime_status_t st = pathime_context_reset(ctx());
         note_result(call, st);
         note_status("context_reset", st);
         page_ = 0;
+        refresh_surrounding_text();
+        return true;
+    }
+
+    case Term::Key::Ctrl_T: {
+        /*
+         * The other half: end the composition and keep the text. This is what
+         * a real client does when the user leaves a field, and the log is
+         * where the difference from Ctrl+R shows — a commit_text comes back
+         * out under the call, where a reset produces only the
+         * composition_changed.
+         *
+         * Called unconditionally, without first asking whether anything is
+         * composing: an empty composition is a no-op with no callbacks, which
+         * is exactly so that a client need not ask.
+         */
+        const std::uint64_t call = note_call("context_commit");
+        const pathime_status_t st = pathime_context_commit(ctx());
+        note_result(call, st);
+        note_status("context_commit", st);
+        page_ = 0;
+        refresh_surrounding_text();
         return true;
     }
 

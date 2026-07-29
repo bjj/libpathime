@@ -114,7 +114,10 @@ public:
                      Composition *model,
                      Output *out) override;
 
-    void reset(Composition *model, Output *out) override;
+    void reset(Composition *model) override;
+    void commit(const OptionReader &options,
+                Composition *model,
+                Output *out) override;
 
     pathime_status_t select_candidate(size_t index,
                                       const OptionReader &options,
@@ -1028,20 +1031,42 @@ bool AnthyContextBackend::key_while_converting(const KeyEvent &key,
     return true;
 }
 
-void AnthyContextBackend::reset(Composition *model, Output *out)
+void AnthyContextBackend::reset(Composition *model)
 {
     (void)model;
-    (void)out;
 
-    /* Nothing goes into `out`: everything this context holds is preedit, which
-     * reset discards by definition — eager selections included, since they
-     * were never committed. The header's "must not commit implicitly" is not
-     * a rule we have to work around here — it is already what cancelling a
-     * composition means for this engine. */
+    /* Everything this context holds is preedit, which reset discards by
+     * definition — eager selections included, since they were never
+     * committed. There is nowhere for text to go here and nothing that wants
+     * one: discarding is already what cancelling a composition means for this
+     * engine. */
     anthy_reset_context(context_);
     forget_conversion();
     composer_.clear();
     eager_settled_.clear();
+}
+
+/**
+ * Exactly what Return does, chosen by the same state that chooses it there.
+ *
+ * The two commit paths differ in what "what is on screen" means: mid-conversion
+ * it is the converted segments plus the unconverted tail, and while typing it
+ * is the kana with a pending romaji consonant resolved. Routing on converting_
+ * is what makes a client-driven commit land where the user's own Return would
+ * have, rather than inventing a third answer.
+ */
+void AnthyContextBackend::commit(const OptionReader &options,
+                                 Composition *model,
+                                 Output *out)
+{
+    if (converting_) {
+        commit_conversion(model, out, options);
+        return;
+    }
+    if (composer_.empty() && eager_settled_.empty()) {
+        return;
+    }
+    commit_kana(model, out, romaji_settings(options));
 }
 
 /* ---------------------------------------------------------------------------

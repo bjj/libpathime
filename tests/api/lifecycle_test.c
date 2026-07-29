@@ -494,6 +494,8 @@ static void check_null_context_calls(void)
     PT_CHECK_STATUS(pathime_context_set_surrounding_text(NULL, text, 0),
                     PATHIME_ERROR_INVALID_ARGUMENT);
 
+    PT_CHECK_STATUS(pathime_context_commit(NULL), PATHIME_ERROR_INVALID_ARGUMENT);
+
     PT_CHECK_STATUS(pathime_context_reset(NULL), PATHIME_ERROR_INVALID_ARGUMENT);
 
     /*

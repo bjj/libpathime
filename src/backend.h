@@ -200,14 +200,38 @@ public:
                              Output *out) = 0;
 
     /**
-     * Discard transient state and return to neutral. Must not commit
-     * implicitly; an adapter that has text it must not lose puts it in @a out
-     * explicitly, which is the header's rule for pathime_context_reset().
+     * Discard transient state and return to neutral, committing nothing.
+     *
+     * There is no Output here, and its absence is the contract: a reset cannot
+     * produce text, so no adapter is offered a channel to produce it through.
+     * Text that must survive is the client's to ask for through commit()
+     * first, which is the header's split between pathime_context_reset() and
+     * pathime_context_commit().
      *
      * The caller clears @a model afterward regardless, so an adapter need only
-     * deal with its own library's state.
+     * deal with its own library's state. That includes forgetting what
+     * precedes the caret — the punctuation look-behind is cleared here and
+     * updated by commit(), because after a reset the engine genuinely does not
+     * know what the client's document now holds.
      */
-    virtual void reset(Composition *model, Output *out) = 0;
+    virtual void reset(Composition *model) = 0;
+
+    /**
+     * End the composition now, committing exactly what the preedit says would
+     * be committed if it ended right now.
+     *
+     * This is an ordinary commit that the client asked for rather than a key
+     * did, and it must land in the same state an ordinary commit does — which
+     * is what makes it weaker than reset(): the look-behind is *updated* with
+     * the committed text, not cleared, so the next key still knows what
+     * precedes the caret.
+     *
+     * An empty composition commits nothing and leaves @a out untouched; the
+     * core turns that into a callback-free no-op.
+     */
+    virtual void commit(const OptionReader &options,
+                        Composition *model,
+                        Output *out) = 0;
 
     /**
      * Choose candidate @a index of the active span, settling it and advancing

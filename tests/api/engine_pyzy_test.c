@@ -1256,6 +1256,43 @@ static void test_double_pinyin_preedit(pathime_engine_t *pinyin)
 }
 
 /*
+ * Commit, checked on double pinyin because that is where getting it wrong is
+ * visible.
+ *
+ * A forced commit must land where Return lands: the preedit the client was
+ * shown, separators dropped. Taking pyzy's own commit(TYPE_CONVERTED) instead
+ * would emit the raw keystrokes "nihk" under this scheme — shorthand for an
+ * IME that is no longer listening, and nothing any user wants in a document.
+ * Full pinyin cannot tell the two apart, so it is not the case to test on.
+ */
+static void test_commit(pathime_engine_t *pinyin)
+{
+    client_log_t log;
+    pathime_client_t client;
+    pathime_context_t *ctx = open_context(pinyin, &client, &log);
+
+    PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_PINYIN_SCHEME,
+                                                   PATHIME_PINYIN_SCHEME_DOUBLE_MSPY),
+                    PATHIME_OK);
+    type(ctx, "nihk");
+    check_str("preedit before commit", preedit_of(ctx), PINYIN_NI_HAO);
+
+    log_reset(&log);
+    PT_CHECK_STATUS(pathime_context_commit(ctx), PATHIME_OK);
+    PT_CHECK(log.commit_count == 1);
+    check_str("commit takes the preedit, not the keystrokes", log.commits, "nihao");
+    check_str("preedit after commit", preedit_of(ctx), "");
+
+    /* Nothing composing: no-op, no callbacks. */
+    log_reset(&log);
+    PT_CHECK_STATUS(pathime_context_commit(ctx), PATHIME_OK);
+    PT_CHECK(log.commit_count == 0);
+    PT_CHECK(log.changed_count == 0);
+
+    pathime_context_destroy(ctx);
+}
+
+/*
  * The other half of the fuzzy claim: the engines that do *not* implement it.
  *
  * Hangul is checked here because this test can create one. Anthy cannot be
@@ -1473,6 +1510,7 @@ int main(void)
         test_options(pinyin, bopomofo);
         test_width_and_punctuation(pinyin, bopomofo);
         test_double_pinyin_preedit(pinyin);
+        test_commit(pinyin);
         test_fuzzy_is_not_a_hangul_option();
         /* Last: it commits, and pyzy learns on commit into a user database
          * shared by every context. Everything above that pins a candidate

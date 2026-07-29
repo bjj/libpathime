@@ -24,6 +24,7 @@ The client sends the engine:
 * surrounding text
 * candidate cursor movements
 * candidate selections
+* commit and reset requests
 
 The engine returns:
 
@@ -411,13 +412,27 @@ A client with several destinations keeps an input context for each and routes ke
 
 Both frameworks also carry an *activation* concept — IBus enable/disable, Fcitx activate/deactivate — indicating whether the engine is selected and enabled for a context. This model does not. A client that wants direct keyboard input, or that has selected another engine, stops sending key events to the input context; no separate state is required to express it.
 
+### Commit
+
+**Commit** asks the engine to end the composition now, committing what it holds.
+
+What the client receives is exactly what the composition data said would be committed if the composition ended at that moment — the same text, and subject to the same departures, as the engine's own commit key. No conversion the user did not choose is applied: an engine displaying a preview commits what is displayed, not the candidate it happens to be hovering.
+
+This is an ordinary commit that the client asked for rather than a key event did. The engine therefore ends up knowing that the committed text is what now precedes the insertion position, and interprets the next key in its light.
+
+A composition that is already empty commits nothing and produces no output at all. A client can therefore request it unconditionally rather than inspecting composition data first to decide whether it needs to.
+
+Commit is requested when the client wants the half-finished text kept — most obviously when the user leaves a text field, which is the case that would otherwise lose it.
+
 ### Reset
 
 **Reset** asks the engine to discard its current transient composition state for an input context and return to a neutral state.
 
-After a reset, the engine should produce empty composition data unless it has a reason to begin a new composition immediately.
+Reset is a hard end. Everything the composition held is discarded, and after it the engine produces empty composition data unless it has a reason to begin a new composition immediately.
 
-Reset does not commit preedit text. An engine that needs to preserve text must issue commit text explicitly before or as part of handling the reset.
+Reset never commits, and no engine is offered a way to make it commit. There is no case in which requesting a reset places text in the client's document. A client that wants the text requests a commit first.
+
+The engine also stops knowing what precedes the insertion position, which is the observable difference between the two. A reset means the client is starting somewhere else, so context-sensitive behavior that depends on preceding text begins again from nothing.
 
 Reset does not destroy the input context. Negotiated information and other persistent per-context settings remain in effect.
 
@@ -594,6 +609,7 @@ The canonical terms used by this documentation are:
 | **Surrounding text**        | Client text near the insertion position, supplied as context.       |
 | **Commit text**             | Insert finalized text into the client.                              |
 | **Delete surrounding text** | Delete client text using an offset and character count.             |
+| **Commit**                  | End the composition now, committing what it holds.                  |
 | **Reset**                   | Discard transient composition state without destroying the context. |
 | **Negotiation**             | Exchange capabilities, field information, options, and policies.    |
 

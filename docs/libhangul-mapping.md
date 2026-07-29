@@ -38,7 +38,7 @@ separate from the syllable-composition core.
 | **Preedit text**        | `const ucschar* hangul_ic_get_preedit_string(HangulInputContext*)` — UCS-4 string, valid until the next call that mutates `hic`. At most one syllable's worth of composition, but that may be **1–3 UCS-4 codepoints** (e.g. choseong + `HANGUL_JUNGSEONG_FILLER`, non-precomposable jaso combinations, or decomposed jamo under `HANGUL_OUTPUT_JAMO` mode). |
 | **Commit text**         | `const ucschar* hangul_ic_get_commit_string(HangulInputContext*)` — UCS-4 string, valid until the next call that mutates `hic`. **Not limited to one syllable:** a single `hangul_ic_process()` can leave a completed syllable *followed by* an appended character (up to the internal `commit_string[64]` buffer). In particular a printable **non-jamo ASCII** character *may be* appended to the commit string with the call returning `true` (handled), so libhangul swallows and re-emits it rather than declining it — but **only when the selected layout's table carries a non-zero entry for that key**, which makes the behaviour layout-dependent. See mismatch #3. |
 | **Reset**               | `void hangul_ic_reset(HangulInputContext*)` — clears preedit, commit, and flushed strings and resets the internal jamo buffer; does not commit. |
-| **Flush (forced commit)** | `const ucschar* hangul_ic_flush(HangulInputContext*)` — serializes the pending jamo buffer into a **separate** `flushed_string[64]` buffer and returns *that*. It first clears the preedit, commit, **and** flushed strings, so `hangul_ic_get_commit_string()` is **empty** afterward; the caller must use the flush return value directly. This is distinct from the internal flush-to-commit path (`hangul_ic_flush_internal`) used during normal composition. Intended for context-switch scenarios, where the caller wants the pending syllable kept rather than discarded. |
+| **Commit (forced)** | `const ucschar* hangul_ic_flush(HangulInputContext*)` — serializes the pending jamo buffer into a **separate** `flushed_string[64]` buffer and returns *that*. It first clears the preedit, commit, **and** flushed strings, so `hangul_ic_get_commit_string()` is **empty** afterward; the caller must use the flush return value directly. This is distinct from the internal flush-to-commit path (`hangul_ic_flush_internal`) used during normal composition. Intended for context-switch scenarios, where the caller wants the pending syllable kept rather than discarded. |
 | **Composition data**    | Partially covered. `hangul_ic_get_preedit_string()` provides preedit text. No auxiliary text concept. No candidate list concept. |
 | **Auxiliary text**      | No equivalent in libhangul.                                               |
 | **Candidate list**      | No equivalent in libhangul for Hangul composition. The Hanja subsystem (`HanjaTable`, `HanjaList`) provides a candidate list for Hanja conversion, but it is a separate lookup table, not integrated into the composition loop. |
@@ -328,12 +328,12 @@ reassigns. The safe rule is to offer every printable ASCII key to libhangul and
 honour its verdict. What is *not* libhangul's to decide is the word boundary: a
 key it declines closes a held word.
 
-### 4. No flush concept distinct from reset
+### 4. Commit and reset are two calls here, and libhangul has both
 
-**Project concept:** Reset discards transient state without committing. The
-model has no focus, so nothing in it decides "what happens on focus-out" — a
-client that wants the pending syllable kept finalizes it before it stops
-sending keys.
+**Not a mismatch — the one place the split lines up exactly.** The model
+distinguishes commit (end the composition, keep the text) from reset (end it,
+discard), and gives the client both. libhangul draws the same line with two
+functions, so the adapter is a routing decision rather than a policy one.
 
 **libhangul provides:** `hangul_ic_reset()` discards without committing.
 `hangul_ic_flush()` serializes any in-progress syllable into a separate
@@ -342,12 +342,16 @@ effect), but does not interact with any client. Note this means the flush return
 value is the only place the flushed text appears — `hangul_ic_get_commit_string()`
 is empty after a flush.
 
-**Bridge required:** The adapter must decide, when the client leaves a field
-(and on receiving Control/Alt/etc. keystrokes), whether to call
-`hangul_ic_reset()` (discard) or `hangul_ic_flush()` (commit the remaining
-syllable). The ibus-hangul wrapper
-uses the IBus `IBUS_ENGINE_PREEDIT_COMMIT` mode to delegate this to IBus where
-possible, and calls `hangul_ic_reset()` directly otherwise.
+**Bridge required:** Only the routing. `pathime_context_reset()` calls
+`hangul_ic_reset()`; `pathime_context_commit()` goes through the adapter's
+`end_composition()`, which is the one caller of `hangul_ic_flush()` and is also
+what a declined key already does — so a client-driven commit lands where a word
+boundary would have put it.
+
+The reference wrapper had to decide this for itself, because IBus gave it no
+commit call: ibus-hangul uses the `IBUS_ENGINE_PREEDIT_COMMIT` mode to delegate
+the choice to IBus where possible, and calls `hangul_ic_reset()` directly
+otherwise.
 
 ### 5. No surrounding text support
 

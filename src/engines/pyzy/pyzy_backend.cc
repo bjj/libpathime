@@ -778,18 +778,44 @@ void PyzyContext::commit_preedit(const Composition &model, Output *out)
     punctuation_.note_commit(text);
 }
 
-void PyzyContext::reset(Composition *model, Output *out)
+/**
+ * Exactly what Return does, and for the same reason it is derived from the
+ * model rather than from commit(TYPE_CONVERTED): the guarantee that what is
+ * committed is the preedit the client was last shown holds by construction,
+ * including under double pinyin where TYPE_CONVERTED would emit the raw
+ * keystrokes.
+ */
+void PyzyContext::commit(const OptionReader &options, Composition *model, Output *out)
+{
+
+    /* The same guard Return sits behind: with no input there is nothing this
+     * engine would have committed, so there is nothing to commit now. */
+    if (context_ == nullptr || context_->inputText().empty()) {
+        return;
+    }
+    commit_preedit(*model, out);
+
+    /*
+     * And the same harvest process_key() ends with, for the reason the Escape
+     * case gives: nothing here empties the model directly. commit_preedit()
+     * calls pyzy's reset(), which speaks by setting the observer's dirty
+     * flags, and harvest() is what reads them and copies the now-empty
+     * segments over what the model was holding. Without it the preedit would
+     * survive its own commit.
+     */
+    harvest(options, model, out);
+}
+
+void PyzyContext::reset(Composition *model)
 {
     /*
-     * @a model and @a out are untouched on purpose. pyzy's reset() discards
-     * without committing (docs/pyzy-mapping.md, "Reset"), which is exactly what
-     * the API asks for, so there is no text that must not be lost and nothing
-     * to put in @a out; and backend.h says the caller clears @a model
-     * afterward regardless. Harvesting here would be work whose result is
-     * about to be overwritten.
+     * @a model is untouched on purpose. pyzy's reset() discards without
+     * committing (docs/pyzy-mapping.md, "Reset"), which is exactly what the
+     * API asks for, and backend.h says the caller clears @a model afterward
+     * regardless. Harvesting here would be work whose result is about to be
+     * overwritten.
      */
     (void)model;
-    (void)out;
 
     /*
      * Cleared even when there is no pyzy context to reset, because this state

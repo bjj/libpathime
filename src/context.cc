@@ -459,8 +459,35 @@ pathime_status_t pathime_context_set_surrounding_text(pathime_context_t *ctx,
 }
 
 /* ===========================================================================
- * Reset
+ * Commit and reset
  * ======================================================================== */
+
+pathime_status_t pathime_context_commit(pathime_context_t *ctx)
+{
+    if (ctx == nullptr) {
+        return PATHIME_ERROR_INVALID_ARGUMENT;
+    }
+    if (!pathime::initialized()) {
+        return PATHIME_ERROR_NOT_INITIALIZED;
+    }
+
+    /*
+     * The same sequence process_key() runs, and for the same reason: this is
+     * an ordinary commit that the client asked for rather than a key did, so
+     * it goes through assemble → materialize → dispatch exactly as one the
+     * user typed would. An adapter with nothing to commit writes nothing, and
+     * refresh_composition()'s change detection turns that into the
+     * callback-free no-op the header promises.
+     */
+    ctx->output.clear();
+    if (ctx->backend != nullptr) {
+        const pathime::ContextOptions options(ctx);
+        ctx->backend->commit(options, &ctx->model, &ctx->output);
+    }
+
+    pathime::refresh_composition(ctx, false);
+    return PATHIME_OK;
+}
 
 pathime_status_t pathime_context_reset(pathime_context_t *ctx)
 {
@@ -475,15 +502,18 @@ pathime_status_t pathime_context_reset(pathime_context_t *ctx)
 
     /*
      * The backend's own reset — hangul_ic_reset(), anthy_reset_context(),
-     * PyZy::InputContext::reset(). It does not commit: an engine that must
-     * preserve text puts it in the Output explicitly, as part of handling the
-     * reset, and the dispatch below delivers it. The three backends differ on
-     * flush semantics; the docs/ mapping notes have the details rather than
-     * this file re-deriving them.
+     * PyZy::InputContext::reset(). It cannot commit: ContextBackend::reset()
+     * takes no Output, so there is no channel for text to leave through, and
+     * the composition ends here whatever the backend was holding. A client
+     * that wants the text is expected to have called
+     * pathime_context_commit() first.
+     *
+     * The output is cleared all the same, because a failure may have left
+     * something in it that this reset is the recovery from.
      */
     ctx->output.clear();
     if (ctx->backend != nullptr) {
-        ctx->backend->reset(&ctx->model, &ctx->output);
+        ctx->backend->reset(&ctx->model);
     }
 
     ctx->model.clear();

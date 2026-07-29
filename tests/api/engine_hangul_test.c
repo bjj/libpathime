@@ -497,6 +497,57 @@ static void test_key_position_and_shift(pathime_engine_t *engine)
 }
 
 /*
+ * Commit ends the composition and keeps the text; reset ends it and does not.
+ * The pair is the whole of what a client does when the user leaves a field, so
+ * they are checked against each other rather than apart.
+ */
+static void test_commit(pathime_engine_t *engine)
+{
+    client_log_t log;
+    pathime_client_t client;
+    pathime_context_t *ctx = NULL;
+
+    log_reset(&log);
+    memset(&client, 0, sizeof(client));
+    client.struct_size = sizeof(client);
+    client.commit_text = on_commit;
+    client.composition_changed = on_changed;
+
+    PT_CHECK_STATUS(pathime_context_create(engine, &client, &log, &ctx), PATHIME_OK);
+
+    /*
+     * A half-built syllable is exactly the case the call exists for: 하 is two
+     * jamo of a three-jamo syllable, and the user walking away from it should
+     * keep 하 rather than lose it.
+     */
+    press(ctx, 'g');
+    press(ctx, 'k');
+    check_str("preedit before commit", preedit_of(ctx), HA);
+
+    log_reset(&log);
+    PT_CHECK_STATUS(pathime_context_commit(ctx), PATHIME_OK);
+    /* What the preedit said would be committed is what was committed. */
+    check_str("commit emits the preedit", log.commits, HA);
+    check_str("preedit after commit", preedit_of(ctx), "");
+    /* commit_text, then composition_changed — the library's usual order. */
+    check_str("callback order", log.order, "cx");
+
+    /* Empty now, so a second call is a no-op with no callbacks at all — which
+     * is what lets a client call it unconditionally on leaving a field. */
+    log_reset(&log);
+    PT_CHECK_STATUS(pathime_context_commit(ctx), PATHIME_OK);
+    PT_CHECK_SIZE(strlen(log.commits), 0);
+    PT_CHECK(log.changed_count == 0);
+    PT_CHECK_SIZE(strlen(log.order), 0);
+
+    /* And composition starts cleanly afterwards rather than resuming. */
+    press(ctx, 'g');
+    check_str("composition starts fresh", preedit_of(ctx), HIEUH);
+
+    pathime_context_destroy(ctx);
+}
+
+/*
  * Reset discards without committing — the model case for the project's rule of
  * preferring a determinate behaviour to a deferral.
  */
@@ -990,6 +1041,66 @@ static void test_preedit_none_end_composition(pathime_engine_t *engine)
 }
 
 /*
+ * Reset under PATHIME_HANGUL_PREEDIT_NONE does not reach into the document.
+ *
+ * This mode is the one place where composition state and client text overlap:
+ * the provisional syllable is already in the document, and the adapter tracks
+ * it so that the next key can delete it and write a fuller form. A reset ends
+ * that tracking. It does not ask for the syllable back — the text is the
+ * client's, and a call documented as committing nothing must equally take
+ * nothing away.
+ *
+ * The failure this pins down is one key later, not at the reset: an adapter
+ * that reset without forgetting would still believe it owned the 하, so the
+ * *next* jamo would issue a deletion for text the client had already been
+ * given and settled.
+ */
+static void test_preedit_none_reset(pathime_engine_t *engine)
+{
+    pathime_client_t client;
+    pathime_context_t *ctx = NULL;
+    client_log_t log;
+
+    log_reset(&log);
+    memset(&client, 0, sizeof(client));
+    client.struct_size = sizeof(client);
+    client.commit_text = on_commit;
+    client.delete_surrounding_text = on_delete;
+    client.composition_changed = on_changed;
+
+    PT_CHECK_STATUS(pathime_context_create(engine, &client, &log, &ctx), PATHIME_OK);
+    PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_HANGUL_PREEDIT,
+                                                   PATHIME_HANGUL_PREEDIT_NONE),
+                    PATHIME_OK);
+
+    refresh_snapshot(ctx, &log);
+    PT_CHECK(press(ctx, 'g'));
+    refresh_snapshot(ctx, &log);
+    PT_CHECK(press(ctx, 'k'));
+    check_str("none/reset: built 하", log.doc, HA);
+
+    /* The reset itself neither commits nor deletes. */
+    refresh_snapshot(ctx, &log);
+    log_reset_callbacks(&log);
+    PT_CHECK_STATUS(pathime_context_reset(ctx), PATHIME_OK);
+    check_str("none/reset: 하 stays put", log.doc, HA);
+    PT_CHECK_SIZE(log.commit_count, 0);
+    PT_CHECK_SIZE(log.delete_count, 0);
+
+    /*
+     * And the next key writes after it rather than deleting it. ㄱ is a new
+     * syllable's first jamo, so the document reads 하ㄱ — the 하 untouched.
+     */
+    refresh_snapshot(ctx, &log);
+    log_reset_callbacks(&log);
+    PT_CHECK(press(ctx, 'r'));
+    PT_CHECK_SIZE(log.delete_count, 0);
+    check_str("none/reset: new syllable follows", log.doc, HA GIYEOK);
+
+    pathime_context_destroy(ctx);
+}
+
+/*
  * The recovery path: a client that does not refresh the snapshot.
  *
  * The header fixes what happens rather than leaving it undefined — the engine
@@ -1060,6 +1171,7 @@ int main(void)
         test_word_mode_settled_boundary(engine);
         test_backspace(engine);
         test_key_position_and_shift(engine);
+        test_commit(engine);
         test_reset(engine);
         test_context_requirements(engine);
         test_interleaved_contexts(engine);
@@ -1067,6 +1179,7 @@ int main(void)
         test_preedit_none_builds_in_document(engine);
         test_preedit_none_backspace(engine);
         test_preedit_none_end_composition(engine);
+        test_preedit_none_reset(engine);
         test_preedit_none_stale_snapshot(engine);
     }
 

@@ -1292,6 +1292,55 @@ static void test_options(pathime_engine_t *engine)
 }
 
 /*
+ * Commit, on the engine with two answers to what "what is on screen" means.
+ *
+ * anthy is the only backend where a forced commit has to choose a path: while
+ * typing it is the kana with a pending romaji consonant resolved, and
+ * mid-conversion it is the converted segments plus the unconverted tail. Both
+ * are checked, because routing on the wrong one would still produce plausible
+ * Japanese and pass a laxer test.
+ */
+static void test_commit(pathime_engine_t *engine)
+{
+    client_log_t log;
+    pathime_client_t client;
+    pathime_context_t *ctx = open_context(engine, &client, &log);
+
+    /*
+     * While typing. "nihon" is にほん and not にほn: committing resolves the
+     * trailing romaji "n", which is exactly the departure from the preedit
+     * that pathime_composition_t::preedit documents.
+     */
+    type(ctx, "nihon");
+    log_reset(&log);
+    PT_CHECK_STATUS(pathime_context_commit(ctx), PATHIME_OK);
+    check_str("commit while typing resolves the pending n", log.commits, NIHON);
+    check_str("preedit after commit", preedit_of(ctx), "");
+
+    /* Empty now: no-op, no callbacks, still PATHIME_OK. */
+    log_reset(&log);
+    PT_CHECK_STATUS(pathime_context_commit(ctx), PATHIME_OK);
+    PT_CHECK_SIZE(strlen(log.commits), 0);
+    PT_CHECK(log.changed_count == 0);
+
+    /*
+     * Mid-conversion. What is committed is what was on screen, which is what
+     * Return would have committed at the same moment — not the candidate the
+     * cursor happens to be hovering, and not "every segment at its best".
+     */
+    type(ctx, "kanji");
+    PT_CHECK(press(ctx, ' '));
+    check_str("converted before commit", preedit_of(ctx), KANJI);
+    log_reset(&log);
+    PT_CHECK_STATUS(pathime_context_commit(ctx), PATHIME_OK);
+    check_str("commit mid-conversion takes what is on screen", log.commits, KANJI);
+    check_str("preedit after commit", preedit_of(ctx), "");
+    PT_CHECK_SIZE(pathime_context_composition(ctx)->candidate_count, 0);
+
+    pathime_context_destroy(ctx);
+}
+
+/*
  * Reset, which behaves the same for every engine but is worth checking on the
  * one whose state is deepest: mid-conversion there is a live anthy context
  * behind the composition, not just a string.
@@ -1535,6 +1584,7 @@ int main(void)
         test_commit_and_cancel(engine);
         test_prediction_strip(engine);
         test_options(engine);
+        test_commit(engine);
         test_reset(engine);
         /* Last: it commits a non-default candidate, and anthy learns on
          * commit. Every test above that pins a candidate position has already

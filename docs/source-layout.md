@@ -18,8 +18,8 @@ src/
                         data_dir(), resource_dir()
   engine.h/.cc          pathime_engine_*: registry, handles, requirements. The
                         header defines struct pathime_engine
-  context.h/.cc         pathime_context_*: lifecycle, process_key entry, reset /
-                        surrounding text, callback dispatch ordering. The
+  context.h/.cc         pathime_context_*: lifecycle, process_key entry, commit /
+                        reset / surrounding text, callback dispatch ordering. The
                         header defines struct pathime_context
   composition.h/.cc     structured composition model + projection to the flat value
   candidates.h/.cc      pathime_context_candidate/_set_candidate_cursor/
@@ -118,7 +118,7 @@ because they are not obvious from the names:
 |---|---|
 | `pathime_version*`, `pathime_status_string`, `pathime_init`, `pathime_shutdown` | `init.cc` |
 | `pathime_has_engine`, `pathime_engine_create/destroy/id/requirements` | `engine.cc` |
-| `pathime_context_create/destroy/engine/user_data/requirements`, `_process_key`, `_composition`, `_set_surrounding_text`, `_reset` | `context.cc` |
+| `pathime_context_create/destroy/engine/user_data/requirements`, `_process_key`, `_composition`, `_set_surrounding_text`, `_commit`, `_reset` | `context.cc` |
 | `pathime_context_candidate`, `_set_candidate_cursor`, `_select_candidate` | `candidates.cc` |
 | all 20 `pathime_*option*` functions, both levels | `options.cc` |
 

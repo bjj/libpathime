@@ -71,6 +71,12 @@ it while the options panel has the keyboard.
 - **Switch engines mid-composition with `Ctrl+E` and come back.** A context
   that stops being keyed is not told so and does not care, so the composition
   is exactly where you left it.
+- **Type half a syllable, then press `Ctrl+T` and `Ctrl+R` in turn.** They are
+  the two ways a composition can end when the user walks away from it: `Ctrl+T`
+  commits what is there — a `commit_text` comes back out under the call —
+  and `Ctrl+R` throws it away, with only the `composition_changed` beneath it.
+  Press either with nothing composing and the log shows the call and no
+  callbacks at all, which is why a client can call them without checking first.
 - **Set `hangul-preedit` to `none` in the options panel, then type `gks`.**
   This is the one mode where the document *is* the composition: each jamo is
   committed, then deleted and recommitted one component fuller. One

@@ -68,7 +68,10 @@ public:
                      Composition *model,
                      Output *out) override;
 
-    void reset(Composition *model, Output *out) override;
+    void reset(Composition *model) override;
+    void commit(const OptionReader &options,
+                Composition *model,
+                Output *out) override;
 
     void options_changed(const OptionReader &options,
                          Composition *model,

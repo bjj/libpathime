@@ -219,7 +219,10 @@ public:
 
     bool process_key(const KeyEvent &key, const OptionReader &options,
                      const SurroundingTextView &doc, Composition *model, Output *out) override;
-    void reset(Composition *model, Output *out) override;
+    void reset(Composition *model) override;
+    void commit(const OptionReader &options,
+                Composition *model,
+                Output *out) override;
     pathime_status_t select_candidate(size_t index, const OptionReader &options,
                                       Composition *model, Output *out) override;
     pathime_status_t set_cursor(size_t index, const OptionReader &options,
@@ -279,8 +282,8 @@ private:
      * who typed their way out of a composition expressed no preference, and
      * recording one would teach the table something the user did not say.
      */
-    void commit(const std::string &text, const std::string &chosen_keys,
-                const OptionReader &options, Output *out);
+    void commit_phrase(const std::string &text, const std::string &chosen_keys,
+                       const OptionReader &options, Output *out);
 
     /**
      * Record one (keys, phrase) selection in the user database, if the
@@ -547,8 +550,8 @@ void TableContext::learn(const std::string &keys, const std::string &phrase,
     table_->record_selection(keys, phrase);
 }
 
-void TableContext::commit(const std::string &text, const std::string &chosen_keys,
-                          const OptionReader &options, Output *out)
+void TableContext::commit_phrase(const std::string &text, const std::string &chosen_keys,
+                                 const OptionReader &options, Output *out)
 {
     /*
      * Every staged segment reached the client as text the user chose, so each
@@ -640,7 +643,7 @@ bool TableContext::take_input_scalar(uint32_t scalar, const OptionReader &option
          */
         if (matches_.size() == 1 && options.flag(PATHIME_OPT_TABLE_AUTO_COMMIT) &&
             matches_[0].tabkeys == keys_valid_) {
-            commit(matches_[0].phrase, keys_valid_, options, out);
+            commit_phrase(matches_[0].phrase, keys_valid_, options, out);
         }
         return true;
     }
@@ -655,7 +658,7 @@ bool TableContext::take_input_scalar(uint32_t scalar, const OptionReader &option
          */
         keys_valid_ = previous_valid;
         matches_ = previous_matches;
-        commit(matches_[cursor_ < matches_.size() ? cursor_ : 0].phrase, keys_valid_,
+        commit_phrase(matches_[cursor_ < matches_.size() ? cursor_ : 0].phrase, keys_valid_,
                options, out);
         refresh_matches(options);
         return take_input_scalar(scalar, options, out);
@@ -775,7 +778,7 @@ bool TableContext::process_key(const KeyEvent &key, const OptionReader &options,
          * right now" is inexact for this engine, and it is stated here rather
          * than papered over.
          */
-        commit(typed_run(), std::string(), options, out);
+        commit_phrase(typed_run(), std::string(), options, out);
         publish(model);
         return true;
 
@@ -804,9 +807,9 @@ bool TableContext::process_key(const KeyEvent &key, const OptionReader &options,
              */
             if (!matches_.empty()) {
                 const size_t index = (cursor_ < matches_.size()) ? cursor_ : 0;
-                commit(matches_[index].phrase, keys_valid_, options, out);
+                commit_phrase(matches_[index].phrase, keys_valid_, options, out);
             } else {
-                commit(typed_run(), std::string(), options, out);
+                commit_phrase(typed_run(), std::string(), options, out);
             }
             publish(model);
             return true;
@@ -853,11 +856,11 @@ bool TableContext::process_key(const KeyEvent &key, const OptionReader &options,
         } else {
             ending = typed_run();
         }
-        commit(ending, ending_keys, options, out);
+        commit_phrase(ending, ending_keys, options, out);
         /*
          * The character itself follows, at the negotiated width. The commit
          * above has already been recorded against the digit look-behind by
-         * commit(), so a Chinese character settled between a digit and a period
+         * commit_phrase(), so a Chinese character settled between a digit and a period
          * disarms it — which is the whole reason note_commit() takes both
          * sources in the order they reach the client.
          */
@@ -907,10 +910,9 @@ bool TableContext::emit_converted(uint32_t scalar, const OptionReader &options,
     return true;
 }
 
-void TableContext::reset(Composition *model, Output *out)
+void TableContext::reset(Composition *model)
 {
     (void)model;
-    (void)out;
     /*
      * Discards without committing, which is what the header requires of
      * pathime_context_reset(). There is no library state to unwind beyond this
@@ -919,10 +921,33 @@ void TableContext::reset(Composition *model, Output *out)
      *
      * The punctuation state goes too: its quote alternation and digit
      * look-behind describe what precedes the caret, and after a reset the engine
-     * no longer knows that.
+     * no longer knows that. This is the one thing commit() does differently —
+     * it updates that look-behind rather than clearing it, because after a
+     * commit the engine knows exactly what precedes the caret.
      */
     clear_state();
     punctuation_.clear();
+}
+
+/**
+ * Exactly what Return does: commit the literal key run, without applying a
+ * conversion the user did not choose.
+ *
+ * Where the table supplies char prompts the committed text is therefore not
+ * character-for-character what the preedit showed — the preedit renders `a` as
+ * 日 and this commits `a` — which is the same documented inexactness Return
+ * carries, and for the same reason. Staged segments go with it, as they do on
+ * every other commit path here.
+ */
+void TableContext::commit(const OptionReader &options, Composition *model, Output *out)
+{
+    const bool composing =
+        !keys_valid_.empty() || !keys_invalid_.empty() || !segments_.empty();
+    if (!composing) {
+        return;
+    }
+    commit_phrase(typed_run(), std::string(), options, out);
+    publish(model);
 }
 
 pathime_status_t TableContext::select_candidate(size_t index, const OptionReader &options,
@@ -943,7 +968,7 @@ pathime_status_t TableContext::select_candidate(size_t index, const OptionReader
      * meaning for the same call would make the result depend on a modifier the
      * API does not carry.
      */
-    commit(matches_[index].phrase, keys_valid_, options, out);
+    commit_phrase(matches_[index].phrase, keys_valid_, options, out);
     refresh_matches(options);
     publish(model);
     return PATHIME_OK;
