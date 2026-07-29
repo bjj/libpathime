@@ -101,8 +101,10 @@ std::string quote(const std::string &value)
 {
     std::string out = "'";
     for (const char c : value) {
+        /* Emit the doubling quote only; the character itself follows below, so
+         * the pair is written exactly once. */
         if (c == '\'') {
-            out += "''";
+            out.push_back('\'');
         }
         out.push_back(c);
     }
