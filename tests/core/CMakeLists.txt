@@ -119,6 +119,16 @@ target_link_libraries(core_backend_defaults_test PRIVATE
 target_compile_definitions(core_backend_defaults_test PRIVATE
   $<TARGET_PROPERTY:pathime,COMPILE_DEFINITIONS>)
 
+# core.romaji drives the Japanese front end with no anthy behind it, which is
+# what romaji.h's plain-struct settings were written to allow. Gated on the
+# backend only because romaji.cc is not built when anthy is off.
+if(LIBPATHIME_WITH_ANTHY)
+  libpathime_add_core_test(romaji SOURCES
+    "${PROJECT_SOURCE_DIR}/src/engines/anthy/romaji.cc"
+    "${PROJECT_SOURCE_DIR}/src/keys.cc"
+    "${PROJECT_SOURCE_DIR}/src/utf8.cc")
+endif()
+
 libpathime_add_core_test(composition SOURCES
   "${PROJECT_SOURCE_DIR}/src/composition.cc"
   "${PROJECT_SOURCE_DIR}/src/utf8.cc")
