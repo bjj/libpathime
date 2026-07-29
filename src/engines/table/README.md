@@ -3,7 +3,6 @@
 The fourth engine, written here from scratch rather than wrapped: `ibus-table`
 is Python, so there is nothing to link against. It supplied the proven feature
 set, and the data format both programs read is `docs/ibus-table-mapping.md`.
-Why this engine behaves as it does is `docs/design-history.md` §6.
 
 One engine id (`PATHIME_ENGINE_TABLE`) covers every table-driven method, because
 they differ only in the table loaded. Tables are selected per context with
@@ -11,6 +10,9 @@ they differ only in the table loaded. Tables are selected per context with
 a different one to each context.
 
 ## The split, and the rule that holds it
+
+`§N` here and in the comments under this directory always means
+`docs/ibus-table-mapping.md` §N.
 
 ```
 table_backend.cc     the seam: EngineBackend, ContextBackend, the key-event
@@ -38,28 +40,20 @@ something has reached back across it.
 
 `coverage.*` sits one step further out again: it is the only pair here the
 **library does not link at all**. Glyph filtering happens once, in
-`tools/table-compile`, and a map of up to 2,000 ranges would otherwise be dead
-weight in every process that loads libpathime. That is also why
-`apply_coverage_filter()` lives in `coverage.h` rather than next to
+`tools/table-compile`, and the map — 2,032 ranges for Noto, 822 for Windows —
+would otherwise be dead weight in every process that loads libpathime. That is
+also why `apply_coverage_filter()` lives in `coverage.h` rather than next to
 `apply_frequency_transfer()` in `table_source.h`, where it would otherwise
 belong: `table_source.cc` *is* in the library, and putting it there would drag
 the map in behind it.
 
-Which of the two maps `coverage.cc` compiles against is `LIBPATHIME_TABLE_COVERAGE`
-— `noto`, `windows`, or `none`, defaulting per platform. `coverage.h` owns
-`CoverageRange` so the two generated headers can declare the same symbols;
-`none` is honoured by passing `--no-glyph-filter` to the compile tool rather than
-by compiling the map out, so there is always a real map for `core.table` to
-assert against. BUILD.md, "Glyph coverage", carries the measurements, and
-`docs/design-history.md` §6d carries why there are two.
-
-The alternative considered and rejected was a standalone `engines/table/`
-library with its own surface. It would have needed its own key-event type, its
-own composition representation and its own option carrier, each translated by an
-adapter that did nothing else — a second IME API invented purely so the first
-one could have something to wrap. The three real adapters exist because upstream
-imposed a shape on us; here nothing would have imposed it but the directory
-choice.
+Which of the two maps `coverage.cc` compiles against is the
+`LIBPATHIME_TABLE_COVERAGE` build option — BUILD.md, "Glyph coverage", is its
+home and carries the measurements. What belongs here is the source-layout half:
+`coverage.h` owns `CoverageRange` so the two generated headers can declare the
+same symbols, and `none` is honoured by passing `--no-glyph-filter` to the
+compile tool rather than by compiling the map out, so there is always a real map
+for `core.table` to assert against.
 
 ## What the data contract costs
 
@@ -87,6 +81,4 @@ compiles a selected set with `tools/table-compile` into
 value resolves against. The set is `LIBPATHIME_TABLES` in
 `cmake/LibpathimeRuntimeData.cmake`; adding one is a line.
 
-Upstream's own `tables/CMakeLists.txt` is deliberately unused — it needs
-`ibus-table-createdb` (the Python being replaced) plus `sed`, `iconv` and `awk`,
-none of which run on Windows.
+Upstream's own `tables/CMakeLists.txt` is deliberately unused; BUILD.md says why.

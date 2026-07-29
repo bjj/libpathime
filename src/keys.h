@@ -1,7 +1,7 @@
 /*
  * The engine-agnostic half of the key-event layer.
  *
- * The backends accept only finished input (docs/design-history.md §2, Finding 6): anthy
+ * The backends accept only finished input: anthy
  * wants completed kana, pyzy accepts only [a-z] and apostrophe, libhangul
  * takes a US-QWERTY int with uppercase meaning Shift and backspace as a
  * separate call. Everything from pathime_key_event_t down — validation,
@@ -11,9 +11,8 @@
  *
  * The per-engine composing front ends are deliberately *not* here: the
  * romaji/kana state machine is engines/anthy/romaji.*, because only Japanese
- * needs one before its backend sees input (the per-engine answer to TODO.md
- * §3, question 2 — recorded in docs/source-layout.md, cheap to hoist if the
- * table engine turns out to want it shared).
+ * needs one before its backend sees input. It is cheap to hoist here if a
+ * second engine ever wants it.
  *
  * What this file settles, once, so that three adapters cannot each answer it
  * differently: what a valid event is, what counts as a chorded shortcut, and

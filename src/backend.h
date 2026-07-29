@@ -12,14 +12,14 @@
  * What the interface is, and what it deliberately is not
  * ---------------------------------------------------------------------------
  *
- * Two layers, matching the two the API already has (docs/design-history.md §2, Finding 3):
+ * Two layers, matching the two the API already has:
  * an EngineBackend holds what one input method shares across its contexts and
  * makes ContextBackends; a ContextBackend is one composition in flight. The
  * process-global layer is *not* here — it is init.cc's, driven once per
  * process through backend_global_init() below, because a per-instance
  * interface is the wrong shape for something that happens once.
  *
- * A backend is handed **finished input** (Finding 6). The key layer is ours:
+ * A backend is handed **finished input**. The key layer is ours:
  * validation, modifiers, the PATHIME_KEY_* keys, and any composing front end
  * sit above this interface. What crosses it is a KeyEvent the adapter is free
  * to reject, because "handled" is a judgement only the backend can make — but
@@ -37,9 +37,10 @@
  * ---------------------------------------------------------------------------
  *
  *  1. **Copy at the seam.** Everything the three vendor libraries return is
- *     borrowed and volatile — valid only until their next mutating call
- *     (Finding 4). Nothing may be aliased into the Composition; utf8.h has the
- *     conversions, including the UCS-4 one libhangul needs.
+ *     borrowed and volatile — valid only until their next mutating call, and
+ *     the encoding differs from one to the next. Nothing may be aliased into
+ *     the Composition; utf8.h has the conversions, including the UCS-4 one
+ *     libhangul needs.
  *
  *  2. **Positions are scalar values.** Any offset an adapter puts into an
  *     Output is in Unicode scalar values, never bytes. pyzy's cursor() is a
@@ -147,9 +148,9 @@ public:
  * decided what to commit.
  *
  * Why not a full document view: nothing needs one. Reading preceding context
- * is a Hanja feature and Hanja is out of scope (docs/design-history.md §1), so exposing the
- * text would be a concept carried for no consumer. If a real one appears this
- * is the place to widen.
+ * is a Hanja feature and Hanja is out of scope, so exposing the text would be
+ * a concept carried for no consumer. If a real one appears this is the place
+ * to widen.
  */
 class SurroundingTextView {
 public:
@@ -375,9 +376,9 @@ public:
      * which is the honest shape of an operation that opens a database.
      *
      * It also makes tier 3 answer immediately. declared_number() reads the
-     * *loaded* table and will not load one, so before this hook existed the same
-     * query returned the descriptor default before the first keystroke and the
-     * table's declaration after it.
+     * *loaded* table and will not load one, so without this hook the same query
+     * would answer with the descriptor default before the first keystroke and
+     * with the table's declaration after it.
      *
      * Returning anything but PATHIME_OK aborts the set: the status reaches the
      * client unchanged and nothing is stored, so the previously resolved value
@@ -446,8 +447,8 @@ std::unique_ptr<EngineBackend> pyzy_create_engine(pathime_engine_id_t id);
 
 #if PATHIME_WITH_TABLE
 /**
- * The table engine's global init locates the directory shipped tables live in
- * — `table/` under the resource directory — and the directory user databases
+ * The table engine's global init locates the directory installed tables live
+ * in — `table/` under the resource directory — and the directory user databases
  * are written to under the data directory. It answers false when the resource
  * directory holds no `table/`, which reaches the client as
  * pathime_has_engine(PATHIME_ENGINE_TABLE) answering false: an engine that can

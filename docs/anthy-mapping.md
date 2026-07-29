@@ -46,7 +46,7 @@ All text exchanged with the library is UTF-8 when the context is configured with
 | **Candidate list** | `anthy_get_segment(ctx, seg_idx, cand_idx)` iterated over `anthy_segment_stat.nr_candidate` | Per-segment, not a flat global list. Special index constants `NTH_UNCONVERTED_CANDIDATE` (-1), `NTH_KATAKANA_CANDIDATE` (-2), `NTH_HIRAGANA_CANDIDATE` (-3), `NTH_HALFKANA_CANDIDATE` (-4) access pseudo-candidates. |
 | **Select candidate** | `anthy_commit_segment(ctx, seg_idx, cand_idx)` for finalising, plus the caller tracking which candidate is currently "shown" per segment | Library commit is destructive (updates personal dict). Navigating candidates without committing is a caller responsibility. |
 | **Commit text** | `anthy_commit_segment(ctx, seg_idx, cand_idx)` records the choice in the personal dictionary; the actual text insertion is done by the caller using the string returned by `anthy_get_segment` | The library does not push text to any output; it just records the selection. |
-| ~~Auxiliary text~~ | No equivalent | Not a concept in this model either — `pathime_composition_t` has no such field. ibus-anthy synthesises `( 3 / 12 )` (candidate position / total), which this API publishes as `candidate_cursor` and `candidate_count`. Nothing was lost by removing the field; see `docs/japanese-input-model.md` §6. |
+| **Auxiliary text** | No equivalent | Not a concept in this model either — `pathime_composition_t` has no such field. ibus-anthy synthesises `( 3 / 12 )` (candidate position / total), which this API publishes as `candidate_cursor` and `candidate_count`. See `docs/japanese-input-model.md` §6. |
 | **Surrounding text** | No direct equivalent | `anthy_set_reconversion_mode(ctx, ANTHY_RECONVERT_*)` controls whether the library uses reconversion, but the caller must supply the surrounding text to `anthy_set_string` manually. |
 | **Delete surrounding text** | No equivalent | The library never requests deletion of client text. |
 | **Focus** | No equivalent | anthy-unicode has no lifecycle callbacks or awareness of focus. |
@@ -197,11 +197,11 @@ callbacks:
 
 `self.__reset()` (`engine.py:Engine.__reset`) discards the `JaString`, clears `__segments`,
 clears the lookup table, and resets `__convert_mode` to `CONV_MODE_OFF`. It does **not** call
-`anthy_reset_context` directly. This is safe not because "the stale state is overwritten" but
-because `anthy_set_string` itself calls `anthy_do_reset_context` first (`main.c:212`); the C
-context is always reset at the start of the next conversion. Calling `anthy_reset_context` on
-reset is still worthwhile to release the segment list / dictionary session promptly (see
-mismatch #5).
+`anthy_reset_context` directly. That is safe because `anthy_set_string` itself calls
+`anthy_do_reset_context` as its first action (`main.c:212`), so the C context is always reset at
+the start of the next conversion — there is never stale conversion state for it to read. Calling
+`anthy_reset_context` on reset is still worthwhile, to release the segment list / dictionary
+session promptly (see mismatch #5).
 
 **Note on API naming:** the introspection wrapper uses convenience methods
 (`get_nr_segments()`, `get_nr_candidates(seg)`, `get_nr_predictions()`) that are GObject-introspection
@@ -326,8 +326,9 @@ it discards only the Python-side `JaString` and segment list. There is **no stal
 because `anthy_set_string` calls `anthy_do_reset_context` as its first action (`main.c:212`,
 `context.c:322` — it frees the prior segment list, split context, and input string). The C side
 is therefore always reset at the start of each conversion. A libpathime implementation should
-still call `anthy_reset_context` on reset, but the justification is **prompt resource release**
-(freeing the segment list and releasing the dictionary session) rather than avoiding stale state.
+still call `anthy_reset_context` on reset, and the reason it should is **prompt resource
+release**: freeing the segment list and releasing the dictionary session at the moment the
+composition is abandoned rather than whenever the next one begins.
 
 ### 6. No surrounding text input to the library
 
@@ -359,20 +360,18 @@ flag causes `__begin_anthy_convert()` to be called inside `__on_key_common`, whi
 `anthy_set_string` on every printable keystroke. libpathime must replicate this policy choice
 if it wants to support immediate conversion.
 
-### 8. Auxiliary text position — resolved by deleting the concept
+### 8. Auxiliary text — a concept neither side has
 
-**What CONCEPTS.md expects**: one auxiliary-text string; the client decides where to display it.
+**What CONCEPTS.md expects**: nothing. This model has no auxiliary text at all.
 
-**What anthy-unicode provides**: nothing.
+**What anthy-unicode provides**: nothing either. The `( N / M )` candidate counter is generated
+entirely by the ibus-anthy wrapper, in `__update_anthy_convert_chars`; the library has no
+notion of it.
 
-**Resolved:** there is no auxiliary text in this model, so there is nothing to bridge. The
-counter is `candidate_cursor` and `candidate_count`, and rendering it is the client's.
-The original note follows.
-
-**What must be bridged**: the auxiliary text (`( N / M )` candidate counter) is generated
-entirely by the ibus-anthy wrapper in `__update_anthy_convert_chars`. A libpathime binding must
-generate equivalent status information itself, or omit it and rely on the client to derive
-similar information from the candidate list.
+**What must be bridged**: nothing. The counter's two numbers are `candidate_cursor` and
+`candidate_count` in `pathime_composition_t`, and formatting and placing them is the client's
+job. The only thing to be careful of is not reintroducing a status string on the anthy side to
+carry information the composition data already carries.
 
 ---
 

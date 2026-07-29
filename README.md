@@ -26,12 +26,13 @@ The name is its backends: **p**yzy, **a**nthy, **t**able, **h**angul.
 | `PATHIME_ENGINE_BOPOMOFO` | Chinese, Bopomofo/Zhuyin | pyzy |
 | `PATHIME_ENGINE_TABLE` | Table-driven: Wubi, Cangjie, Stroke5, Zhuyin, … | internal |
 
-The first four wrap vendored submodules. The table engine is a reimplementation of
-`ibus-table` that uses the same databases.
+The first four engines are served by three vendored libraries — pyzy supplies both
+Pinyin and Bopomofo. The table engine is part of this library but shares table formats with `ibus-table`.
 
-Each backend adds significant IME functionality on top of the base library: For example,
-if you only care about Japanese, you could use Anthy directly, but you wouldn't get kana
-input support.
+Each adapter adds real input-method behaviour on top of the library it wraps. If you
+only care about Japanese you could link anthy directly, but anthy accepts finished
+kana and nothing else — the romaji and kana typing, the key handling and the
+composition model would all still be yours to write.
 
 ## Platforms
 
@@ -55,7 +56,7 @@ cmake --build build
 It is a client of the public header and nothing else, so it also serves as a
 worked example of the parts the snippet above skips — surrounding text,
 candidate paging, and what to do with a key the engine declines. See
-**[`demo/README.md`](demo/README.md)**
+**[`demo/README.md`](demo/README.md)** for what to try in it.
 
 ## Example
 
@@ -108,20 +109,29 @@ that caused it returns. The API is synchronous throughout and starts no threads.
 
 ## Tests
 
-`tests/` holds two kinds of suite, both run by `ctest`. `tests/hangul`,
-`tests/anthy` and `tests/pyzy` test the ports of the vendored libraries
-themselves — that they still behave the same after being built this way,
-particularly on Windows. `tests/api` and `tests/core` test `libpathime`:
-the public header driven exactly as a client would drive it, end to end
-against each engine, plus the core's own units. `docs/testing.md` is how to run
-them.
+`tests/` holds two kinds of suite, both run by `ctest`: one that checks the
+vendored libraries still behave the same after being built this way, and one
+that drives the public header exactly as a client would, end to end against
+every engine. `docs/testing.md` has the detail and the commands.
 
 ## Documentation
 
-- `BUILD.md` — how to build
-- `docs/testing.md` — how to run the tests
-- `docs/CONCEPTS.md` — definition of terms: engine, client, composition, candidates
+Using the library:
+
 - `include/pathime/pathime.h` — the API, documented in full
-- `docs/source-layout.md` — the map of `src/`
-- `docs/windows-port.md` — how the Windows port works, and its limitations
+- `docs/CONCEPTS.md` — definition of terms: engine, client, composition, candidates
+- `BUILD.md` — how to build, and every build option
 - `demo/README.md` — the interactive terminal demo, and what to try in it
+
+Working on the library:
+
+- `docs/source-layout.md` — the map of `src/`: which file owns what
+- `docs/testing.md` — the test suites and how to run them
+- `docs/windows-port.md` — how the Windows port works, and its limitations
+- `src/engines/table/README.md` — the table engine's own map
+- `docs/libhangul-mapping.md`, `docs/anthy-mapping.md`, `docs/pyzy-mapping.md` — how
+  each vendored library connects to this one. Read before upgrading a submodule.
+- `docs/ibus-table-mapping.md` — the ibus-table data format, and what this library
+  does with each part of it
+- `docs/japanese-input-model.md` — measured anthy and ibus-anthy behaviour, behind
+  the Japanese design decisions

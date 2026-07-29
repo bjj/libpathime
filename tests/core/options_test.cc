@@ -2,16 +2,15 @@
  * src/options.cc — the descriptor table, the two-level store, and the
  * validation and resolution orders behind the header's Options section.
  *
- * This suite exists because the public API cannot reach any of it yet. No
- * engine adapter is written, so pathime_engine_create() always answers
- * PATHIME_ERROR_UNKNOWN_ENGINE and a C client can never hold an engine handle —
- * which puts pathime_engine_option_info(), every setter and getter, and the
- * whole of the two-level resolution out of reach from tests/api. src/engine.h
- * and src/context.h define `struct pathime_engine` and `struct pathime_context`
- * as ordinary C++ aggregates, so a test compiled against the internal sources
- * can build those handles itself and then drive the *public* entry points
- * against them. Everything below therefore exercises shipped, exported
- * behaviour; only the way the handle was obtained is internal.
+ * This suite builds its own handles rather than asking the public API for
+ * them. src/engine.h and src/context.h define `struct pathime_engine` and
+ * `struct pathime_context` as ordinary C++ aggregates, so a test compiled
+ * against the internal sources can construct one with no backend behind it and
+ * still drive the *public* entry points against it — every setter and getter,
+ * pathime_engine_option_info(), and the whole of the two-level resolution —
+ * none of which needs an engine that a given build may not have compiled in.
+ * Everything below therefore exercises exported behaviour; only the way the
+ * handle was obtained is internal.
  *
  * Two rules follow from building handles by hand, and both are load-bearing:
  *
@@ -332,9 +331,9 @@ const Expected kExpected[] = {
     {PATHIME_OPT_ANTHY_LATIN_WITH_SHIFT, "anthy-latin-with-shift",
      PATHIME_OPTION_BOOL, kA, false, 1, 0, 0, 0, ""},
 
-    /* ---- Pinyin. Everything under this heading is Pinyin-only, the two
-     * FLAGS options included: they sit in the Pinyin section, and the header
-     * scopes them there. ------------------------------------------------- */
+    /* ---- Pinyin. The header's section heading scopes these to Pinyin, and
+     * every row below is Pinyin-only except the fuzzy one, whose own doc
+     * comment widens it and which says why here. ------------------------- */
 
     /* "ENUM of pathime_pinyin_scheme_t, default PATHIME_PINYIN_SCHEME_FULL.
      * Resets the composition." */
@@ -343,19 +342,14 @@ const Expected kExpected[] = {
      values_upto(PATHIME_PINYIN_SCHEME_DOUBLE_XHE), ""},
 
     /*
-     * "FLAGS of PATHIME_PINYIN_FUZZY_*, default every bit." Twenty bits,
-     * contiguous from bit 0, the last being PATHIME_PINYIN_FUZZY_ING_IN.
+     * "FLAGS of PATHIME_PINYIN_FUZZY_*, default every bit. Pinyin, Bopomofo."
+     * Twenty bits, contiguous from bit 0, the last being
+     * PATHIME_PINYIN_FUZZY_ING_IN.
      *
-     * Bopomofo as well as Pinyin, and this is the one row whose engine set the
-     * header's section heading no longer gives correctly. Unlike the unprefixed
-     * options, this one's doc comment names no engines at all, so the heading is
-     * all a reader has — and src/options.cc has since widened it to both ids the
-     * pyzy backend supplies, on a trace through pyzy's bopomofo_table showing
-     * that 61 of its rows carry a PINYIN_FUZZY_* bit and that check_flags()
-     * makes parseBopomofo() stop at a syllable whose bit is clear. The widening
-     * is additive and right; the header is what has fallen behind, and its
-     * PATHIME_OPT_PINYIN_FUZZY comment wants a "Pinyin, Bopomofo." line of its
-     * own so that this stops depending on which file a reader opens.
+     * Both ids the pyzy backend supplies, which is why this row's doc comment
+     * names its engines rather than leaning on the section heading it sits
+     * under: 61 rows of pyzy's bopomofo_table carry a PINYIN_FUZZY_* bit, and
+     * check_flags() makes parseBopomofo() stop at a syllable whose bit is clear.
      *
      * PATHIME_OPT_PINYIN_CORRECTION below is genuinely Pinyin-only, by the same
      * trace: no row of that table reaches a PINYIN_CORRECT_* bit, because a
@@ -778,10 +772,11 @@ void test_struct_size_protocol()
     }
 
     /*
-     * Smaller than any layout that has shipped. Rejected with nothing written —
-     * verified byte for byte, because "nothing written" is the whole guarantee:
-     * the caller's struct is smaller than the library's idea of it, so a single
-     * stray field would be a buffer overrun rather than a stale value.
+     * Smaller than any layout the struct has ever had. Rejected with nothing
+     * written — verified byte for byte, because "nothing written" is the whole
+     * guarantee: the caller's struct is smaller than the library's idea of it,
+     * so a single stray field would be a buffer overrun rather than a stale
+     * value.
      */
     for (size_t bad : {static_cast<size_t>(0), static_cast<size_t>(1), kSize - 1,
                        sizeof(size_t)}) {

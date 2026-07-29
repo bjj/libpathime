@@ -15,8 +15,8 @@
  * Neither is display text — both are stable machine-readable keys, and a
  * shipping client would map them to its own localized strings — but printing
  * them directly is the honest demonstration of how far the inventory walk gets
- * without a table of its own. This file used to carry thirteen hardcoded label
- * sets, which was exactly the hardcoding the walk exists to avoid.
+ * without a table of its own. Nothing here carries a label set of its own,
+ * because a hardcoded label set is exactly what the walk exists to avoid.
  */
 
 #ifndef PATHIME_DEMO_OPTIONS_VIEW_H
@@ -37,9 +37,9 @@ struct OptionRow {
     /**
      * FLAGS only: which of the option's honoured bits the panel is pointing
      * at, as an index into them lowest-first. Purely this program's cursor —
-     * the library has no such notion — and it exists because each bit now has
-     * a name from pathime_option_value_name(), which is what makes editing
-     * them one at a time worth offering.
+     * the library has no such notion — and it exists because each bit has a
+     * name from pathime_option_value_name(), which is what makes editing them
+     * one at a time worth offering.
      */
     std::size_t flags_bit = 0;
 };

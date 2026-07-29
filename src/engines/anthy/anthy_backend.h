@@ -3,18 +3,19 @@
  * what makes this more than a shim:
  *
  *  - anthy holds N segments, each with its own candidate array, plus an
- *    active-segment index (Finding 1). The API exposes none of that: greedy
+ *    active-segment index. The API exposes none of that: greedy
  *    left-to-right resolution over the leftmost unsettled segment, no
  *    segment navigation or resizing — the phone-keyboard target's call.
  *  - It is UTF-8 only after anthy_context_set_encoding(ANTHY_UTF8_ENCODING),
- *    and seg_len counts input reading xchars, not bytes (Finding 4).
+ *    and seg_len counts input reading xchars, not bytes — so every string
+ *    crossing this seam is converted and copied, never aliased.
  *  - It records a candidate choice only at anthy_commit_segment() time, so
- *    the currently-shown cursor is core's (Finding 2, candidates.cc).
- *  - It wants completed kana (Finding 6); the composing front end that turns
- *    key events into kana is romaji.*, above this adapter.
- *  - anthy_init() is process-global, and "personality" is the write-once
- *    trap that shaped pathime_init()'s data_dir; the auxiliary dictionaries
- *    were deferred for exactly that reason (docs/design-history.md §1).
+ *    the currently-shown cursor is core's (candidates.cc).
+ *  - It wants completed kana; the composing front end that turns key events
+ *    into kana is romaji.*, above this adapter.
+ *  - anthy_init() is process-global, and "personality" is write-once in
+ *    anthy's public interface — the trap that shaped pathime_init()'s
+ *    data_dir, and the reason auxiliary dictionaries are out of scope.
  *
  * ---------------------------------------------------------------------------
  * Nothing is declared here

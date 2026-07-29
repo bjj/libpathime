@@ -7,12 +7,12 @@
  * Why this sits in src/ rather than under one adapter
  * ---------------------------------------------------------------------------
  *
- * Both Chinese engines need it, and the two options must mean one thing. pyzy
- * came first, so this was written as its adapter's; the table engine then
- * arrived needing the same behaviour, and ibus-table's own answer (spec §11.4)
- * disagrees with ibus-pinyin's on four characters — `^` (…… against …), `[` and
- * `<` (variant-dependent here, fixed there), and the period, where §11.4
- * switches on sentence position while this keeps "1.5" intact.
+ * Both Chinese engines need it, and the two options must mean one thing. The
+ * behaviour here is ibus-pinyin's. ibus-table's own answer, in
+ * docs/ibus-table-mapping.md § 11.4, disagrees with it on four characters —
+ * `^` (…… against …), `[` and `<` (variant-dependent here, fixed there), and
+ * the period, where ibus-table switches on sentence position while this keeps
+ * "1.5" intact.
  *
  * Following each reference per engine would make PATHIME_OPT_PUNCTUATION_WIDTH
  * mean two different things depending on which Chinese engine a client had
@@ -28,21 +28,20 @@
  * Why this is ours to write, and where the reference puts it
  * ---------------------------------------------------------------------------
  *
- * pyzy takes [a-z] and the apostrophe and nothing else (Finding 6). It has no
+ * pyzy takes [a-z] and the apostrophe and nothing else. It has no
  * opinion about a comma, and neither of these two options exists anywhere in
  * its API — they are ibus-pinyin's, and in ibus-pinyin they live in a separate
  * *editor*: FallbackEditor, the one that runs when no phonetic editor claims
  * the key (refs/ibus-pinyin/src/PYFallbackEditor.cc). This file is that
  * editor's substance, minus the parts that are IBus plumbing.
  *
- * Locating it in the reference settled a question the pyzy adapter had left
- * open with a comment in the wrong place. The substitution runs when *nothing
- * is composing*: PinyinEditor::processPunct returns FALSE only on empty input
- * (PYPinyinEditor.cc:82-84), which is what lets the key fall through to
- * FallbackEditor. While composing, ibus-pinyin swallows the key and loses the
- * character unless its auto-commit option is on. So the placement in
- * pyzy_backend.cc is the "nothing is composing" branch, not the default arm of
- * the composing switch.
+ * Where the reference puts it is also what settles where this belongs. The
+ * substitution runs when *nothing is composing*: PinyinEditor::processPunct
+ * returns FALSE only on empty input (PYPinyinEditor.cc:83-87), which is what
+ * lets the key fall through to FallbackEditor. While composing, ibus-pinyin
+ * swallows the key and loses the character unless its auto-commit option is
+ * on. So the placement in pyzy_backend.cc is the "nothing is composing"
+ * branch, not the default arm of the composing switch.
  *
  * ---------------------------------------------------------------------------
  * Two deliberate departures from ibus-pinyin
@@ -60,7 +59,7 @@
  *
  * 2. **A key that arrives mid-composition is not lost.** ibus-pinyin's default
  *    swallows it. The adapter ends the composition first and then emits, which
- *    is ibus-pinyin's own auto-commit path (PYPinyinEditor.cc:117-123) promoted
+ *    is ibus-pinyin's own auto-commit path (PYPinyinEditor.cc:121-126) promoted
  *    from an option to the rule. Losing text the user typed is not a behaviour
  *    worth copying.
  *
@@ -152,7 +151,7 @@ struct PunctuationState {
  * The bound matters as much as the rule. Everything outside it — the named
  * keys, the function keys, anything a keymap produces above ASCII — stays the
  * client's, which is FallbackEditor's `default: break` and the reason it
- * returns FALSE for them (PYFallbackEditor.cc:268-270).
+ * returns FALSE for them (PYFallbackEditor.cc:270-272).
  */
 bool emittable(uint32_t keysym);
 

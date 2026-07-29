@@ -4,12 +4,14 @@ The settled rounds, in the words they were settled in. This file exists so
 that `TODO.md` can stay what its name says — upcoming work — without losing
 the record that keeps decisions from being reopened: every entry here is a
 question that was asked, the evidence it was answered against, and what the
-answer cost. It was split out of `TODO.md` on 2026-07-28; the section numbers
-(§1, §2, §3, §4a, §4b, §4c, §5) are preserved from that file because code
-comments and other docs cite them, and they must not be renumbered. The
-adapter-layer findings are §2, back under their original number. §6, the table
-engine, was written here directly rather than carried over, and follows the same
-rule.
+answer cost.
+
+**This file is development-only, and so is a leaf.** It may cite anything;
+nothing may cite it. Code comments, the public header and every other document
+in `docs/` are written to stand on their own, so that this file, `TODO.md` and
+`CLAUDE.md` could all be deleted with nothing dangling. When a round settles
+something a reader of the code needs, the substance goes into the code or the
+permanent doc that owns it, and only the reasoning stays here.
 
 Nothing here is pending. For what is, read `TODO.md`; for the model, read
 `docs/CONCEPTS.md`; for the contract, `include/pathime/pathime.h`.
@@ -243,15 +245,13 @@ rules do extend because bopomofo is parsed into pinyin before it is matched.
 
 The six numbered constraints that shape the adapter layer — why it is more than
 a thin shim over the three vendored libraries. They came out of the mapping
-review (`docs/*-mapping.md`), still hold, and are **cited by number from `src/`
-comments**; the numbering is inherited from the old `PLAN.md` and must not be
-reused or reordered.
+review (`docs/*-mapping.md`) and still hold.
 
-These lived in `docs/design-history.md` §2 until 2026-07-28, and in `TODO.md` §2
-before that — which is why this file's numbering used to skip §2. They are back
-under their original number because the code cites them and the constraints are
-still true of it: a reader changing `backend.h` needs Finding 6 to know why
-backends are handed finished input, not a record that someone once decided it.
+**Their permanent home is `docs/source-layout.md`**, which states each one and
+gives it exactly one place in the tree; the code states whichever it depends on
+at the point that depends on it. Nothing cites them by number any more, and
+nothing should — the numbering survives here only so that this file's own
+prose is readable. What is kept below is the evidence each was derived from.
 
 ### Finding 1 — the internal model must be richer than the API projection
 
@@ -279,11 +279,10 @@ Process-global one-time init (pyzy's shared SQLite `Database` and
 separate from per-context handles (`HangulInputContext*`, `anthy_context_t`,
 `PyZy::InputContext*`), which are one owned handle each and caller-destroyed.
 
-**Corrected during the `src/` stub-out:** this finding used to name libhangul's
-keyboard registry via `hangul_init()` as a third case. It is not one in our
-build. `hangul_init()`/`hangul_fini()` exist only under
+**libhangul is not a third case, though it looks like one.**
+`hangul_init()`/`hangul_fini()` exist only under
 `ENABLE_EXTERNAL_KEYBOARDS` (`engines/libhangul/hangul/hangul.h:99-103`,
-`hangulkeyboard.c:994-1033`), which the top-level `CMakeLists.txt:34` turns off
+`hangulkeyboard.c:994-1033`), which the top-level `CMakeLists.txt:37` turns off
 to avoid an EXPAT dependency and a `sed -i` codegen step. Without it the nine
 built-in layouts are static tables and hangul has **no** process-global setup at
 all — it is the one backend whose availability cannot fail at runtime. Recorded
@@ -708,7 +707,7 @@ without a backend whose list length genuinely misleads.
   The original finding:
   `Composition::cursor` (`src/composition.h:117`) is per active span, is reset
   when a span settles, and is fed to the backend on selection — the core tracks
-  it because neither anthy nor pyzy durably records it (`docs/design-history.md` §2, Finding 2). The
+  it because neither anthy nor pyzy durably records it (§2). The
   public API has no way to read it: `pathime_composition_t` carries a count and
   `pathime_context_candidate()` carries text, and nothing says which entry the
   preedit currently reflects.
@@ -909,7 +908,7 @@ hangul never had one; anthy's was always empty, and ibus-anthy's only content is
 `( 3 / 12 )`, which this API publishes as `candidate_cursor` and
 `candidate_count`; pyzy's turned out to be the preedit under another name; and
 the table engine's is `get_aux_strings()` — the key run, which
-`docs/ibus-table-mapping.md` §6.2 *already* specified as preedit text, plus the
+`docs/ibus-table-mapping.md` §2 *already* specified as preedit text, plus the
 same counter. Nothing was left in the field.
 
 `PATHIME_OPT_PINYIN_SHOW_RAW` went with it, since the auxiliary text was the
@@ -980,7 +979,7 @@ as kana, cursor browsing without rewriting anything.
   "offerings the user did not ask to convert" — pre-conversion on anthy,
   post-commit suggestion mode on table (`docs/ibus-table-mapping.md` §11.3) —
   and a phone strip consumes both, which is why shipping IMEs give them one
-  name. Table's as-you-type candidates are structural (spec §7.2) and are not
+  name. Table's as-you-type candidates are structural — the lookup runs on every key — and are not
   what the option governs there. The user's settings flexibility was part of
   the ruling: a client unhappy with the pairing can set it per context.
 - **The §8 active-span gap is accepted, no new field.** pyzy has shipped the
@@ -1273,7 +1272,7 @@ build-time-manifest alternative.
 
 Six questions the finished engine raised, answered together.
 
-**Char prompts stay in the preedit; the header's clause is what gave.** Spec §7.4
+**Char prompts stay in the preedit; the header's clause is what gave.** ibus-table
 makes the essential operation "commit the literal input", so Cangjie `a`+`b`
 commits `ab` while the preedit reads 日月 — against the header's promise that the
 preedit "is the text that would be committed if the composition ended right now".
@@ -1378,7 +1377,7 @@ way, whereas a search beginning with a wildcard is a search for everything.
 
 ### 6c. What was ruled out of scope, and what compatibility actually means
 
-**User-derived phrases (§10.2) are out of scope for the first phase.** The
+**User-derived phrases are out of scope for the first phase.** The
 deciding argument is reach: only wubi-jidian86 can use the feature at all, and
 that is the table this library has least reason to lead with. The investigation
 is preserved in `TODO.md` because it found something worth not rediscovering —

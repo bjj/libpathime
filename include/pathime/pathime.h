@@ -1410,16 +1410,16 @@ typedef enum pathime_option {
      * anthy re-segments; that churn is the measured cost of eagerness and
      * is ordinary for phrase-at-a-time typing.
      *
-     * On the table engine it enables suggestion mode: after a commit, the
-     * candidate list offers continuations of what was just committed, drawn
-     * from the table's suggestion data. The two surfaces differ — before
-     * the commit on Anthy, after it on Table — but the choice a client is
-     * making is the same one, whether the engine puts forward what the user
-     * did not ask for, and shipping IMEs present both in the same strip.
      * Anthy's own history-based completions are deliberately *not* what
      * this enables — they are empty on a fresh profile and whenever
      * learning is off — but they may be merged into the same candidate
-     * list in a later release without the option changing meaning.
+     * list later without the option changing meaning.
+     *
+     * The table engine accepts this option but currently produces nothing
+     * from it. The intended meaning there is suggestion mode: after a
+     * commit, continuations of what was just committed, drawn from the
+     * table's suggestion data. No table this library compiles carries that
+     * data, so the setting has no observable effect.
      *
      * Pinyin and Bopomofo have no row here because for them unbidden
      * candidates are not a choice: conversion by selection is the only route
@@ -1441,11 +1441,14 @@ typedef enum pathime_option {
      *
      * Whether a partial spelling can match a longer entry, so that "nh" reaches
      * 你好 without typing "nihao" in full. Pinyin and Bopomofo call this
-     * incomplete pinyin; the table engine reaches the same result by appending
-     * a wildcard to the key sequence before searching. They are one option
-     * because the choice a client is making is identical: whether the engine
+     * incomplete pinyin. The choice a client is making is whether the engine
      * guesses ahead from an unfinished spelling, at the cost of a longer
      * candidate list.
+     *
+     * The table engine reaches the same result by appending a wildcard to the
+     * key sequence before searching, but does so on its table's own
+     * declaration rather than on this option: a client's value is accepted
+     * and has no effect there.
      */
     PATHIME_OPT_INCOMPLETE_INPUT = 7,
 
@@ -1718,31 +1721,57 @@ typedef enum pathime_option {
     /**
      * BOOL, default false.
      *
-     * Whether a key sequence that can no longer be extended stages its best
-     * match automatically, rather than waiting to be selected. Table authors
-     * treat this and PATHIME_OPT_TABLE_AUTO_SELECT as one behavioural profile
-     * and set them together, so a client changing one will usually want both.
+     * Whether a key run that has reached the table's maximum length stages its
+     * current candidate automatically, rather than waiting to be selected —
+     * and, separately, whether a run that matches exactly one entry commits
+     * that entry outright, without waiting for the run to end. The second is
+     * the one that surprises: it delivers text mid-run, at any length.
+     *
+     * Staging at a boundary the table's own rules declare happens either way
+     * and is not this option's doing.
+     *
+     * Table authors treat this and PATHIME_OPT_TABLE_AUTO_SELECT as one
+     * behavioural profile and set them together, so a client changing one will
+     * usually want both.
      */
     PATHIME_OPT_TABLE_AUTO_COMMIT = 24,
 
     /**
      * BOOL, default false.
      *
-     * Whether the first candidate is selected implicitly when the key sequence
-     * reaches its maximum length, so that typing continues into the next
-     * character without an explicit selection.
+     * What happens when a key run stops matching anything at all: with this
+     * on, the run is rewound to its last matching form, the candidate standing
+     * at that moment is selected, and the key that broke the match starts a
+     * fresh run — so typing continues into the next character without an
+     * explicit selection. Off, the run simply stops matching.
+     *
+     * It selects the candidate under the cursor, not unconditionally the
+     * first, so a client's highlight is honoured here as everywhere else.
      */
     PATHIME_OPT_TABLE_AUTO_SELECT = 25,
 
     /**
      * STRING, default empty. One character, or empty to disable.
      *
-     * The character that stands for exactly one unknown key in a search. Empty
-     * means the table offers no single-character wildcard, which is the common
-     * case: of the tables surveyed only one defines it.
+     * The character that stands for exactly one unknown key in a search, and
+     * empty when the table offers no single-character wildcard.
+     *
+     * Read it rather than assume it. Most tables declare no wildcard of their
+     * own, but a table compiled by this library is given one where its
+     * alphabet leaves room, so on most of the tables that ship this reads back
+     * as a character the table's author never wrote — which is exactly why the
+     * value is worth querying before showing a user how to type a wildcard.
+     *
+     * One position is exempt: a wildcard character at the *start* of a key run
+     * is a literal key, not a wildcard. Tables that use the character as an
+     * ordinary key in first position — cangjie5 reaches several hundred
+     * punctuation codes that way — would otherwise lose them.
      *
      * "One character" means one Unicode scalar value. A string holding more
      * than one is PATHIME_ERROR_INVALID_ARGUMENT and changes nothing.
+     *
+     * A value set by a client is currently accepted and stored but does not
+     * reach the search: the wildcards in force are the resolved table's.
      */
     PATHIME_OPT_TABLE_SINGLE_WILDCARD = 26,
 
@@ -1751,7 +1780,8 @@ typedef enum pathime_option {
      *
      * The character that stands for any run of unknown keys, conventionally an
      * asterisk. One Unicode scalar value, on the same terms as
-     * PATHIME_OPT_TABLE_SINGLE_WILDCARD.
+     * PATHIME_OPT_TABLE_SINGLE_WILDCARD, including that a client's own value
+     * does not currently reach the search.
      */
     PATHIME_OPT_TABLE_MULTI_WILDCARD = 27,
 
@@ -1771,6 +1801,12 @@ typedef enum pathime_option {
      * contain: commit the candidate standing at that moment, or commit the raw
      * keys the user typed. The choice matters most to users who mix table input
      * with Latin text.
+     *
+     * It governs only keys outside the alphabet. A key the alphabet does
+     * contain, arriving where it can no longer extend the run, is
+     * PATHIME_OPT_TABLE_AUTO_SELECT's case rather than this one. And with no
+     * candidate standing, the first value falls back to the second, since
+     * there is nothing else to commit.
      */
     PATHIME_OPT_TABLE_INVALID_INPUT = 29,
 

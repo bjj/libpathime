@@ -82,7 +82,7 @@ int main(void)
 
     /*
      * 2. Per-engine, not fatal. hangul has no process-global setup at all in
-     * this build (docs/design-history.md §2, Finding 3), so it is the one backend whose
+     * this build, so it is the one backend whose
      * availability cannot fail at runtime — which makes it the right witness
      * that pyzy's failure stayed pyzy's.
      */

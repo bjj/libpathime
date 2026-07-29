@@ -41,8 +41,12 @@ against the five shipped tables (305,150 rows, 70,948 distinct characters):
 
     map                          code points   rows dropped
     Noto Sans CJK                     44,810   111,827 (36.6%)   cangjie5 52.4%
-    Windows in-box CJK                30,360   117,626 (38.5%)   cangjie5 55.1%
+    Windows in-box CJK                43,509   116,945 (38.3%)   cangjie5 54.9%
     + SimSun-ExtB / MingLiU-ExtB     113,496         0 ( 0.0%)
+
+The first two rows are reproducible from the checked-in maps: build
+pathime-table-compile against each and compile the five tables. The third needs
+the two Ext-B fonts, which are not in a bare Windows install.
 
 The filter is, in practice, "drop CJK Extension B and beyond": of the 40,686
 distinct characters the Noto map drops, 40,603 are supplementary-plane and the
@@ -62,13 +66,13 @@ Reading a font's coverage
 -------------------------
 
 read_charset() parses the font's own `cmap` table, formats 4 (BMP) and 12 (full
-range), with no platform library involved. That is deliberate, and replaces an
-earlier plan to call fontconfig on Linux and GDI on Windows:
+range), with no platform library involved. That is deliberate: the obvious
+platform answers, fontconfig on Linux and GDI on Windows, are both worse here.
 
   - fc-query works, but makes the generator Linux-only for no gain -- its charset
     comes from FreeType reading the same `cmap` this does.
 
-  - GDI's GetFontUnicodeRanges, the obvious Windows equivalent, **cannot express
+  - GDI's GetFontUnicodeRanges, the Windows equivalent, **cannot express
     supplementary-plane coverage at all**, which is precisely the range this map
     is deciding about. GLYPHSET/WCRANGE are UTF-16 code *units*. Measured on
     Windows 11 against SimSun-ExtB, whose cmap covers 60,349 supplementary code
@@ -78,9 +82,8 @@ earlier plan to call fontconfig on Linux and GDI on Windows:
     is COM through ctypes for a script that runs twice a year.)
 
 Parsing `cmap` is about fifty lines, is correct above the BMP, needs nothing
-installed, and reads a font file that need not even be a system font. The
-contract is unchanged from when this was platform-specific: given a font path,
-return a set of ints.
+installed, and reads a font file that need not even be a system font. The whole
+of the interface it has to meet: given a font path, return a set of ints.
 """
 
 import argparse

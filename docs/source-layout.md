@@ -1,18 +1,17 @@
 # Source layout — `src/`, `tests/api/` and `tests/core/`
 
-The map of the implementation tree: what each file is for, the conventions
-that hold across it, and which choices are settled versus deliberately still
-open. This is the starting point for implementation work; `docs/design-history.md` §2 holds
-the numbered findings this layout answers to, and `docs/CONCEPTS.md` plus
-`include/pathime/pathime.h` hold the contract being implemented.
+The map of the implementation tree: what each file is for, and the conventions
+that hold across it. This is the starting point for implementation work;
+`docs/CONCEPTS.md` and `include/pathime/pathime.h` hold the contract being
+implemented, and "What the adapter layer forces" below states the six properties
+of the backends that this layout has to answer to.
 
 ## The shape
 
 ```
 src/
-  CMakeLists.txt        the `pathime` library target; defines PATHIME_BUILD, carries
-                        the public include dirs (the old libpathime::headers
-                        interface target is folded in and retired)
+  CMakeLists.txt        the `pathime` library target; defines PATHIME_BUILD and
+                        carries the public include dirs
   init.h/.cc            process-global layer: pathime_init/shutdown, init params,
                         version + status introspection; the header answers the
                         questions every other file asks — initialized(),
@@ -54,14 +53,20 @@ src/
                         coverage.*/coverage_data_*.h are a further step out: the
                         *library* does not link them, only tools/table-compile,
                         because glyph filtering happens once at build time and
-                        the map would otherwise be dead weight in every process
+                        the map would otherwise be dead weight in every process.
+                        README.md is this directory's own map — the data/behaviour
+                        boundary and what the ibus-table data contract costs
 tools/
   table-compile/        pathime-table-compile: source .txt to compiled .db, built
                         from the engine's own data-layer sources
   generate-variants.py  regenerates engines/table/variants_data.h from Unicode
+  generate-coverage.py  regenerates engines/table/coverage_data_{noto,windows}.h
+                        from fonts; opt-in target only, never an ordinary build
+                        (BUILD.md, "Glyph coverage")
 tests/
   api/                  links the built library, exported symbols only, C11:
-                        abi, lifecycle, options, and one test per engine
+                        abi, lifecycle, options, one test per engine, plus the
+                        no-database negative for pyzy
   core/                 compiles internal sources directly, C++17:
                         utf8, composition, options, table
 ```
@@ -134,18 +139,48 @@ rather than being split between `engine.cc` and `context.cc`**: they are
 kind-typed pairs that differ only in which store they consult first, and
 splitting them would put the two halves of one resolution rule in two files.
 
-## Who owns which finding
+## What the adapter layer forces
 
-The findings are `docs/design-history.md` §2's; the layout gives each exactly one home.
+Six properties are true of the backends whatever this library wants, and every
+structural choice above is an answer to one of them. They are permanent — they
+describe libhangul, anthy and pyzy as they are, and the table engine inherited
+most of them from writing against a data format instead of a library.
 
-| Concern | Home |
+1. **The internal model has to be richer than the flat public value.** Every
+   backend keeps state `{preedit, preedit_settled, candidates}` cannot hold:
+   anthy an array of segments each with its own candidates and an active index,
+   pyzy a three-part preedit with a provisional middle, libhangul only the
+   trailing syllable, so the settled prefix has to be accumulated on this side.
+2. **The library owns the "currently shown" candidate.** Neither anthy nor pyzy
+   durably records which candidate is hovered before it is committed — anthy
+   records the choice only at `anthy_commit_segment` time — so the cursor is not
+   a value that can be read back out of a backend.
+3. **Lifetime is two layers, not one.** Process-global one-time initialization
+   is a separate thing from the per-context handles built on top of it, and the
+   two fail, succeed and are torn down independently.
+4. **Encoding is not uniform.** Conversion happens at every boundary, and every
+   string a backend hands back is *borrowed and volatile*: valid until that
+   backend's next mutating call and no longer.
+5. **Push and pull have to be reconciled.** pyzy fires Observer callbacks
+   synchronously in the middle of a mutation; anthy and libhangul say nothing and
+   must be asked. Dirty flags plus one post-call assembly step reconcile the two
+   without an event loop anywhere in the library.
+6. **The whole key-event layer is the library's.** No backend accepts a key event
+   in anything like the form a client produces one: anthy wants completed kana,
+   pyzy takes `[a-z]` and an apostrophe, libhangul takes a US-QWERTY int.
+   Validation, routing and the handled/unhandled answer are all this side of the
+   seam, and each adapter is handed finished input.
+
+The layout gives each exactly one home.
+
+| Property | Home |
 |---|---|
-| Structured model richer than the flat value (Finding 1) | `composition.*` for the model and projection; each adapter supplies its own structure |
-| Currently-shown candidate is ours (Finding 2) | `candidates.cc` |
-| Two-layer lifetime (Finding 3) | `init.cc` / `engine.cc` / `context.cc` — one file per layer |
-| Encoding at every boundary (Finding 4) | `utf8.*`, invoked inside each adapter |
-| Push vs pull reconciliation (Finding 5) | `engines/pyzy/observer.*` sets dirty flags; `context.cc`'s post-call assembly reads them |
-| The whole key-event layer is ours (Finding 6) | `keys.*` for the engine-agnostic part; `engines/anthy/romaji.*` for the composing front end |
+| The internal model is richer than the flat value | `composition.*` for the model and projection; each adapter supplies its own structure |
+| The currently-shown candidate is ours | `candidates.cc` |
+| Two-layer lifetime | `init.cc` / `engine.cc` / `context.cc` — one file per layer |
+| Encoding converts at every boundary | `utf8.*`, invoked inside each adapter |
+| Push and pull reconciled | `engines/pyzy/observer.*` sets dirty flags; `context.cc`'s post-call assembly reads them |
+| The whole key-event layer is ours | `keys.*` for the engine-agnostic part; `engines/anthy/romaji.*` for the composing front end |
 | Eager materialization before callbacks | `candidates.cc`, sequenced by `context.cc` |
 
 ## Conventions
@@ -189,12 +224,22 @@ strict C and that the symbols are exported.
   across every entry point in three initialization states.
 - `options_test.c` — the introspection walk, name totality and distinctness,
   the pre-init-safe subset.
-- `engine_hangul_test.c`, `engine_anthy_test.c`, `engine_pyzy_test.c` — one
-  end-to-end test per engine, typing real Korean, Japanese and Chinese through
-  the public API. These are the only tests here gated on a `LIBPATHIME_WITH_*`
-  option, because they need their backend's *runtime data* rather than just the
-  library; `tests/api/CMakeLists.txt` carries that wiring and says why it is a
-  test-environment problem rather than a library one.
+- `engine_hangul_test.c`, `engine_anthy_test.c`, `engine_pyzy_test.c`,
+  `engine_table_test.c` — one end-to-end test per engine, typing real Korean,
+  Japanese and Chinese through the public API. These are the only tests here
+  gated on a `LIBPATHIME_WITH_*` option, because they need their backend's
+  *runtime data* rather than just the library; `tests/api/CMakeLists.txt` carries
+  that wiring and says why it is a test-environment problem rather than a library
+  one. Three of the four also get a `.clean` fixture test that empties a private
+  home directory first, because they commit and so write learning state.
+- `engine_pyzy_nodb_test.c` — the negative half of `engine_pyzy_test.c`: with the
+  database missing, Pinyin and Bopomofo report themselves absent *together* (they
+  are one backend behind two ids) and `pathime_init()` still succeeds with hangul
+  intact. It exists because pyzy will not report the failure itself —
+  `PyZy::InputContext::init()` returns void and `Database::init()` constructs the
+  singleton whether or not `open()` found anything (`Database.cc:202-208,
+  729-734`), so the adapter tests for the file in front of init and this is what
+  proves it.
 
 **`tests/core/`** compiles the internal sources under test directly into each
 executable, because internal helpers carry no `PATHIME_API` and a shared build
@@ -211,6 +256,14 @@ widen the ABI for no client's benefit. C++17, ctest names `core.<name>`.
   and the engine-level broadcast. It builds `pathime_engine` and
   `pathime_context` aggregates directly, which is how it reaches machinery the
   public API alone cannot.
+- `table_test.cc` — the table engine's data layer below the seam: the source
+  parser, the typed declaration, LIKE-pattern construction and candidate
+  ordering, against inputs chosen to be awkward (wildcard characters that collide
+  with SQL's own, rule sets malformed in each of the ways `docs/ibus-table-mapping.md`
+  §3.5 forbids). It opens
+  no database and compiles six of `engines/table/`'s files plus `paths.cc` and
+  `utf8.cc` — which is only possible because of the boundary inside that
+  directory described above.
 
 Compiling the sources in twice is the deliberate trade: a little build time for
 tests that reach the seams where the rules actually live, without any of it
@@ -218,26 +271,15 @@ becoming public surface.
 
 ## The seam, as designed
 
-`backend.h` and `composition.h` were one decision — `docs/design-history.md` §3, question 1 —
-and were taken against all three mapping docs at once rather than accreted
-engine by engine. The answer turned out to be smaller than expected, because
-laid side by side the three backends describe the same three-part picture:
-
-|          | settled              | active             | tail              |
-|----------|----------------------|--------------------|-------------------|
-| pyzy     | `selectedText()`     | `conversionText()` | `restText()`      |
-| anthy    | segments < active    | segment[active]    | segments > active |
-| hangul   | finished syllables   | trailing syllable  | (always empty)    |
-
-So `Composition` is three strings, a candidate list for the active span, and a
-cursor into it; the projection to the flat public value is a concatenation and
-a scalar count, and `preedit_settled` falls out as the length of `settled`.
-Greedy left-to-right resolution is then one function, `settle_active()`.
-
-There is deliberately no segment array and no active index. anthy has both; it
-keeps them privately and reports the three strings. That is the
-phone-keyboard target breaking the tie, and it is why nothing in the model can
-address a span other than the active one.
+`backend.h` and `composition.h` were one decision, taken against all the mapping
+docs at once rather than accreted engine by engine — which is why laid side by
+side the backends turn out to describe the same three-part picture, and why
+`Composition` is three strings, a candidate list for the active span and a cursor
+into it. **The shape and the reasoning live in `src/composition.h`'s header
+comment**, next to the code they govern; that is where the settled/active/tail
+correspondence per backend is tabulated and where the deliberate absence of a
+segment array and an active index is explained. Greedy left-to-right resolution
+is then one function, `settle_active()`, in `composition.cc`.
 
 `backend.h` follows from that: two layers matching the API's own
 (`EngineBackend`, `ContextBackend`), a `KeyEvent` the key layer has already
@@ -247,7 +289,7 @@ validated, an `OptionReader` an adapter pulls resolved values through, a
 adapter mutates the model in place and never dispatches, never orders, never
 learns that options have tiers.
 
-`SurroundingTextView` is the newest of those and the narrowest: one method,
+`SurroundingTextView` is the narrowest of those: one method,
 `can_delete_before(count)`. It exists because `PATHIME_HANGUL_PREEDIT_NONE`
 builds its syllable inside the client's document, and the header's recovery
 when the snapshot no longer covers that text is not something the dispatch can
@@ -261,32 +303,29 @@ exposing the text would be a concept carried for no consumer. Its predicate and
 `range_within_snapshot()` in `context.cc`, so the answer an adapter gets before
 the fact and the check the library applies after it cannot disagree.
 
-## Decided here, cheap to revisit
+## Two placements that are not obvious from the names
 
-- **The romaji/kana front end lives with anthy, not in core** — the
-  per-engine answer to `docs/design-history.md` §3, question 2. Only Japanese needs a
-  composing state machine before its backend sees input; hangul and pyzy
-  dispatch is simple enough to live in their adapters. Answered for the table
-  engine now that it exists: it wants nothing from `romaji.*`. Its key run is
-  the raw scalars the user typed, matched against a set the table declares, so
-  there is no state machine in front of it at all — the nearest thing is
-  char-prompt substitution, which is display-only and applies *after* the run is
-  built.
+**The romaji/kana front end lives with anthy, not in core.** Only Japanese needs
+a composing state machine in front of its backend, so `engines/anthy/romaji.*` is
+the anthy adapter's and not a shared layer; hangul and pyzy dispatch is simple
+enough to sit in their own adapters. The table engine wants nothing from it
+either: its key run is the raw scalars the user typed, matched against a set the
+table declares, so there is no state machine in front of it at all — the nearest
+thing is char-prompt substitution, which is display-only and applies *after* the
+run is built.
 
-- **The width and punctuation tables are per-language, so Chinese has one and
-  Japanese has its own** — `punctuation.*` for Chinese, and the same job done
-  inline by `engines/anthy/romaji.cc`'s `kSymbolTable` for Japanese.
-  `PATHIME_OPT_LATIN_WIDTH` and `PATHIME_OPT_PUNCTUATION_WIDTH` are common
-  options, but nothing about their *content* is: the comma key is 、in
-  Japanese and ，in Chinese, and Chinese needs two tables of its own for the
-  simplified and traditional variants. Only the half-to-full-width arithmetic
-  is genuinely shared, and it is three lines.
+**The width and punctuation tables are per-language, so Chinese has one and
+Japanese has its own** — `punctuation.*` for Chinese, and the same job done
+inline by `engines/anthy/romaji.cc`'s `kSymbolTable` for Japanese.
+`PATHIME_OPT_LATIN_WIDTH` and `PATHIME_OPT_PUNCTUATION_WIDTH` are common
+options, but nothing about their *content* is: the comma key is 、in
+Japanese and ，in Chinese, and Chinese needs two tables of its own for the
+simplified and traditional variants. Only the half-to-full-width arithmetic
+is genuinely shared, and it is three lines.
 
-  `punctuation.*` sits directly in `src/` rather than under an adapter because
-  **both** Chinese engines use it. It began as pyzy's; the table engine then
-  needed the same behaviour, and ibus-table's own answer (spec §11.4) disagrees
-  with ibus-pinyin's on four characters. Following each reference per engine
-  would make one option mean two things depending on which Chinese engine the
-  client picked, so the table engine uses this and the parity cost is recorded
-  at the top of `punctuation.h`. There is still no `engines/common/`: shared
-  code does not get a subdirectory, it goes in `src/` with the rest of the core.
+`punctuation.*` sits directly in `src/` rather than under an adapter because
+**both** Chinese engines use it, and the two options must mean one thing whichever
+one a client picked. Which characters that costs against ibus-table, and why the
+cost is worth paying, is at the top of `src/punctuation.h`. There is still no
+`engines/common/`: shared code does not get a subdirectory, it goes in `src/`
+with the rest of the core.

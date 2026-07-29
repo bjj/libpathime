@@ -63,7 +63,10 @@ LikePattern build_like_pattern(const TableProperties &properties, const std::str
  * `pinyin` and `suggestion` tables are created only when the table declares the
  * matching mode, and are left empty: their source data (`pinyin_table.txt`,
  * `phrase.txt`) ships with ibus-table rather than with the tables, and this
- * library does not carry it — see TODO.md.
+ * library does not carry it, so neither mode is implemented. Creating the
+ * tables anyway keeps the schema identical to the one ibus-table writes, and
+ * keeps the declaration and the data separate questions — which is the
+ * distinction TableProperties::pinyin_data exists to draw.
  */
 bool compile_table(const TableSource &source, const std::string &path, std::string *error);
 

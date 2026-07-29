@@ -1,16 +1,16 @@
 /*
- * Library lifetime — the process-global layer of the two-layer lifetime
- * (docs/design-history.md §2, Finding 3). This file owns pathime_init() and
+ * Library lifetime — the process-global layer, above the engine and the
+ * context. This file owns pathime_init() and
  * pathime_shutdown(): validating the init params, resolving the two
  * directories, and running each compiled-in backend's one-time global
  * initialization — anthy's dictionaries, pyzy's shared Database and
  * SpecialPhraseTable — through the lifetime hooks backend.h declares. It is
  * documented as the one slow call, so eager global work belongs here and
- * nowhere else. libhangul needs nothing at this layer in our build; the note
- * in pathime_init() says why, and corrects docs/design-history.md §2, Finding 3 on the point.
+ * nowhere else. libhangul needs nothing at this layer in this build; the note
+ * in pathime_init() says why.
  *
- * The pre-init introspection — version and status strings — is implemented
- * already rather than stubbed: the answers are ABI-fixed statics, and
+ * The pre-init introspection — version and status strings — needs none of that
+ * state: the answers are ABI-fixed statics, callable before pathime_init(), and
  * tests/api/abi_test.c exercises them to prove the library links.
  *
  * Allocation discipline for this file and engine.cc: exceptions must not cross
@@ -253,9 +253,9 @@ pathime_status_t pathime_init(const pathime_init_params_t *params)
      */
     if (params != nullptr) {
         /*
-         * Exactly one layout of this struct has shipped, so exactly one size
-         * is recognized. When a second field is added this becomes a range —
-         * at least the size through the last field this library knows, at most
+         * One layout of this struct exists, so exactly one size is recognized.
+         * When a second field is added this becomes a range — at least the
+         * size through the last field this library knows, at most
          * sizeof(pathime_init_params_t) — so that an older caller stays usable
          * against a newer library. A *larger* value stays an error in either
          * case: it means the caller set fields we would silently ignore.
@@ -316,10 +316,10 @@ pathime_status_t pathime_init(const pathime_init_params_t *params)
      * unavailable". PATHIME_ERROR_BACKEND from this function would mean the
      * library itself is unusable, which is a different and much rarer claim.
      *
-     * libhangul is deliberately absent, against what docs/design-history.md §2, Finding 3 used
-     * to say. hangul_init() and hangul_fini() exist only under
-     * ENABLE_EXTERNAL_KEYBOARDS (engines/libhangul/hangul/hangul.h:99-103,
-     * hangulkeyboard.c:994-1033), which our top-level CMakeLists.txt:34 turns
+     * libhangul is deliberately absent. hangul_init() and hangul_fini() exist
+     * only under ENABLE_EXTERNAL_KEYBOARDS
+     * (engines/libhangul/hangul/hangul.h:99-102,
+     * hangulkeyboard.c:994-1033), which the top-level CMakeLists.txt:37 turns
      * off to avoid an EXPAT dependency and a sed-based codegen step. Without it
      * there is no keyboard registry to populate: the nine built-in layouts are
      * static tables, so hangul has no process-global setup at all in this
@@ -367,8 +367,8 @@ void pathime_shutdown(void)
      *
      * pyzy's is the one that does real work: PyZy::InputContext::finalize() is
      * also where its user database is written, because the save it schedules
-     * through g_timeout_add and a GTimer never fires without a GMainLoop we do
-     * not run (docs/design-history.md §5). Skipping this loses the user's learned phrases.
+     * through g_timeout_add and a GTimer never fires without a GMainLoop this
+     * library does not run. Skipping this loses the user's learned phrases.
      *
      * By contract every engine and context is already destroyed, so nothing
      * here has to tear down per-context state.

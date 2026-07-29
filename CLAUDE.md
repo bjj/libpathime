@@ -55,15 +55,21 @@ After cloning, `git submodule update --init --recursive`.
 ## Where to look
 
 Every document opens with its own statement of what it is for; this list is
-only the routing:
+only the routing.
+
+**Three documents are development-only and must stay leaves: this file,
+`TODO.md` and `docs/design-history.md`.** They may cite anything; nothing may
+cite them. Code comments, the public header and every other document are
+written to stand on their own, so that all three could be deleted with nothing
+dangling. When a round settles something a reader of the code needs, put the
+substance in the code or in the permanent document that owns it, and leave only
+the reasoning in the history.
 
 - `TODO.md` — upcoming work, open questions, deliberate deferrals. Nothing
   settled lives there.
 - `docs/design-history.md` — the settled design rounds, question by question,
   with evidence and costs. **Read it before reopening anything that looks
-  undecided.** Its § numbers are the ones code comments cite — §2 is the six
-  numbered adapter-layer constraints, cited by number from `src/`, and §6 is
-  the table engine.
+  undecided.** §6 is the table engine.
 - `docs/CONCEPTS.md` and `include/pathime/pathime.h` — the model and the
   contract, kept in lockstep; neither carries deviations from the other.
 - `docs/source-layout.md` — which file owns what. Read before adding or
@@ -112,7 +118,11 @@ same habits should carry into the implementation:
   nature all follow from it.
 - **Never edit the vendored submodule trees.** Windows fixes go through the
   compat headers or a configure-time generated copy; see `docs/windows-port.md`.
-
+- **Write in the present tense; the library is unreleased.** Nothing has
+  shipped, so there is no "used to", no "no longer does", no "was widened", and
+  no dated changelog entry. A comment that explains the current shape by
+  contrasting it with an earlier one makes every reader reconstruct a decision
+  they do not need. State what is true and why.
 - **Keep commit messages short.** A subject line and a few sentences. The
   reasoning belongs in the code comments and in `docs/`, where it is next to
   what it explains and gets updated with it; a commit message repeating it just

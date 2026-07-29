@@ -1,7 +1,7 @@
 # Building libpathime
 
 One CMake build produces the `libpathime` library and the three vendored
-input-method submodules it wraps (libhangul, anthy-unicode, pyzy), on Linux and
+input-method libraries it wraps (libhangul, anthy-unicode, pyzy), on Linux and
 Windows.
 
 - Running the tests: `docs/testing.md`
@@ -18,7 +18,7 @@ Per-backend dependencies:
 | Backend | Needs |
 |---------|-------|
 | Korean (libhangul) | nothing beyond a C compiler |
-| Japanese (anthy-unicode) | nothing external; its dictionary is built by host tools at build time, so cross-compiling is not yet supported |
+| Japanese (anthy-unicode) | nothing external; its dictionary is built by host tools at build time, so cross-compiling is not supported |
 | Chinese (pyzy) | `glib-2.0 ≥ 2.24`, `sqlite3`, a UUID provider (`libuuid` on Unix; the bundled Rpcrt4 shim on Windows), plus Python 3 for the optional `android.db` |
 | Table-driven | `sqlite3` — the compiled table format *is* a SQLite database, so reading one ibus-table wrote needs it. Its tables come from the `engines/ibus-table-chinese` submodule. |
 
@@ -32,11 +32,10 @@ from the engine's own sources. Upstream's `tables/CMakeLists.txt` is not used �
 it calls `ibus-table-createdb` (the Python being replaced) plus `sed`, `iconv`
 and `awk`, none of which run on Windows.
 
-`LIBPATHIME_WITH_TABLE` defaults `ON`, like the other three: Pinyin alone does
-not reach the whole Chinese market, and Cangjie, Quick, Wubi and Zhuyin are how
-a great many people type. Missing SQLite turns it off with a warning, as with
-any other backend. Without the submodule the engine still builds and still opens
-a table a client names by absolute path; it simply ships none.
+`LIBPATHIME_WITH_TABLE` defaults `ON`, like the other three. Missing SQLite
+turns it off with a warning, as with any other backend. Without the submodule
+the engine builds and opens a table a client names by absolute path; it ships
+none.
 
 Linux (Debian/Ubuntu):
 
@@ -178,13 +177,15 @@ What the trim actually removes is **CJK Extension B and beyond**: of the 40,686
 distinct characters the Noto map drops from the five shipped tables, 40,603 are
 supplementary-plane and the remaining 83 are private-use. So the right answer
 depends on whether the target has a supplementary-plane font, and that differs
-by platform enough that one map cannot serve both. `LIBPATHIME_TABLE_COVERAGE`
-picks, measured against those tables' 305,150 rows:
+by platform enough that one map cannot serve both — which is why two ship:
+`noto` describes Noto Sans CJK, the ordinary Linux target, and `windows` the
+in-box faces a bare Windows install has. `LIBPATHIME_TABLE_COVERAGE` picks,
+measured against those tables' 305,150 rows:
 
 | value | map | rows dropped | `cangjie5` | table data |
 |-------|-----|--------------|------------|------------|
 | `noto` | Noto Sans CJK, 44,810 points | 36.6% | 52.4% | ~9 MB |
-| `windows` | Windows in-box CJK, 43,509 points | 38.5% | 55.1% | ~5 MB |
+| `windows` | Windows in-box CJK, 43,509 points | 38.3% | 54.9% | ~5 MB |
 | `none` | — | none | none | ~15 MB |
 
 `none` is a real choice on Windows rather than a footgun. A system with the
@@ -235,8 +236,8 @@ backend header or links a backend library. On Windows that is a hard
 requirement rather than a style preference for anthy — see
 `docs/anthy-mapping.md`.
 
-No CMake package config is installed yet, so a consumer names the include
-directory and library itself. A consumer of a **static** build must define
+No CMake package config is installed, so a consumer names the include directory
+and library itself. A consumer of a **static** build must define
 `PATHIME_STATIC` when compiling against the header, to match
 `PATHIME_BUILT_STATIC` in `<pathime/config.h>`; without it the declarations pick
 up `__declspec(dllimport)` on Windows. Within this build tree the `pathime`
@@ -258,6 +259,12 @@ linking `libpathime::pathime` needs no further wiring.
   two submodules that ship no CMake. They compile the vendored sources directly
   and reproduce each project's build-time code and data generation. The
   submodule trees are never modified.
-- `src/` — the library target; `docs/source-layout.md` is the map of what each
-  file owns.
-- `tests/` — every test suite, vendored and our own; `docs/testing.md`.
+
+`src/` builds the single `pathime` target: the core plus each enabled adapter,
+added source by source, so a disabled backend contributes no object at all. The
+one file that lives there without being part of it is
+`src/engines/table/coverage.cc`, which `tools/` compiles into
+`pathime-table-compile` instead — glyph filtering happens when a table is
+compiled, never at runtime. `docs/source-layout.md` is the map of what each file
+owns. `tests/` builds only under `LIBPATHIME_BUILD_TESTS` and installs nothing;
+see `docs/testing.md`.

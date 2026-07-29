@@ -10,7 +10,7 @@
  * when they are stacked.
  *
  * Hangul is the right engine to prove the stack on. It produces no candidates
- * at all — hanja was cut in the API review round — so the composition it
+ * at all — hanja is out of scope for this API — so the composition it
  * exercises is exactly the settled/active spine, without the candidate
  * machinery on top. It is also the only engine whose composition is defined by
  * key *position* rather than by character, which is what layout_key exists for.
@@ -686,8 +686,8 @@ static void test_context_requirements(pathime_engine_t *engine)
     PT_CHECK(pathime_context_requirements(ctx) == 0);
     PT_CHECK(pathime_context_requirements(limited) == 0);
 
-    /* The override that §4b's demo got wrong. The context now requires both
-     * bits; the engine, untouched, still requires neither. */
+    /* The per-context override. The context now requires both bits; the
+     * engine, untouched, still requires neither. */
     PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_HANGUL_PREEDIT,
                                                    PATHIME_HANGUL_PREEDIT_NONE),
                     PATHIME_OK);

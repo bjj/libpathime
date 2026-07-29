@@ -6,8 +6,9 @@
  * where a wrong answer shows up as a differently ordered candidate list and a
  * right answer proves little about the edge cases. Here they are called
  * directly, against inputs chosen to be awkward: the synthetic table from
- * the mapping doc's minimal example, wildcard characters that collide with SQL's own,
- * and rule sets that are malformed in each of the ways §3.5 forbids.
+ * docs/ibus-table-mapping.md's minimal example, wildcard characters that
+ * collide with SQL's own, and rule sets that are malformed in each of the ways
+ * that document's §3.5 forbids.
  *
  * Nothing here opens a database. That is the point of the split the directory
  * is organized around — the parser and the ranking know nothing about SQLite,

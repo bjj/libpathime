@@ -1,5 +1,5 @@
 /*
- * Encoding boundaries (docs/design-history.md §2, Finding 4). The API surface is UTF-8 with
+ * Encoding boundaries. The API surface is UTF-8 with
  * every position in Unicode scalar values; each backend disagrees somewhere:
  * libhangul's composition API is UCS-4; anthy is UTF-8 only after
  * anthy_context_set_encoding() and its seg_len counts input reading xchars,

@@ -59,7 +59,7 @@ namespace {
  * ------------------------------------------------------------------------- */
 
 /*
- * Every layout of each caller-supplied struct this library has ever shipped.
+ * The accepted layouts of each caller-supplied struct — currently one apiece.
  *
  * The header's rule is that a value the library does not recognize is
  * PATHIME_ERROR_INVALID_ARGUMENT, which is a membership test rather than a
@@ -68,9 +68,10 @@ namespace {
  * one, whose layout we cannot know and whose extra fields we would silently
  * ignore.
  *
- * Only one layout of each has shipped. When a member is appended, today's
- * sizeof stays in the list and the new one joins it; nothing is ever removed,
- * because that would break a client still compiling against the old header.
+ * The lists grow by appending: when a member is added to one of these structs,
+ * today's sizeof stays and the larger one joins it. Entries are never removed,
+ * because a client compiled against an earlier header keeps passing its own
+ * sizeof and must keep being recognized.
  */
 constexpr size_t kClientStructSizes[] = { sizeof(pathime_client_t) };
 constexpr size_t kKeyEventStructSizes[] = { sizeof(pathime_key_event_t) };
@@ -257,8 +258,8 @@ void pathime_context_destroy(pathime_context_t *ctx)
                        siblings.end());
     }
 
-    /* The backend handle goes with the object — each of the three is one owned
-     * handle, caller-destroyed (docs/design-history.md §2, Finding 3), and unique_ptr in
+    /* The backend handle goes with the object — each backend's per-context
+     * handle is one owned thing, caller-destroyed, and unique_ptr in
      * context.h is where that ownership is stated. */
     delete ctx;
 }
@@ -351,7 +352,7 @@ pathime_status_t pathime_context_process_key(pathime_context_t *ctx,
      * backend finishes mutating before anything is assembled, and everything
      * is assembled before any callback is dispatched.
      *
-     * The backends accept only finished input (docs/design-history.md §2, Finding 6), so
+     * The backends accept only finished input, so
      * everything above this call is ours — and for anthy the composing front
      * end runs inside its adapter, which is why there is no separate step for
      * it here.
@@ -672,9 +673,9 @@ void refresh_composition(pathime_context_t *ctx, bool force)
      * Before any callback, never during one. pyzy's hasCandidate(i) is lazy
      * and mutating, so pathime_context_candidate() is only the plain array
      * read the header promises if every candidate the
-     * PATHIME_OPT_MAX_CANDIDATES cap allows has already been fetched. That is
-     * the obligation from the API round, and this call is where it is
-     * discharged; candidates.cc owns the rest.
+     * PATHIME_OPT_MAX_CANDIDATES cap allows has already been fetched. This
+     * call is where that obligation is discharged; candidates.cc owns the
+     * rest.
      *
      * It runs before the projection because the projection publishes the
      * count, and a count published before the list it describes would be a lie

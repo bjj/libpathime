@@ -5,8 +5,9 @@
  * The shape of one mutating call
  * ---------------------------------------------------------------------------
  *
- * Every mutating method here runs the same four steps, and the order is the
- * whole of Finding 5:
+ * pyzy pushes — it fires Observer callbacks synchronously from inside a
+ * mutation — while this library pulls. Every mutating method here reconciles
+ * the two by running the same four steps, and the order is the whole of it:
  *
  *   1. observer_.clear()      — so what is read afterward describes this call
  *   2. apply_options()        — options are pulled, never cached (rule 4)
@@ -62,8 +63,9 @@ namespace {
  * Process-global state
  *
  * One bool. pyzy's own global layer is a singleton Database plus a
- * SpecialPhraseTable (Finding 3), reached only through the two static members
- * of InputContext; all this records is whether we have called them, so that a
+ * SpecialPhraseTable — process-global one-time state, separate from the
+ * per-context handles — reached only through the two static members of
+ * InputContext; all this records is whether we have called them, so that a
  * shutdown without an init, or a second init, is a no-op rather than an
  * unbalanced Database::finalize().
  * ------------------------------------------------------------------------ */
@@ -143,13 +145,15 @@ unsigned int translate_flags(int64_t ours, const FlagPair (&table)[N])
  * The PROPERTY_CONVERSION_OPTION bitmask, assembled from the three options
  * that feed it.
  *
- * PATHIME_OPT_PINYIN_FUZZY and _CORRECTION are read for bopomofo contexts too.
- * The option table currently scopes both to Pinyin, so for a bopomofo context
- * they resolve to their tier-4 default of every bit — which is also pyzy's own
- * default (InputContext.h:181-182), so reading them unconditionally is both
- * correct today and already right on the day the fuzzy row is widened. The
- * trace behind that is in pyzy_backend.h's header comment: fuzzy rules really
- * are reachable from bopomofo, correction rules really are not.
+ * PATHIME_OPT_PINYIN_FUZZY and _CORRECTION are both read unconditionally, for
+ * bopomofo contexts as well as pinyin ones, and the two get there differently.
+ * Fuzzy is scoped to both pyzy ids, so a bopomofo context resolves whatever
+ * the client set. Correction is scoped to Pinyin alone, so a bopomofo context
+ * resolves it to its tier-4 default of every bit — which is also pyzy's own
+ * default (InputContext.h:181-182), so sending it changes nothing. The
+ * measured trace behind that split — fuzzy rules really are reachable from
+ * bopomofo, correction rules really are not — is above the two make_flags rows
+ * in src/options.cc.
  */
 unsigned int conversion_option(const OptionReader &options)
 {
@@ -186,9 +190,9 @@ bool wants_simplified(const OptionReader &options)
  *
  * updateAuxiliaryText() writes a '|' at the input cursor
  * (PinyinContext.cc:174-204). This library never moves that cursor — Left and
- * Right are declined while composing, because routing them through made pyzy
- * render the same marker inside conversionText() — so it is always the last
- * character, and it is display state rather than content either way.
+ * Right are declined while composing, because routing them through would make
+ * pyzy render the same marker inside conversionText() — so it is always the
+ * last character, and it is display state rather than content either way.
  *
  * The trailing position is asserted rather than assumed: anything other than a
  * final '|' would mean the cursor had moved after all, and the honest response
@@ -253,7 +257,8 @@ unsigned int double_pinyin_schema(const OptionReader &options)
  *
  * Printable keysyms are the character's Unicode scalar value, which for ASCII
  * is the character, so the keysym is the char pyzy wants with no table in
- * between. That is the whole of Finding 6 for this backend.
+ * between. pyzy is handed finished input and nothing else, and for this
+ * backend that translation is the whole of it.
  */
 bool insertable(uint32_t keysym, PyZy::InputContext::InputType type, bool composing)
 {
@@ -384,9 +389,9 @@ void PyzyContext::apply_options(const OptionReader &options)
      * commit path — PhraseEditor::commit() is reached from inside
      * selectCandidate() and commit(), neither of which takes a flag — and the
      * public header exposes no switch, only resetCandidate() to unlearn one
-     * entry after the fact. The user database is process-global besides
-     * (Finding 3), so even a hack could not be per-context, which this option
-     * is. Reporting unsupported is the decision; see the descriptor comment in
+     * entry after the fact. The user database is process-global besides, so
+     * even a hack could not be per-context, which this option is. Reporting
+     * unsupported is the decision; see the descriptor comment in
      * src/options.cc for the alternative that was turned down.
      */
 }
@@ -423,12 +428,12 @@ void PyzyContext::harvest(const OptionReader &options, Composition *model, Outpu
      *     selectCandidate 你  selected "你"  aux "hao|"      commit "你hao"
      *     bopomofo "su3cl3"  selected ""   aux "ㄋㄧˇ,ㄏㄠˇ|"  commit "ㄋㄧˇㄏㄠˇ"
      *
-     * which is why the preedit and what Return commits now agree, and why the
-     * header no longer has to warn that they might not.
+     * which is why the preedit and what Return commits agree.
      *
      * Bopomofo is the case that makes the rule obviously right rather than
-     * merely consistent: the zhuyin the user is literally typing used to be
-     * reachable only through the auxiliary text, while the preedit showed 你好.
+     * merely consistent: conversionText() there is the Chinese 你好, and the
+     * zhuyin the user is literally typing is reachable only through the
+     * auxiliary text.
      *
      * tail stays empty. restText() is *already inside* what
      * updateAuxiliaryText() renders — that is what its textAfterPinyin() call
@@ -449,8 +454,8 @@ void PyzyContext::harvest(const OptionReader &options, Composition *model, Outpu
      * header names.
      *
      * cursor() itself is still read nowhere. It is a byte offset into the raw
-     * ASCII input (Finding 4), a position in a different string from anything
-     * the API carries.
+     * ASCII input, a position in a different string from anything the API
+     * carries.
      */
     if (observer_.preedit || observer_.auxiliary) {
         model->settled = context_->selectedText();
@@ -617,13 +622,13 @@ bool PyzyContext::process_key(const KeyEvent &key,
             break;
 
         /*
-         * The cursor keys move within the *raw input* — pyzy's cursor, the
-         * byte offset of Finding 4 — not within the output and not within the
-         * candidate list. Up, Down, Page Up and Page Down are absent on
-         * purpose: they navigate the candidate list, which docs/CONCEPTS.md
-         * puts on the client's side, and the API has no operation for moving
-         * the hover anyway. A client scrolls its own list and calls
-         * pathime_context_select_candidate().
+         * The cursor keys move within the *raw input* — pyzy's cursor, a byte
+         * offset into the ASCII it was handed — not within the output and not
+         * within the candidate list. Up, Down, Page Up and Page Down are
+         * absent on purpose: they navigate the candidate list, which
+         * docs/CONCEPTS.md puts on the client's side, and the API has no
+         * operation for moving the hover anyway. A client scrolls its own list
+         * and calls pathime_context_select_candidate().
          *
          * The four cursor keys are **declined**, and the reason is the
          * composition model rather than pyzy. A Composition has no cursor
@@ -632,12 +637,12 @@ bool PyzyContext::process_key(const KeyEvent &key,
          * nothing the client could be told about the result. The anthy adapter
          * declines them for exactly the same reason.
          *
-         * Routing them to pyzy was tried first and is what made the reason
-         * concrete. While its cursor sits anywhere but the end of the input,
-         * pyzy stops putting converted Chinese in conversionText() and puts
-         * the spelled-out syllables with a literal '|' at the cursor there
-         * instead (PinyinContext.cc:129-142, the `m_text.size () != m_cursor`
-         * arm) — typing "nihao" then Left really does make the preedit read
+         * What makes that concrete is what pyzy does with them if they are
+         * routed to it. While its cursor sits anywhere but the end of the
+         * input, pyzy stops putting converted Chinese in conversionText() and
+         * puts the spelled-out syllables with a literal '|' at the cursor
+         * there instead (PinyinContext.cc:129-142, the `m_text.size () !=
+         * m_cursor` arm) — typing "nihao" then Left makes the preedit read
          * "ni h|a". That marker is pyzy rendering its own cursor into a string
          * the API promises is plain content text, and the API has nowhere to
          * say otherwise. Filtering the marker out would hide the state rather
@@ -663,7 +668,7 @@ bool PyzyContext::process_key(const KeyEvent &key,
              *
              * Never swallowed, which is where this parts company with
              * ibus-pinyin: its editor returns TRUE for every key while
-             * composing (PYPhoneticEditor.cc:161-162), so with its auto-commit
+             * composing (PYPhoneticEditor.cc:166-167), so with its auto-commit
              * option off a comma typed mid-composition simply vanishes.
              */
             handled = false;
@@ -685,7 +690,7 @@ bool PyzyContext::process_key(const KeyEvent &key,
      *     the convert key, and only with nothing composing does it become an
      *     ordinary space (or U+3000 at full width). ibus-pinyin arrives at the
      *     same split through processSpace returning FALSE on empty input
-     *     (PYPhoneticEditor.cc:68-69).
+     *     (PYPhoneticEditor.cc:70-71).
      *   - It makes these engines *handle* every printable key, including the
      *     ones they merely pass through unchanged at half width. That is
      *     correct for an IME the user has switched into — ibus-pinyin's
@@ -723,7 +728,7 @@ void PyzyContext::finish_composition(const Composition &model)
 
     /*
      * Select then commit, which is ibus-pinyin's auto-commit path verbatim
-     * (PYPinyinEditor.cc:117-122). The two steps are not redundant:
+     * (PYPinyinEditor.cc:121-126). The two steps are not redundant:
      * selectCandidate() settles the hovered candidate and moves on to the next
      * phonetic segment rather than finishing, so the commit is what disposes
      * of whatever is left — as raw input, which is the same TYPE_CONVERTED
@@ -756,8 +761,8 @@ void PyzyContext::finish_composition(const Composition &model)
  * preedit and not in the document.
  *
  * Safe to strip unconditionally because pyzy accepts only [a-z] and the
- * apostrophe as input (Finding 6) and renders zhuyin for bopomofo, so neither
- * character can reach here as content.
+ * apostrophe as input and renders zhuyin for bopomofo, so neither character
+ * can reach here as content.
  */
 void PyzyContext::commit_preedit(const Composition &model, Output *out)
 {
@@ -816,8 +821,8 @@ void PyzyContext::options_changed(const OptionReader &options,
      * candidate list through the observer. So pulling them at the top of the
      * next mutating call is too late: the header promises a change takes
      * effect immediately, and between two keystrokes there is no next call.
-     * Without this, setting PATHIME_OPT_CHINESE_VARIANT mid-composition left
-     * the traditional candidates on screen until the user typed again.
+     * Without this, setting PATHIME_OPT_CHINESE_VARIANT mid-composition would
+     * leave the traditional candidates on screen until the user typed again.
      *
      * apply_options() may also rebuild the whole context when the phonetic
      * type changed — but PATHIME_OPT_PINYIN_SCHEME is declared
@@ -849,9 +854,9 @@ void PyzyContext::options_changed(const OptionReader &options,
      * and yet the entries that come back from getCandidate() afterwards really
      * are different, because the simplified/traditional choice is applied as
      * each candidate is produced. Measured: without this, setting
-     * PATHIME_OPT_CHINESE_VARIANT mid-composition left the traditional 離 at
-     * index 5 until the user typed one more key, at which point the real
-     * candidatesChanged arrived and it became 离.
+     * PATHIME_OPT_CHINESE_VARIANT mid-composition leaves the traditional 離 at
+     * index 5 until the user types one more key, at which point the real
+     * candidatesChanged arrives and it becomes 离.
      *
      * So the list is dropped here and the core's pump refills it. Positions
      * may move, which is allowed: the caller forces composition_changed for an
@@ -912,12 +917,11 @@ pathime_status_t PyzyContext::set_cursor(size_t index,
     }
 
     /*
-     * focusCandidate() is what docs/design-history.md §3 recorded as reachable and undriven:
-     * pyzy has always tracked a focused index and rewritten its preedit to
-     * match (PhoneticContext.cc:143-155, which sets m_focused_candidate and
-     * calls updatePreeditText), but nothing in this library could move it, so
-     * the active span always showed candidate 0 however the client's highlight
-     * moved. This call is the thing that was missing.
+     * focusCandidate() is what carries the client's highlight into pyzy. pyzy
+     * tracks a focused index and rewrites its preedit to match
+     * (PhoneticContext.cc:143-155, which sets m_focused_candidate and calls
+     * updatePreeditText); without this call the active span would always show
+     * candidate 0 however the client's highlight moved.
      *
      * It fires preeditChanged and nothing else — no commit, and no
      * candidatesChanged, since the list it is hovering within is unchanged —
@@ -1003,7 +1007,7 @@ std::unique_ptr<ContextBackend> PyzyEngine::create_context(const OptionReader &o
     std::unique_ptr<PyzyContext> ctx(new PyzyContext(id_, options));
     if (!ctx->valid()) {
         /* InputContext::create() warns and returns NULL only for an InputType
-         * it does not know (InputContext.cc:76-78), which wanted_type() cannot
+         * it does not know (InputContext.cc:77-79), which wanted_type() cannot
          * produce — so this is a defensive path, not an expected one. */
         return nullptr;
     }
@@ -1096,15 +1100,15 @@ void pyzy_global_shutdown()
     }
 
     /*
-     * This is where the user-database save gets driven (docs/design-history.md §5), and the
-     * entry point is the one the public header already has: finalize().
+     * This is where the user-database save gets driven, and the
+     * entry point is the one pyzy's public header already has: finalize().
      *
      * The chain is finalize() -> Database::finalize() (Database.cc:736-740),
      * which resets the singleton and so runs ~Database (Database.cc:211-219) —
      * and that destructor calls saveUserDB() whenever a save is outstanding.
      * "Outstanding" is m_timeout_id != 0, which Database::modified() sets from
      * g_timeout_add_seconds after every learning write (Database.cc:460-470).
-     * The timeout itself never fires, exactly as docs/design-history.md §5 says, because
+     * The timeout itself never fires, because
      * nothing runs a GMainLoop; but g_timeout_add_seconds still returns a
      * non-zero source id without one, so the flag the destructor tests is set
      * regardless and the save happens here.

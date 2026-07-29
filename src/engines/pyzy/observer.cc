@@ -1,12 +1,13 @@
 /*
  * Implementation of the dirty-flag Observer declared in observer.h.
  *
- * Every function here is deliberately as small as it looks. The whole design
- * of Finding 5 rests on these bodies doing nothing but record: they execute
- * inside pyzy's own mutation frames, where the three preedit segments, the
- * candidate list and the input buffer are not all consistent with each other
- * yet. Anything that read them from in here would be reading a half-applied
- * state; the adapter reads them once, afterward, when pyzy has finished.
+ * Every function here is deliberately as small as it looks. Reconciling pyzy's
+ * push callbacks with this library's pull model rests on these bodies doing
+ * nothing but record: they execute inside pyzy's own mutation frames, where the
+ * three preedit segments, the candidate list and the input buffer are not all
+ * consistent with each other yet. Anything that read them from in here would
+ * be reading a half-applied state; the adapter reads them once, afterward,
+ * when pyzy has finished.
  */
 
 #include "engines/pyzy/observer.h"

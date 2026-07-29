@@ -12,11 +12,11 @@ namespace pathime {
 namespace {
 
 /*
- * Every layout of pathime_key_event_t that has shipped. Exactly one so far, so
- * this is a one-element set; it becomes a range when a field is added, at
- * which point an older caller's smaller struct stays usable and the fields it
- * lacks read as zero. A *larger* value stays an error either way: it means the
- * caller set fields this library would silently ignore.
+ * The accepted layouts of pathime_key_event_t. Exactly one for now, so this is
+ * a one-element set; it grows by appending when a field is added, at which
+ * point an older caller's smaller struct stays usable and the fields it lacks
+ * read as zero. A *larger* value stays an error either way: it means the caller
+ * set fields this library would silently ignore.
  */
 constexpr size_t kKeyEventStructSizes[] = {sizeof(pathime_key_event_t)};
 

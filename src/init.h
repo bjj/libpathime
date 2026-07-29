@@ -1,7 +1,9 @@
 /*
- * Process-global state — the top layer of the two-layer lifetime (docs/design-history.md §2,
- * Finding 3). init.cc owns the state; this header is how the other core files
- * ask the two questions they all have to ask.
+ * Process-global state — the top layer of the lifetime every backend imposes:
+ * one-time process init (pyzy's shared database and special-phrase table,
+ * anthy_init()) separate from the per-context handles built on top of it.
+ * init.cc owns the state; this header is how the other core files ask the two
+ * questions they all have to ask.
  *
  * Nearly every public entry point begins by rejecting calls made before
  * pathime_init() has succeeded, so `initialized()` is the most-called function

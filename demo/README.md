@@ -93,11 +93,13 @@ and others silently ignore.
 
 - **The caret is always at the end of the document.** Arrow keys go to the
   engine rather than moving it. A demo text field, not an editor.
-- **String options are stepped through, not typed into.** The only one is
-  `PATHIME_OPT_TABLE_FILE`, and the library enumerates its legal values — the
-  installed tables — so Left/Right picks one exactly as it picks an enum value.
-  A string option with nothing to enumerate stays unsupported here, because this
-  panel has no text entry and a free-form string has no honest gesture.
+- **String options are stepped through, not typed into.** Of the three —
+  `PATHIME_OPT_TABLE_FILE`, `PATHIME_OPT_TABLE_SINGLE_WILDCARD` and
+  `PATHIME_OPT_TABLE_MULTI_WILDCARD` — only `PATHIME_OPT_TABLE_FILE` has legal
+  values the library enumerates, the installed tables, so Left/Right picks one
+  exactly as it picks an enum value. The other two enumerate nothing and stay
+  unsupported here, because this panel has no text entry and a free-form string
+  has no honest gesture.
 - **Flags options are edited one bit at a time, not as a set.** Left and Right
   move between `pinyin-fuzzy`'s twenty bits and Space toggles the one under the
   cursor; there is no "all" or "none" gesture.

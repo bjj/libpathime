@@ -1,7 +1,7 @@
 /*
- * The engine object — the middle layer of the two-layer lifetime (docs/design-history.md §2,
- * Finding 3): one input method implementation plus whatever it shares across
- * every context using it.
+ * The engine object — the middle layer of the lifetime, between process-global
+ * init and the per-context handles: one input method implementation plus
+ * whatever it shares across every context using it.
  *
  * This header defines `struct pathime_engine` because three core files need to
  * reach inside it and none of them is engine.cc: options.cc reads and writes

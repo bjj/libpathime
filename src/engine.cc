@@ -1,6 +1,6 @@
 /*
  * The engine layer: pathime_engine_* — what one engine shares across all of
- * its contexts (the middle layer of docs/design-history.md §2, Finding 3). Owns:
+ * its contexts, between process-global init and the per-context layer. Owns:
  *
  *  - the engine registry, keyed by pathime_engine_id_t and gated on the
  *    PATHIME_WITH_* macros from <pathime/config.h> — pathime_has_engine()
@@ -215,7 +215,7 @@ uint32_t pathime_engine_requirements(const pathime_engine_t *engine)
 
     /*
      * PATHIME_HANGUL_PREEDIT_NONE is the only thing in the library that sets
-     * either bit (docs/design-history.md §1, "Cut in the API review round"). It holds no
+     * either bit. It holds no
      * preedit at all, building each syllable inside the client's document by
      * deleting the partial form and recommitting a fuller one, so it can only
      * work against a client that both supplies surrounding text and can delete

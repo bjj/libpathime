@@ -12,14 +12,15 @@ programs read and write. So §3, §4 and §5 below are a contract in the literal
 sense — change them and a table this library compiles stops being one ibus-table
 can open, or vice versa.
 
-This file began as `docs/ibus-table-mapping.md`, a clean-room specification written to
-implement the engine from. That job is done, and the parts that only served it —
-the orientation, the implementation checklist, the test-data pointers, and the
-narrative of the key-event state machine — were removed on 2026-07-28. **The
-section numbers of what remains are unchanged**, because ~70 comments in
-`src/engines/table/` cite them; the gaps are the removed sections and must not be
-reused. Why the engine behaves as it does, as opposed to what the format says, is
-`docs/design-history.md` §6.
+**The section numbers here are frozen.** Many comments under `src/engines/table/`
+cite them by number — `§8.1` at the lookup query, `§3.1` at the declaration,
+`§11.1` at variant classification, and so on — so a section is never renumbered
+and a number is never reused. The sequence has gaps; they stay gaps.
+
+What the format specifies is below. Why the engine behaves as it does, where that
+is a choice this library made rather than something the format dictates, is stated
+at the point it arises — inline here where it is a property of the mapping, and in
+`src/engines/table/README.md` where it is a property of the implementation.
 
 ---
 
@@ -27,9 +28,8 @@ reused. Why the engine behaves as it does, as opposed to what the format says, i
 
 This table is the primary connection between `ibus-table` and `CONCEPTS.md`.
 The **Detail** column points at whichever is authoritative for that row: a section
-below where this document still describes the format, `src/engines/table/` where
-the answer is the implementation, and `docs/design-history.md` §6 where it is a
-decision this library took.
+below where this document describes the format, and `src/engines/table/` where the
+answer is the implementation.
 
 | `CONCEPTS.md` concept | ibus-table realization | Detail |
 |---|---|---|
@@ -38,9 +38,9 @@ decision this library took.
 | **Key event** | Offered to the engine's input/editing state machine. Only keys that build or edit the composition are consumed; the rest are reported unhandled. | `table_backend.cc`, `process_key()` |
 | **Handled / Unhandled** | Handled = the key changed composition state (input char, backspace, boundary commit). Unhandled = the engine does not use the key; the client processes it normally. | `table_backend.cc` |
 | **Composition data** | Preedit text + candidate list, recomputed after each handled key. | §8, `table_backend.cc` |
-| **Preedit text** | Concatenation of pre-committed segment phrases and the current key run, with optional per-key prompt substitution (§3.4). | §3.4, design-history §6b |
+| **Preedit text** | Concatenation of pre-committed segment phrases and the current key run, with optional per-key prompt substitution (§3.4). The prompts are keycap legends, so the substitution is what the preedit clause permits under "key legends"; the cost is that the preedit is then not the literal text a commit produces. | §3.4 |
 | **Preedit display position** | The end of the confirmed left segments — text before it is stable on commit, the current key run after it is still provisional. | `table_backend.cc`, `publish()` |
-| ~~Auxiliary text~~ | Not in the model. ibus-table's only auxiliary content was a "position / total" candidate indicator, which is client UI — and the `#: <code>` display that made user-defined phrases discoverable. | §12, design-history §4c |
+| ~~Auxiliary text~~ | Not in the model: this API has no auxiliary text. ibus-table's only auxiliary content is a "position / total" candidate indicator — published here as the candidate cursor and count — and the `#: <code>` display that makes user-defined phrases discoverable, a feature this library does not implement (§3.1, `USER_CAN_DEFINE_PHRASE`). | §12 |
 | **Candidate list** | The full sorted result of the lookup query, capped at 100. Complete and unpaged. | §8 |
 | **Select candidate** | Commit the phrase at an absolute index, apply learning, and continue or clear composition. Paging and selection keys are client policy. | `table_backend.cc`, `select_candidate()` |
 | **Commit text** | A committed phrase, a literal key run committed verbatim, or an optionally full-width-converted character. | §11.4, `src/punctuation.h` |
@@ -93,7 +93,7 @@ descriptive.
 | `AUTO_WILDCARD` | `TRUE` | Engine option | Append `%` to every query so a partial key run matches longer entries (§8.1). |
 | `START_CHARS` | `""` | Data/lookup | If set, only these chars are valid as the *first* key stroke. |
 | `RULES` | `""` | Data/lookup | Compound-phrase construction rules; also defines segment boundaries (§3.5). |
-| `USER_CAN_DEFINE_PHRASE` | `FALSE` | Engine option | Enable learning of user-derived compound phrases; implies a `goucima` table exists (§4.3). Not implemented — `docs/design-history.md` §6c. |
+| `USER_CAN_DEFINE_PHRASE` | `FALSE` | Engine option | Enable learning of user-derived compound phrases; implies a `goucima` table exists (§4.3). Not implemented. |
 | `DYNAMIC_ADJUST` | `FALSE` | Engine option | Track selection frequency and reorder candidates. |
 | `NO_CHECK_CHARS` | `""` | Data/lookup | Characters excluded from frequency adjustment and phrase learning. |
 | `LEAST_COMMIT_LENGTH` | `0` | Data/lookup | Alternative to `RULES` for segment boundaries. |
@@ -365,7 +365,7 @@ classification of a candidate's first character:
 | `cm4` | No filter or boost. |
 
 Classification maps a code point to a bitmask (bit 0 = simplified, bit 1 = traditional) via a
-Unicode-range table derived from `tools/Unihan_Variants.txt`. A clean-room engine must regenerate an
+Unicode-range table derived from `refs/ibus-table/tools/Unihan_Variants.txt`. A clean-room engine must regenerate an
 equivalent table from the same Unicode data (§13.4), not copy the reference's generated table.
 
 ### 11.2 Pinyin mode
@@ -418,8 +418,11 @@ Relative to `CONCEPTS.md`, ibus-table exercises only part of the interface:
   does not synthesize forwarded events.
 - **Focus / Activation** — lifecycle hooks with no intrinsic commit or reset. Commit-on-focus-out is
   a negotiated policy, not implied by focus.
-- **Auxiliary text** — not in the model at all. Removed from the API entirely;
-  `docs/design-history.md` §4c is why.
+- **Auxiliary text** — not in the model at all: this API has no auxiliary-text
+  field. ibus-table's `get_aux_strings()` carries the current key run, which this
+  document already specifies as preedit text (§3.4, §8), plus a "position / total"
+  candidate counter, which `CONCEPTS.md` publishes as the candidate cursor and the
+  candidate count. Nothing is left for the field to hold.
 
 Excluded as client/UI policy (parsed where they appear in data, never acted on): candidate selection
 keys, commit keys, page keys, candidate orientation, "always show lookup", icon/symbol/status prompt,
@@ -443,15 +446,13 @@ Attach the user database as its own schema and set `journal_mode = WAL` on it.
 
 ---
 
-### 13.4 Data to regenerate, not copy
+## 13.4 Data to regenerate, not copy
 
 - **Chinese variant table** (§11.1) — regenerate the code-point→bitmask table from
-  `tools/Unihan_Variants.txt` / upstream Unicode data.
+  `refs/ibus-table/tools/Unihan_Variants.txt` / upstream Unicode data.
 - **Full-width table** (§11.4) — regenerate the half↔full mapping from Unicode data.
 - **Pinyin tone encoding** (§11.2) — the `1..5 → !@#$%` substitution is a fixed convention, not
   copyrightable data; reproduce it directly.
-
----
 
 ---
 
@@ -466,8 +467,7 @@ docs end the same way.
   Home and End are declined while composing and `Composition::tail` is always empty
   for this engine. This is the largest thing given up, and unlike the same
   flattening in anthy and pyzy it removes a *documented ibus-table feature* rather
-  than an incidental capability. `TODO.md` keeps it open: the table engine is the
-  strongest argument for revisiting the model.
+  than an incidental capability.
 
 - **Client-policy declarations are parsed and ignored.** `SELECT_KEYS`,
   `PAGE_UP_KEYS`, `ORIENTATION`, "always show lookup", icons, status prompts and
@@ -479,8 +479,12 @@ docs end the same way.
 - **Committing a run and displaying it are two renderings, not one.** Where a table
   declares char prompts, the preedit shows the key legends (Cangjie `a` reads 日)
   and Return commits the letters. Four of the five shipped tables do this. The
-  header's preedit clause was widened to permit it; `docs/design-history.md` §6b
-  has the reasoning and the cost.
+  header's preedit clause permits it, because `BEGIN_CHAR_PROMPTS` is the *keycap
+  legend* — cangjie5 maps `a`→日, `b`→月 … `y`→卜, which is what is printed on a
+  Cangjie keyboard — so the preedit is the physical keyboard rendered back at the
+  user, and that is the feature rather than a defect in it. What it costs: a client
+  reading the preedit as literal committable text is wrong for those four tables
+  and has to know it.
 
 - **Full-width punctuation follows ibus-pinyin, not §11.4.** The two references
   disagree on `^`, `[`, `<` and the period. One option cannot mean two things
@@ -494,7 +498,7 @@ docs end the same way.
   transfers frequencies from a usage-ranked table, and derives a `z` wildcard where
   the source declared none. The last is a behaviour difference rather than a data
   one — ibus-table's lookup has no position rule, so under ibus-table a *leading*
-  `z` would become a wildcard too. `TODO.md` carries the detail.
+  `z` would become a wildcard too.
 
 - **Pinyin mode (§11.2) and suggestion mode (§11.3) are not implemented.** Their
   source data ships with ibus-table rather than with ibus-table-chinese, so the

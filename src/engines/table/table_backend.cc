@@ -14,14 +14,15 @@
  * declines the motions that would need one. ibus-table lets the user move a
  * caret among the pre-committed segments and insert in the middle, which is
  * what its `cursor_precommit` is for; docs/CONCEPTS.md flattens that away, and
- * docs/ibus-table-mapping.md records it as an impedance mismatch. So new input always joins at the end,
- * every pre-committed segment is to the left of it, and `settled` holds all of
- * them. That also makes preedit_settled fall out as it should: the
- * display position is the end of the pre-committed segments.
+ * docs/ibus-table-mapping.md records it as an impedance mismatch. So new input
+ * always joins at the end, every pre-committed segment is to the left of it,
+ * and `settled` holds all of them. That also makes preedit_settled fall out as
+ * it should: the display position is the end of the pre-committed segments.
  *
- * The consequence is the same one anthy and pyzy already pay, and it is
- * recorded as an open question in TODO.md rather than hidden here: Left, Right,
- * Home and End are declined while composing.
+ * The consequence is the same one anthy and pyzy already pay, and it is stated
+ * here rather than hidden: Left, Right, Home and End are declined while
+ * composing, so a composition can only be edited from its end — Backspace, or
+ * abandon it and retype.
  */
 
 #include "engines/table/table_backend.h"
@@ -198,10 +199,10 @@ private:
      * Tier-3 resolution goes through here rather than through load(), because
      * resolving an option must not have the side effect of opening a database —
      * options are resolved during pathime_engine_option_get(), where a client
-     * has asked a question and not asked for any work. Before the first context
+     * has asked a question and not asked for any work. Until the first context
      * exists, tier 3 therefore contributes nothing and resolution falls to the
-     * descriptor default, which is the same answer it gave before this engine
-     * existed.
+     * descriptor default, which is the same answer it gives for any engine
+     * that publishes no tier-3 source at all.
      */
     const TableDatabase *peek(const char *table_file) const;
 
@@ -762,18 +763,17 @@ bool TableContext::process_key(const KeyEvent &key, const OptionReader &options,
             return false;
         }
         /*
-         * Commit the literal input, which is ibus-table's rule for Return too. The
-         * header's rule is that
-         * it ends the composition without applying a conversion the user did
-         * not choose, and for this engine what the user typed is the key run
-         * itself.
+         * Commit the literal input, which is ibus-table's rule for Return too.
+         * The header's rule is that it ends the composition without applying a
+         * conversion the user did not choose, and for this engine what the user
+         * typed is the key run itself.
          *
          * Where the table has char prompts, the committed text is therefore not
          * character-for-character what the preedit showed — the preedit renders
          * `a` as 日 and this commits `a`. That is the one place the header's
          * "this is the text that would be committed if the composition ended
-         * right now" is inexact for this engine, and it is an open question in
-         * TODO.md rather than a settled reading.
+         * right now" is inexact for this engine, and it is stated here rather
+         * than papered over.
          */
         commit(typed_run(), std::string(), options, out);
         publish(model);
@@ -785,8 +785,8 @@ bool TableContext::process_key(const KeyEvent &key, const OptionReader &options,
     case PATHIME_KEY_END:
         /*
          * Declined while composing, for the reason the model gives: there is no
-         * cursor inside a span to move. Same answer as anthy and pyzy, same
-         * open question (TODO.md).
+         * cursor inside a span to move. Same answer as anthy and pyzy, and the
+         * same cost: the run is editable only from its end.
          */
         return false;
 

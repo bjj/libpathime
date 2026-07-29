@@ -403,9 +403,9 @@ static void test_conversion_candidates(pathime_engine_t *engine)
     /*
      * Space with an empty buffer inserts a space rather than converting, at
      * the width PATHIME_OPT_LATIN_WIDTH selects — the same rule pyzy applies,
-     * and what the header says that option governs. It used to be declined
-     * here so the client could insert its own, which left the two engines
-     * disagreeing about the same key.
+     * and what the header says that option governs. Asserted here because the
+     * two composing engines have to agree about this key: a client binds
+     * Space once, and an engine that declined instead would break that.
      */
     log_reset(&log);
     PT_CHECK(press(ctx, ' '));
@@ -484,11 +484,10 @@ static void test_conversion_candidates(pathime_engine_t *engine)
  * So each check below tests the cursor and the preedit against each other, and
  * either one drifting from the other fails.
  *
- * The arrow keys are the other half. They used to cycle candidates inside this
- * adapter; they no longer do, because navigating a list is the client's and an
- * engine that reports the key handled takes that decision back. So Up and Down
- * must now be *declined* mid-conversion, which is what lets a client bind them
- * to pathime_context_set_candidate_cursor() at all.
+ * The arrow keys are the other half. Navigating a list is the client's, and an
+ * engine that reported the key handled would take that decision back — so Up
+ * and Down are *declined* mid-conversion, which is what lets a client bind
+ * them to pathime_context_set_candidate_cursor() at all.
  */
 static void test_candidate_cursor(pathime_engine_t *engine)
 {
@@ -810,11 +809,11 @@ static size_t scalar_len(const char *s)
 /*
  * PATHIME_OPT_PREDICTION on — the default — is the eager candidate strip:
  * candidates from the first keystroke, the preedit staying kana, the cursor
- * browsing without previewing until Space asks. Every check here is one of the
- * places docs/design-history.md §4c said the obvious implementation would be quietly wrong,
- * plus the strip-selection semantics that came with building it: selection
- * settles the leftmost segment greedily and *typing can continue*, which the
- * converting flow never needed to support.
+ * browsing without previewing until Space asks. Every check here is a place
+ * where the obvious implementation would be quietly wrong, plus the
+ * strip-selection semantics: selection settles the leftmost segment greedily
+ * and *typing can continue*, which the converting flow does not have to
+ * support.
  *
  * Candidate text is captured at runtime rather than asserted by name wherever
  * learning earlier in this run could have reordered a list — the file comment
@@ -864,8 +863,8 @@ static void test_prediction_strip(pathime_engine_t *engine)
     check_str("backspace regenerated against the shorter reading",
               preedit_of(ctx), NI HO);
 
-    /* Return commits the kana and never candidate 0 — the §4c invariant, on
-     * the engine where the strip newly puts it at risk. */
+    /* Return commits the kana and never candidate 0, on the engine where the
+     * strip puts that invariant most at risk. */
     type(ctx, "n");
     log_reset(&log);
     PT_CHECK(press(ctx, PATHIME_KEY_RETURN));
@@ -1009,7 +1008,7 @@ static void test_prediction_strip(pathime_engine_t *engine)
     PT_CHECK(c->candidate_count > 0);
 
     /* Return commits exactly what is on screen: settled text plus the
-     * remaining kana — the §4c guarantee with a partial settlement in play. */
+     * remaining kana, with a partial settlement in play. */
     snprintf(shown, sizeof(shown), "%s", preedit_of(ctx));
     log_reset(&log);
     PT_CHECK(press(ctx, PATHIME_KEY_RETURN));

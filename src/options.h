@@ -10,13 +10,13 @@
  *  - the kind-typed setter/getter plumbing, including the kind-mismatch and
  *    unsupported-for-this-engine rejections.
  *
- * The inventory itself is settled: it is the Options section of
- * include/pathime/pathime.h, and each option's backend meaning is documented
- * in the docs/ per-library options inventories. One claim to re-verify while
- * implementing: PATHIME_OPT_PINYIN_FUZZY/_CORRECTION are scoped out of
- * bopomofo on reasoning that was not traced all the way through the
- * bopomofo-to-pinyin tables (docs/design-history.md §1, "One claim to re-check"); widening
- * support later is additive and harmless.
+ * The inventory itself is the Options section of include/pathime/pathime.h;
+ * how each option reaches its backend is in the matching docs/*-mapping.md.
+ * One scoping decision worth knowing about: PATHIME_OPT_PINYIN_CORRECTION is
+ * Pinyin-only because a correction repairs a Latin spelling and bopomofo has
+ * none to slip in, while PATHIME_OPT_PINYIN_FUZZY covers both engines because
+ * bopomofo is parsed into pinyin before it is matched. Widening either later
+ * is additive and harmless.
  *
  * Only one level of the store lives in one object: an OptionStore is the set
  * of values explicitly set at that level and nothing else. Resolution walks

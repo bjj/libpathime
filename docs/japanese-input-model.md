@@ -24,8 +24,8 @@ The reference is `refs/ibus-anthy` pinned at `bjj/ibus-anthy@0962741`.
 ibus-anthy binds Space to **three** commands at once
 (`data/org.freedesktop.ibus.engine.anthy.gschema.xml.in:932-959`) — `insert_space`,
 `convert`, and `select_next_candidate`. They never overlap, because each is
-guarded by `_chk_mode` (`engine/python3/engine.py:1969-1990`), whose five states
-are mutually exclusive:
+guarded by `_chk_mode` (`engine/python3/engine.py:1970-1990`), whose six states
+are mutually exclusive in every reachable configuration:
 
 | `_chk_mode` | state | Space does |
 |---|---|---|
@@ -36,15 +36,21 @@ are mutually exclusive:
 | `4` | an F-key convert mode (katakana, wide latin, …) | `convert` |
 | `5` | candidate list visible, any mode | `select_next_candidate` |
 
-**source:** `__cmd_convert` is guarded `_chk_mode('14')` (`engine.py:2274`),
-`__cmd_select_next_candidate` is guarded `_chk_mode('235')` (`engine.py:2547`),
-`__cmd_insert_half_space` is guarded `_chk_mode('0')`.
+The one overlap the code permits — mode `4` also answering to a query for `5`,
+since the `'4'` branch returns before the `'5'` test — is unreachable, because
+the F-key convert modes never open a lookup table.
+
+**source:** `__cmd_convert` is guarded `_chk_mode('14')`
+(`engine.py:2273-2274`), `__cmd_select_next_candidate` is guarded
+`_chk_mode('235')` (`engine.py:2546-2547`), `__cmd_insert_half_space` is guarded
+`_chk_mode('0')` (`engine.py:2233-2234`).
 
 So "Space converts, and then Space advances the candidate cursor" is not a
 special case bolted onto a convert key. They are two disjoint commands that
 happen to share a binding, and the state decides which one exists. This is worth
 stating because the alternative reading — one key with a mode-dependent
-exception — makes it look like something we invented and could remove.
+exception — makes the behaviour look like a local convenience of the binding
+rather than the structure of ibus-anthy's command table, which is what it is.
 
 **general knowledge:** Space-converts-then-Space-cycles is identical in MS-IME,
 ATOK, Google Japanese Input and macOS. It is the single most ingrained habit a
@@ -53,7 +59,7 @@ Japanese typist has, and an engine that breaks it reads as broken. We match it.
 ## 2. Tab is `predict`, and after conversion it is a second Space
 
 Same dual life. `'predict': ['Tab', 'ISO_Left_Tab']` at modes `1,4`
-(`gschema.xml.in:938`, `__cmd_predict` at `engine.py:2283`), and Tab also appears
+(`gschema.xml.in:938`, `__cmd_predict` at `engine.py:2282-2283`), and Tab also appears
 in `select_next_candidate`'s binding list, which is live at modes `2,3,5`. So
 **after conversion, Tab and Space do exactly the same thing**; they differ only
 while composing, where Space converts and Tab predicts.
@@ -77,9 +83,33 @@ changed at all.
 
 The key that really does re-render the preedit resolved, without committing and
 without kanji conversion, is **F6** (`convert_to_hiragana` → `__on_key_conv(0)`,
-`engine.py:1590-1600`, rendered by `__update_convert_chars` at
-`engine.py:1226-1228`). That family is deliberately out of scope — `docs/design-history.md` §1
-records the decision and what it costs.
+`engine.py:1590-1623`, rendered by `__update_convert_chars` at
+`engine.py:1226-1228`).
+
+**F6 belongs to a family that is out of scope here.** ibus-anthy converts what
+has already been typed to hiragana (F6), katakana (F7), half-width katakana
+(F8), wide latin (F9) or latin (F10), plus `_all` variants; all of them run
+through `__on_key_conv`, which sets `__convert_mode` so that
+`__update_convert_chars` re-renders the preedit in the chosen script, and all of
+them are guarded `_chk_mode('12345')` (`engine.py:2670-2672` for the hiragana
+entry point), so they are live throughout composition. This is a real
+composition operation and a different thing from `PATHIME_OPT_ANTHY_KANA_SCRIPT`,
+which chooses what typing produces going forward; F7 converts what is already
+there.
+
+It is left out because the phone-keyboard target has no F-keys and because pyzy
+has no equivalent, so it would be a concept carried for one and a half engines.
+Two things soften that. Katakana is partly reachable anyway, since conversion
+offers it as a candidate — にほんご gives `[2] ニホンゴ`, わたし gives ワタシ —
+though the position varies with the record and some readings offer none at all.
+And the operation is cheap to add if a consumer appears: it is one additive
+call over the `display()` / `commit_text()` split `RomajiComposer` already has.
+What is lost outright: **half-width katakana, wide latin and latin are reachable
+by no route at all.**
+
+So the routes from `にほn` to `にほん` are: type the second `n`, press Return, or
+convert. That is what ibus-anthy offers too, and typing `nn` is what Japanese
+typists do.
 
 Because Tab carries both `predict` and `select_next_candidate`, what it appears
 to do depends entirely on which mode you are in, which is how this misreading
@@ -150,8 +180,7 @@ off, because the adapter withholds `anthy_commit_segment` in that case
 
 The prediction cache is entirely separate from `ac->seg_list`, so driving it
 cannot disturb conversion — the obstruction that pushed `PATHIME_OPT_LEARNING`
-to unsupported on pyzy does not exist here. What is in doubt is the value, not
-the feasibility.
+to unsupported on pyzy does not exist here.
 
 ## 5. What "always show candidates" actually wants — and it is not prediction
 
@@ -191,58 +220,69 @@ phrase-at-a-time typing a phone keyboard sees; ugly for a whole sentence.
 Japanese keyboard show. Desktop Japanese IMEs do *not* show candidates before a
 convert key, which is a deliberate difference and not an oversight.
 
-**Shipped (2026-07-28)** as `PATHIME_OPT_PREDICTION`, default on — optional
-precisely because the paragraph above describes two deliberate paradigms, not
-one behaviour and a bug. `docs/design-history.md` §4c records the rulings and the
-strip-selection semantics that building it settled.
+The strip is `PATHIME_OPT_PREDICTION`, on by default. It is an option precisely
+because the paragraph above describes two deliberate paradigms, not one
+behaviour and a bug: a client that wants the desktop convert-on-request shape
+turns it off, and the name is kept because 予測入力 is what Japanese IMEs call
+exactly this strip.
 
-## 6. Preedit and auxiliary: the two engines were mirror images
+**Selecting from the strip settles greedily, and typing continues.** The chosen
+text stays *preedit* rather than committing — pyzy's partial `selectCandidate()`
+shape — the composer is re-seeded with the readings of the segments the choice
+did not consume (`RomajiComposer::assign_kana()`), and conversion re-runs on the
+remainder; when nothing remains the composition commits whole. Around that:
 
-**Superseded by the work this file prompted.** The table below is what the two
-engines did *before* `docs/CONCEPTS.md` gained its preedit rule and
-`pathime_composition_t` lost its auxiliary field. It is kept because the
-asymmetry is the evidence for both changes, and because a reader meeting the
-rule needs to see what it replaced. What is true now: the preedit is what the
-user typed in the script they are composing in, for every engine; there is no
-auxiliary text; and Return commits what is on screen everywhere.
+- **Browsing moves no text.** The strip's candidates arrived unbidden, so moving
+  the candidate cursor through them settles nothing and leaves the preedit as
+  kana. After Space the same list is being *chosen among*, and the cursor
+  previews. That is the per-moment rule in `docs/CONCEPTS.md`, *Candidate
+  cursor*, not an engine quirk.
+- **Space adopts whatever the user browsed to** rather than restarting at
+  candidate 0. A moved highlight is the user's most recent expression of
+  interest; with an untouched cursor the two rules are indistinguishable, so the
+  desktop habit is unaffected.
+- **Un-settling exists.** Backspace deletes remainder kana first, then walks the
+  most recent selection back to the reading it consumed; Escape un-settles every
+  selection at once, and a second press discards the buffer.
+- **Learning re-stages each strip choice on its own** (`learn_eager_choice()`):
+  convert just the reading that choice consumed and commit the matching
+  candidate as the only — and therefore last — segment, which is what flushes
+  anthy's record. Doing it in place cannot work, because the flush needs every
+  segment committed before the remainder re-runs. The cost, stated plainly: the
+  solo commit loses anthy's view of the surrounding segments.
+- Eager conversion feeds `anthy_set_string()` from the composer's resolved
+  reading — the same form the convert key uses — so the strip may show
+  candidates for にほん while the preedit reads にほn. That is the split Return
+  has always had, now visible before a romaji sequence is finished.
 
-**measured** through `pathime.h`, composing state, nothing settled:
+## 6. anthy's preedit is the reading, and its auxiliary text is empty
 
-| | anthy, typing `nihon` | pyzy, typing `nihao` |
-|---|---|---|
-| preedit | `にほn` — the reading, pending latin inline | `你好` — a conversion preview |
-| `preedit_settled` | 0 | 0 |
-| auxiliary | *(empty — always)* | `ni hao\|` — raw input, segmented, with a cursor mark |
-| candidates | 0 until Space | 64 immediately |
-| Space | convert, stay composing | **commit** |
-| Space, nothing composing | **unhandled** | commits `" "` |
-
-The same two facts — what the user typed, and what it might become — were in
-**opposite fields** in the two engines. A client could not write one renderer
-for both. That is what the preedit rule fixed: what the user typed is the
-preedit in both, and what it might become is the candidate list in both.
+**measured** through `pathime.h`, anthy, typing `nihon`, nothing settled: the
+preedit is `にほn` with `preedit_settled` 0, there are no candidates until Space,
+and Space converts while staying in composition rather than committing. With
+nothing composing at all, Space is reported **unhandled**.
 
 The pending romaji is genuinely part of anthy's preedit and not an artefact:
 `jastring.get_hiragana()` maps each segment through `to_hiragana()`, which
 returns `_jachars` if the romaji resolved and the raw `_enchars` if it did not
 (`engine/python3/segment.py:71-74`). The trailing `n` becomes `ん` only when the
 `commit=True` form is used (`jastring.py:259-264`), which is why `nihon` + Return
-commits にほん. Our `RomajiComposer` already splits `display()` from
-`commit_text()` the same way.
+commits にほん. `RomajiComposer` splits `display()` from `commit_text()` the same
+way.
 
 **ibus-anthy's auxiliary text carries nothing worth having.** It is built as
-`'( %d / %d )' % (cursor + 1, count)` (`engine.py:1296`) — the candidate position
-and total, which this API already hands the client as `candidate_cursor` and
+`'( %d / %d )' % (cursor + 1, count)` (`engine.py:1291`) — the candidate position
+and total, which this API hands the client as `candidate_cursor` and
 `candidate_count`. In composing mode (`__update_input_chars`, `engine.py:1208`)
 no auxiliary text is set at all.
 
-That was the first of the four checks that removed the field. hangul never had
-one; anthy's was empty; pyzy's turned out to be the *preedit* under another
-name (§7); and the table engine's is `get_aux_strings()`
-(`refs/ibus-table/engine/table.py:1732`), which is the raw key run mapped
-through `char_prompts` plus the same `current / total` counter — the key run
-being preedit text under the rule, exactly as `docs/ibus-table-mapping.md` §6.2
-already specified before any of this. Four engines, nothing left in the field.
+**This API has no auxiliary text**, and anthy is the clearest case for why the
+concept is unnecessary: across the four engines there is nothing left to put in
+the field. hangul has none. anthy's is empty while composing and a counter
+otherwise. pyzy's is the *preedit* under another name (§7). The table engine's
+is `get_aux_strings()` (`refs/ibus-table/engine/table.py:1732`) — the raw key
+run mapped through `char_prompts`, plus the same `current / total` counter — and
+a key run is preedit text (`docs/ibus-table-mapping.md` §2, *Preedit text*).
 
 ## 7. pyzy's three text parts are really two, and they rearrange on selection
 
@@ -273,14 +313,17 @@ Three things fall out:
   reads `nihao`. So aux tracks exactly what has not yet been converted.
 - **`selectedText() + auxiliaryText()` is anthy's shape.** `你` + `hao|` reads
   `你hao|` — settled conversions followed by the not-yet-converted input, which
-  is precisely `settled + active-as-typed` in anthy terms. This is now what the
-  adapter projects, and `conversionText()` is read nowhere.
+  is precisely `settled + active-as-typed` in anthy terms. This is what the
+  adapter projects; `conversionText()` is read nowhere.
 
-- **The `|` is always trailing.** cursor() equals the input length at every step
-  above, because this library never sends pyzy a cursor movement — Left/Right are
-  declined while composing (`TODO.md`'s in-span cursor question, and the reason is that routing them
-  through made pyzy render the same `|` inside `conversionText()`). A marker that
-  can only ever appear at the end carries no information.
+- **The `|` is always trailing.** `cursor()` equals the input length at every
+  step above, because this library never sends pyzy a cursor movement:
+  Left/Right are declined while composing, and on pyzy that is forced rather
+  than chosen, because routing them through makes pyzy render its own input
+  cursor as a literal `|` inside `conversionText()` (`PinyinContext.cc:129-142`)
+  — typing `nihao` then Left gives `ni h|a`, a display marker inside a string
+  the API promises is plain content text. A marker that can only ever appear at
+  the end carries no information, so the adapter strips it.
 
 ## 8. Segments: the machinery works, only re-splitting is missing
 
@@ -306,21 +349,21 @@ tool for when anthy splits wrongly, and it has no phone-keyboard equivalent.
 Segment navigation proper (`select_next_segment` etc., Left/Right at modes `2,5`)
 is what greedy resolution replaces.
 
-**One real gap for eager candidates.** A client can see where `settled` ends
-(`preedit_settled`) but not where the *active span* ends. Today that is
-inferable, because after Space the preedit shows the conversion and the boundary
-is visible in the text. If candidates were published without previewing, a client
-would see `きょうはいいてんきですね` with candidates for `今日は` and no way to
-know they cover only the first four kana.
+**There is no active-span field, and under the strip the span is not otherwise
+visible.** A client sees where `settled` ends (`preedit_settled`) but not where
+the *active span* ends, so it can see `きょうはいいてんきですね` with candidates
+for `今日は` and no way to tell they cover only the first four kana. After Space
+the boundary is inferable, because the preedit shows the conversion; before it,
+with candidates published and no preview, it is not. A composition-level span
+could not be honest in any case: one pyzy candidate list mixes entries covering
+different spans — 你 beside 你好 — so there is no single span the field could
+report.
 
-*(Accepted with the strip, 2026-07-28: no span field. pyzy has shipped exactly
-this shape all along, and one pyzy list mixes candidates covering different
-spans — 你 beside 你好 — so a composition-level span could not even be honest.
-The extension stays additive if a real client needs it. `docs/design-history.md` §4c.)*
+## 9. Return is consistent; the preview is not
 
-## 9. Return was already consistent; the preview was not
-
-**measured**:
+**measured**, each engine driven through its own library. The pyzy preedit in
+the third block is `conversionText()` — pyzy's own preview — and not what this
+API publishes for pyzy, which is the typed input (§7):
 
 ```
 anthy   nihon          preedit にほn     0 candidates
@@ -334,8 +377,9 @@ pyzy    nihao          preedit 你好      64 candidates, cursor 0
 ```
 
 Return does the same thing in both: commit what the user has explicitly settled.
-Anthy's Space *was* an explicit choice, so 日本 is settled and Return takes it.
-pyzy never asked for 你好 — it previewed it unbidden — so Return declines it.
+Anthy's Space *is* an explicit choice, so 日本 is settled and Return takes it.
+pyzy's user never asked for 你好 — pyzy previewed it unbidden — so Return
+declines it.
 
 So Return is not the inconsistency. The inconsistency is that **pyzy rewrites the
 preedit with a conversion the user did not request and anthy never does.** The
@@ -345,12 +389,14 @@ preview is also visibly unstable mid-word:
 n → 了     ni → 你     nih → 你好     niha → 立法     nihao → 你好
 ```
 
-Deciding whether an engine may preview settled Return's apparent split, the
-preedit/auxiliary mirror image, and the shape of any always-on candidate mode,
-all at once. It was one decision, not three, and it went against the preview.
+Whether an engine may preview at all is therefore a single question, not three:
+Return's apparent split, the preedit/auxiliary asymmetry between the two
+engines, and the shape of any always-on candidate mode all turn on it.
+`docs/CONCEPTS.md` answers it against the preview — the preedit is what the user
+typed, and a conversion nobody asked for is a candidate instead — which is why
+the adapter takes the preedit from `auxiliaryText()` (§7).
 
-Two things turned up while implementing it that reasoning had not predicted,
-both now covered by `api.engine_pyzy`:
+Two consequences for the pyzy adapter, both pinned by `api.engine_pyzy`:
 
 - **`commit(TYPE_CONVERTED)` does not agree with the preedit under double
   pinyin.** It commits the raw keystrokes — `nihk` for what the preedit shows
@@ -370,8 +416,9 @@ because the setup is the part that costs time — every one of them has at least
 one non-obvious step that is not worth rediscovering.
 
 Build the library first; the paths assume a build directory `$B` configured
-against this source tree, and `CLAUDE.md` explains why that should be under
-`/tmp` rather than beside the source.
+against this source tree and kept outside it — under `/tmp` when building on
+Linux against a Windows-hosted checkout, where symlinks and case-insensitivity
+otherwise get in the way.
 
 **Against the public API** — the most useful of the three, and the one to write
 first when touching an adapter. Drive `pathime_context_process_key()` and print

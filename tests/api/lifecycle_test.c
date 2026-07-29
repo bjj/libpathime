@@ -7,21 +7,21 @@
  * Which engines this build can actually supply is not something this file
  * decides. It asks pathime_has_engine() and branches, because that query is the
  * whole point of its own existence — a backend compiled in is not the same as
- * an adapter existing to drive it, nor as its dictionaries having opened — and
- * a test that hardcoded the answer would need editing every time src/engines/
- * gains a file. So engine creation is covered either way: as a success and a
- * round-trip where an engine is available, as PATHIME_ERROR_UNKNOWN_ENGINE
- * where it is not.
+ * its dictionaries having opened — and a test that hardcoded the answer would
+ * need editing for every build configuration and every installation it met. So
+ * engine creation is covered either way: as a success and a round-trip where an
+ * engine is available, as PATHIME_ERROR_UNKNOWN_ENGINE where it is not.
  *
  * What is absent, and absent rather than forgotten: everything downstream of an
  * input context — context creation and its _MISSING_CALLBACK rejection,
  * process_key, the focus rules and _NOT_FOCUSED, composition state surviving
- * focus loss. Those need a live adapter to say anything meaningful, and the
- * adapters are still landing. The option machinery that hangs off a context is
- * not going untested in the meantime: tests/core/options_test.cc builds engine
- * and context handles directly and drives the public entry points against them.
+ * focus loss. Those say nothing meaningful without a live adapter behind them,
+ * so they belong to the per-engine suites in tests/api/engine_*.c, and the
+ * option machinery that hangs off a context belongs to
+ * tests/core/options_test.cc, which builds engine and context handles directly
+ * and drives the public entry points against them.
  *
- * Nothing here is a skip: every claim below is live and must hold today.
+ * Nothing here is a skip: every claim below is live and must hold.
  *
  * One entry point is deliberately never called with NULL. pathime_engine_id()
  * is documented in src/engine.cc as un-guarded on purpose — pathime_engine_id_t
@@ -171,7 +171,7 @@ static void test_init_params(void)
 
     /*
      * A struct_size the library does not recognize is PATHIME_ERROR_INVALID_ARGUMENT.
-     * Exactly one layout has shipped, so exactly one value is recognized:
+     * The struct has exactly one layout, so exactly one value is recognized:
      * zero is the uninitialized struct a caller forgot to fill in, and
      * sizeof + 8 is a caller whose header is newer than this library, who has
      * set fields this library would silently ignore. Both are refused rather
@@ -266,18 +266,18 @@ static void test_has_engine(void)
     for (i = 0; i < PT_ENGINE_COUNT; i++) {
         /*
          * The durable claim, and the only one this test can make without
-         * hardcoding which adapters happen to exist today: an engine can only
-         * be available if the backend behind it was compiled in. Stated as an
-         * implication against <pathime/config.h>, so a build configured without
-         * pyzy must still answer false for Pinyin and Bopomofo, and so the
-         * check tightens rather than breaks as src/engines/ fills in.
+         * hardcoding which adapters a particular build contains: an engine can
+         * only be available if the backend behind it was compiled in. Stated as
+         * an implication against <pathime/config.h>, so a build configured
+         * without pyzy must still answer false for Pinyin and Bopomofo, and so
+         * the check holds for every build configuration rather than one.
          *
          * The converse is deliberately not asserted. A backend being compiled
-         * in is not the same as an adapter existing to drive it, nor as its
-         * runtime prerequisites — anthy's dictionaries, pyzy's database —
+         * in is not the same as its runtime prerequisites — anthy's
+         * dictionaries, pyzy's database, the table engine's table directory —
          * having opened; pathime_has_engine() exists precisely so a client does
          * not have to guess at that difference, and a test that hardcoded the
-         * answer would have to be edited every time an adapter lands.
+         * answer would have to be edited for every installation it met.
          */
         PT_CHECK(!pathime_has_engine(kEngineIds[i]) || kBackendCompiledIn[i]);
 
@@ -286,14 +286,14 @@ static void test_has_engine(void)
                  pathime_has_engine(kEngineIds[i]));
     }
 
-    /* PATHIME_ENGINE_TABLE used to be asserted structurally false here, because
-     * nothing in the tree implemented it. It is a real engine now, so it is
-     * covered by the loop above like every other id and needs no special case:
-     * whether it is available depends on the build and on whether its table
-     * directory resolved, which is exactly what pathime_has_engine() is for. */
+    /* PATHIME_ENGINE_TABLE gets no special case: it is a real engine, covered
+     * by the loop above like every other id. Whether it is available depends on
+     * the build and on whether its table directory resolved, which is exactly
+     * what pathime_has_engine() is for. */
 
-    /* Not an engine id at all, now that there is initialized state to consult.
-     * There is no error channel here, so the only correct answer is false. */
+    /* Not an engine id at all, this time with the library initialized and real
+     * state to consult. There is no error channel here, so the only correct
+     * answer is false. */
     PT_CHECK(!pathime_has_engine((pathime_engine_id_t)9999));
     PT_CHECK(!pathime_has_engine((pathime_engine_id_t)-1));
     PT_CHECK(!pathime_has_engine((pathime_engine_id_t)(PATHIME_ENGINE_TABLE + 1)));
@@ -426,10 +426,10 @@ static void test_destroy_null(void)
 
 /**
  * Every context entry point with an error channel, called with a NULL handle.
- * A client cannot obtain a context handle today, so NULL is the only argument
- * available — but the point of the sweep is not the NULL, it is that each of
- * these has a determinate answer rather than a crash, and that the answer is
- * the same before and after pathime_init().
+ * This file never creates a context — that is the per-engine suites' ground —
+ * so NULL is the only handle it has, but the point of the sweep is not the NULL:
+ * it is that each of these has a determinate answer rather than a crash, and
+ * that the answer is the same before and after pathime_init().
  *
  * The order the library documents is arguments first, then initialization, so
  * every one of these is PATHIME_ERROR_INVALID_ARGUMENT in both states. That the

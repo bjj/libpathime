@@ -165,7 +165,8 @@ static pathime_context_t *open_context(pathime_engine_t *engine, client_log_t *l
 /*
  * The core transition: each valid input character extends the key run,
  * the preedit shows the run through the table's char prompts, and the candidate
- * list is the lookup's result in the order §8.2 fixes.
+ * list is the lookup's result in the order docs/ibus-table-mapping.md §8.2
+ * fixes.
  */
 static void test_compose_and_select(pathime_engine_t *engine)
 {
@@ -560,8 +561,8 @@ static void test_z_wildcard(pathime_engine_t *engine)
 
 /*
  * Tier 3 answers as soon as the table is named, because naming it is what loads
- * it. Before the setter did that work, the same query returned the descriptor
- * default until the first keystroke and the table's declaration afterwards.
+ * it: a client can read a table's declared options without sending a key first,
+ * and the answer does not change once typing begins.
  */
 static void test_declarations_available_before_typing(pathime_engine_t *engine)
 {

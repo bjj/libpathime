@@ -21,7 +21,7 @@
  *     which is backend.h rule 1.
  *  3. An unknown keyboard id is not reported. hangul_ic_select_keyboard()
  *     stores whatever hangul_keyboard_list_get_keyboard() returned, NULL
- *     included (hangulinputcontext.c:1470-1482, :1484 set_keyboard), and the
+ *     included (hangulinputcontext.c:1470-1482, :1428 set_keyboard), and the
  *     next process() dereferences it. Every id this file uses is therefore
  *     resolved to a HangulKeyboard * first, and a NULL result is refused.
  */
@@ -46,7 +46,7 @@ namespace {
  *
  * The nine values of PATHIME_OPT_HANGUL_LAYOUT against the nine built-in
  * tables. Every id below was read out of the built-in array in
- * engines/libhangul/hangul/hangulkeyboard.c:133-217 — the HangulKeyboard literals and
+ * engines/libhangul/hangul/hangulkeyboard.c:133-224 — the HangulKeyboard literals and
  * the hangul_builtin_keyboards[] list that indexes them — and then confirmed
  * at runtime by enumerating hangul_keyboard_list_get_keyboard_id() and looking
  * each one up again. Three of them are not what a reader would guess, which is
@@ -111,7 +111,7 @@ constexpr int kNotAscii = -1;
  * rather than tidiness. hangul_keyboard_map_to_char() would answer 0 for an
  * out-of-range key and the jamo path would tolerate it, but
  * hangul_ic_process_romaja() calls isupper() on the raw argument
- * (hangulinputcontext.c:1100-1101), and isupper() outside unsigned char is
+ * (hangulinputcontext.c:887), and isupper() outside unsigned char is
  * undefined. us_layout_char() answers 0 for exactly the keys that must not get
  * that far, so the two conditions are the same one.
  */
@@ -192,9 +192,9 @@ private:
  * Called at the top of every key, never cached, which is backend.h rule 4 and
  * is what makes the header's "a change takes effect immediately" promise true
  * for free. The cost is four field stores: hangul_ic_set_option() sets a bool
- * and hangul_ic_set_keyboard() sets a pointer and a table id
- * (hangulinputcontext.c:1484-1492). Neither touches the jamo buffer, which is
- * why PATHIME_OPT_HANGUL_LAYOUT can advertise itself composition-safe.
+ * (hangulinputcontext.c:1365-1378) and hangul_ic_set_keyboard() sets a pointer
+ * and a table id (:1428-1435). Neither touches the jamo buffer, which is why
+ * PATHIME_OPT_HANGUL_LAYOUT can advertise itself composition-safe.
  *
  * A layout that fails to resolve leaves the current keyboard in place. That is
  * the one thing this function must never get wrong — see note 3 at the top.
@@ -558,8 +558,8 @@ void HangulContextBackend::reset(Composition *model, Output *out)
  * Hangul has no candidates, so there is nothing to select.
  *
  * The only candidate list libhangul could supply is hanja conversion, through
- * the separate HanjaTable/HanjaList lookup API, and hanja was cut in the API
- * review round. Nothing in this adapter ever puts anything in
+ * the separate HanjaTable/HanjaList lookup API, and hanja is out of scope for
+ * this API. Nothing in this adapter ever puts anything in
  * model->candidates, so the core never has an in-range index to offer, and
  * backend.h names this case explicitly as the legitimate use of
  * PATHIME_ERROR_UNSUPPORTED.
@@ -654,12 +654,12 @@ public:
 
 /*
  * Both no-ops, and neither can fail. hangul_init() and hangul_fini() exist
- * only under ENABLE_EXTERNAL_KEYBOARDS (engines/libhangul/hangul/hangul.h:99-103),
- * which the top-level CMakeLists.txt:34 turns off, and the nine built-in
+ * only under ENABLE_EXTERNAL_KEYBOARDS (engines/libhangul/hangul/hangul.h:99-102),
+ * which the top-level CMakeLists.txt:37 turns off, and the nine built-in
  * layouts are static tables that resolve without any initialization — so
  * hangul is the one backend with no process-global setup at all. src/init.cc
- * and src/engine.cc already say this at their own call sites; this is the same
- * finding stated where the function is.
+ * and src/engine.cc already say this at their own call sites; this states it
+ * where the function is.
  *
  * Both directories are unused for the same reason. libhangul ships no data
  * files at all — the layouts and the character tables are compiled into the

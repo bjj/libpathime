@@ -1,6 +1,5 @@
 # The libpathime library target. docs/source-layout.md is the map: what each
-# file is for, the conventions, and which choices are still open. docs/design-history.md §2
-# holds the adapter-layer findings the layout answers to.
+# file is for and the conventions it follows.
 #
 # Core files sit directly in src/ — the public API entry points and the shared
 # machinery are one layer, deliberately not split into api/ vs core/: the entry
@@ -29,8 +28,8 @@ add_library(libpathime::pathime ALIAS pathime)
 target_compile_features(pathime PRIVATE cxx_std_17)
 
 # Public include directories: source tree for <pathime/pathime.h>, binary tree
-# for the generated <pathime/config.h>. Folded here from the retired
-# libpathime::headers interface target (docs/design-history.md §5).
+# for the generated <pathime/config.h>. Both are carried on the library target
+# itself; there is no separate headers-only target to keep in step with it.
 target_include_directories(pathime PUBLIC
   "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>"
   "$<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>"
@@ -41,9 +40,8 @@ target_include_directories(pathime PUBLIC
 target_include_directories(pathime PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 
 # PATHIME_BUILD flips PATHIME_API to its export form while the library itself
-# compiles (closes the "no one to define it" loose end from docs/design-history.md §5). A
-# static build instead needs PATHIME_STATIC on both sides of the boundary,
-# hence PUBLIC.
+# compiles; this is the only place that defines it. A static build instead
+# needs PATHIME_STATIC on both sides of the boundary, hence PUBLIC.
 target_compile_definitions(pathime PRIVATE PATHIME_BUILD)
 if(NOT BUILD_SHARED_LIBS)
   target_compile_definitions(pathime PUBLIC PATHIME_STATIC)

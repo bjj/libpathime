@@ -72,11 +72,11 @@ void rank_candidates(const std::string &keys,
     }
 
     /*
-     * §8.2's keys in order. Two of the nine are deliberately absent and are
-     * TODO.md entries rather than silent omissions: the pinyin tone penalty
-     * (key 2) needs the pinyin table, which has no source data here, and the
-     * Big5 ordering (key 8) needs a Big5 mapping this library does not carry.
-     * Both affect only ties that the remaining keys already order plausibly.
+     * §8.2's keys in order. Two of the nine are deliberately absent rather
+     * than silently omitted: the pinyin tone penalty (key 2) needs the pinyin
+     * table, which has no source data here, and the Big5 ordering (key 8)
+     * needs a Big5 mapping this library does not carry. Both affect only ties
+     * that the remaining keys already order plausibly.
      */
     std::sort(keys_for.begin(), keys_for.end(), [](const SortKey &a, const SortKey &b) {
         if (a.exact != b.exact) {

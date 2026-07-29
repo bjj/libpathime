@@ -1,15 +1,18 @@
 /*
  * The structured composition model and its projection to the flat public
- * value. This is docs/design-history.md §3, question 1, answered — designed against all
- * three mapping docs at once, as docs/source-layout.md required.
+ * value. One model serves all four adapters; it was designed against the three
+ * mapping docs at once rather than grown from whichever backend came first.
  *
  * ---------------------------------------------------------------------------
  * The shape, and why it is this one
  * ---------------------------------------------------------------------------
  *
- * Every backend keeps state the flat {preedit, preedit_settled,
- * candidates} value cannot hold (docs/design-history.md §2, Finding 1). Laid side by side,
- * though, the three describe the same three-part picture:
+ * Every backend keeps state the flat {preedit, preedit_settled, candidates}
+ * value cannot hold: anthy has N segments, each with its own candidate array
+ * and an active index; pyzy's preedit is three parts with the middle one
+ * provisional; libhangul exposes only the trailing mutable syllable, so the
+ * settled prefix has to be accumulated here. Laid side by side, though, the
+ * three describe the same three-part picture:
  *
  *              settled                active              tail
  *   pyzy       selectedText()      conversionText()     restText()
@@ -42,9 +45,9 @@
  * The candidate cursor
  * ---------------------------------------------------------------------------
  *
- * `cursor` is docs/design-history.md §2, Finding 2 given a home. Neither anthy nor pyzy
- * durably records which candidate the user is hovering before commit — anthy
- * records only at anthy_commit_segment() time — so it is ours, and it belongs
+ * `cursor` is ours to keep. Neither anthy nor pyzy durably records which
+ * candidate the user is hovering before commit — anthy records only at
+ * anthy_commit_segment() time — so the library tracks it, and it belongs
  * here rather than in pathime_context because it is per *active span*: when a
  * span settles the next one becomes active and starts hovering its own first
  * candidate again.
@@ -54,8 +57,8 @@
  * ---------------------------------------------------------------------------
  *
  * Every string here is owned. Everything a backend returns is borrowed and
- * volatile — valid only until its next mutating call (Finding 4) — so it is
- * copied in at the seam. utf8.h owns the conversions that copying needs.
+ * volatile — valid only until its next mutating call — so it is copied in at
+ * the seam. utf8.h owns the conversions that copying needs.
  */
 
 #ifndef LIBPATHIME_SRC_COMPOSITION_H

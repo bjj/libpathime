@@ -6,8 +6,8 @@
  * ---------------------------------------------------------------------------
  *
  * Two facts, four states — and the facts are deliberately separate, because
- * conflating them is the trap docs/design-history.md §4c warned this file about. The first
- * fact is whether anthy holds a conversion (segment_count_ > 0); the second is
+ * conflating them is the trap this file exists to avoid. The first fact is
+ * whether anthy holds a conversion (segment_count_ > 0); the second is
  * whether the user *asked* for one (converting_). The eager state is the one
  * where the first is true and the second is false. It is what fills the
  * suggestion strip a phone-keyboard client draws — but the strip is that
@@ -57,9 +57,9 @@
  * ---------------------------------------------------------------------------
  *
  * anthy_commit_segment(ctx, seg, cand) does *not* commit anything on its own:
- * it sets seg->committed and nothing else (src-main/main.c:376-410). The
+ * it sets seg->committed and nothing else (src-main/main.c:378-413). The
  * personal dictionary is only written when the last segment is committed, at
- * which point main.c:412 runs anthy_proc_commit() and anthy_save_history().
+ * which point main.c:415-419 runs anthy_proc_commit() and anthy_save_history().
  * So the calls are per-segment but the learning is all-or-nothing, and an
  * adapter that told anthy only about the segments the user actively chose
  * between would never write anything at all.
@@ -67,7 +67,7 @@
  * Hence: every segment gets committed exactly once, at the moment the user
  * confirms it — at selection for the segments they walked through, and at
  * PATHIME_KEY_RETURN for the ones they left as readings, those at
- * NTH_UNCONVERTED_CANDIDATE, which main.c:394-402 resolves to whichever
+ * NTH_UNCONVERTED_CANDIDATE, which main.c:399-409 resolves to whichever
  * candidate equals the reading. Never during candidate navigation, which is
  * the corruption docs/anthy-mapping.md mismatch #4 warns about. And never at
  * all when PATHIME_OPT_LEARNING is false: anthy has no switch for it, so the
@@ -209,9 +209,11 @@ private:
     int active_ = 0;
 
     /**
-     * The candidate index currently shown for each segment — Finding 2's
-     * "the currently shown candidate is ours", per segment because anthy's
-     * candidate lists are (mismatch #1). Initialized to 0, anthy's own best
+     * The candidate index currently shown for each segment. Tracking it is
+     * the library's job: anthy records nothing about which candidate is
+     * hovered until the segment is committed, so nothing else remembers what
+     * the user is looking at. Per segment because anthy's candidate lists are
+     * (docs/anthy-mapping.md mismatch #1). Initialized to 0, anthy's own best
      * guess for each.
      */
     std::vector<int> chosen_;
@@ -601,7 +603,7 @@ void AnthyContextBackend::commit_kana(Composition *model,
     /* Eager selections settled before this point are part of the composition
      * and commit with it; the remainder commits as typed, unlearned — the
      * user never engaged the candidates for it, and recording it as a chosen
-     * reading is the §3 poison learn_eager_choice()'s comment names. */
+     * reading is the poison learn_eager_choice()'s comment names. */
     out->commit = eager_settled_text() + composer_.commit_text(settings);
     eager_settled_.clear();
     composer_.clear();
@@ -697,8 +699,9 @@ pathime_status_t AnthyContextBackend::set_cursor(size_t index,
  *
  * The one place the shown candidate changes, reached from both the client's
  * set_cursor() and Space's advance_candidate(). Keeping chosen_, model->cursor
- * and model->active in step is exactly the bookkeeping Finding 2 says is ours,
- * and having one writer is what stops the three drifting apart.
+ * and model->active in step is bookkeeping anthy will not do — it has no
+ * notion of a hovered candidate before commit — and having one writer is what
+ * stops the three drifting apart.
  */
 bool AnthyContextBackend::show_candidate(int cursor, Composition *model)
 {
@@ -715,8 +718,8 @@ bool AnthyContextBackend::show_candidate(int cursor, Composition *model)
  * The one derived state an option change can strand here is the eager state:
  * PATHIME_OPT_PREDICTION turned off mid-composition must take the candidates
  * away, and turned on must produce them, and in neither case is there
- * necessarily a next keystroke to do it at (the §4a lesson that put this hook
- * in backend.h).
+ * necessarily a next keystroke to do it at — which is the whole reason
+ * backend.h has this hook.
  *
  * Everything else stays with the default's reasoning — this adapter consults
  * options at the point of use — and the *presence* test below is what keeps
@@ -909,24 +912,23 @@ bool AnthyContextBackend::key_while_typing(const KeyEvent &key,
         /*
          * Space is the convert key only when there is something to convert.
          * With an empty buffer it inserts a space, at the width
-         * PATHIME_OPT_LATIN_WIDTH selects — the same rule pyzy's emit path
-         * applies to space, digits and uppercase (punctuation.cc:117-122), and
-         * what the header has always said that option governs: "Latin letters,
+         * PATHIME_OPT_LATIN_WIDTH selects — the same rule the pyzy adapter
+         * applies to space, digits and letters (src/punctuation.cc:117-122),
+         * and what the header says that option governs: "Latin letters,
          * digits and space".
          *
-         * This used to decline instead, on the reasoning that the client
-         * should insert its own rather than have a full-width 　 forced on it.
-         * That was wrong twice over: it left the two engines disagreeing about
-         * the same key, so no client could bind Space consistently; and the
-         * width was never forced, because the option defaults to half and is
-         * settable per context. ibus-anthy inserts here too — `insert_space`
-         * at `_chk_mode('0')`, wide by default since `half-width-space`
-         * defaults false, which is the one thing we do differently and do
-         * deliberately: one default for every engine beats matching each
-         * reference separately.
+         * Inserting rather than declining is what keeps the two composing
+         * engines agreeing about one key, so a client can bind Space once and
+         * have it mean the same thing everywhere. Nothing is forced on the
+         * client either: the width option defaults to half and is settable per
+         * context, so a full-width 　 only appears where it was asked for.
+         * ibus-anthy inserts here too — `insert_space` at `_chk_mode('0')`,
+         * wide by default since `half-width-space` defaults false, which is
+         * the one thing we do differently and do deliberately: one default for
+         * every engine beats matching each reference separately.
          *
-         * Hangul is the exception and stays declining. It implements no width
-         * option (`kConverting` excludes it), so it has nothing to add that the
+         * Hangul is the exception and declines. It implements no width option
+         * (`kConverting` excludes it), so it has nothing to add that the
          * client's own space does not already do, and ibus-hangul likewise
          * leaves plain Space alone — only Shift+Space is bound there, as a
          * mode hotkey this API excludes (refs/ibus-hangul/src/engine.c:423).
@@ -986,12 +988,12 @@ bool AnthyContextBackend::key_while_converting(const KeyEvent &key,
      * the one key whose meaning the header fixes across every engine that
      * composes, so it stays here.
      *
-     * The arrow keys used to sit alongside it and no longer do. Navigating a
-     * candidate list is the client's — it owns the key bindings, its own
-     * pagination, and whether either end wraps — and
-     * pathime_context_set_candidate_cursor() is how it says so. An engine that
-     * also swallowed Up and Down would take the decision back, because a key
-     * this adapter reports handled never reaches the client's binding at all.
+     * The arrow keys are deliberately not here. Navigating a candidate list
+     * is the client's — it owns the key bindings, its own pagination, and
+     * whether either end wraps — and pathime_context_set_candidate_cursor()
+     * is how it says so. An engine that also swallowed Up and Down would take
+     * the decision back, because a key this adapter reports handled never
+     * reaches the client's binding at all.
      */
     case PATHIME_KEY_SPACE:
     case PATHIME_KEY_HENKAN:
@@ -1049,11 +1051,11 @@ void AnthyContextBackend::reset(Composition *model, Output *out)
 /**
  * anthy shares nothing between contexts that is not already process-global.
  *
- * Its dictionaries, personality and conf database all live behind anthy_init()
- * (Finding 3) and are reached by the vendor library through file-scope state,
- * not through a handle we could hold. So this class is empty and says so,
- * rather than inventing a per-engine object for symmetry with the other two
- * adapters.
+ * Its dictionaries, personality and conf database all live behind the
+ * one-time anthy_init() and are reached by the vendor library through
+ * file-scope state, not through a handle we could hold. So this class is
+ * empty and says so, rather than inventing a per-engine object for symmetry
+ * with the other two adapters.
  */
 class AnthyEngineBackend final : public EngineBackend {
 public:
@@ -1066,8 +1068,8 @@ public:
 
         /* Before anything else: contexts are born in anthy's compiled default
          * encoding, which is EUC-JP (main.c:95), and every string that crosses
-         * this adapter is UTF-8 (Finding 4). Missing this call would not fail
-         * — it would quietly produce mojibake. */
+         * this adapter is UTF-8. Missing this call would not fail — it would
+         * quietly produce mojibake. */
         if (anthy_context_set_encoding(context, ANTHY_UTF8_ENCODING) != ANTHY_UTF8_ENCODING) {
             anthy_release_context(context);
             return nullptr;

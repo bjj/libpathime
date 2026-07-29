@@ -3,11 +3,12 @@
  * The interesting part of this backend is that it is the only one that carries
  * phonetics around as `wchar_t`. pyzy was written for a platform where that
  * type is 32-bit UCS-4 and takes the liberty in one place — BopomofoContext's
- * auxiliary-text builder used to reinterpret a `const wchar_t *` as a UCS-4
- * string and hand it to g_ucs4_to_utf8. Where wchar_t is 16 bits that reads two
- * zhuyin letters as one nonsensical code point, so the auxiliary text came out
- * empty (with a g_warning) instead of "ㄋㄧ,ㄏㄠ|". The Windows build rewrites
- * that statement in its source mirror; see cmake/ports/pyzy/CMakeLists.txt.
+ * auxiliary-text builder reinterprets a `const wchar_t *` as a UCS-4 string
+ * and hands it to g_ucs4_to_utf8 (BopomofoContext.cc:281). Where wchar_t is 16
+ * bits that reads two zhuyin letters as one nonsensical code point, so the
+ * auxiliary text comes out empty (with a g_warning) instead of "ㄋㄧ,ㄏㄠ|".
+ * The Windows build rewrites that statement in its source mirror; see
+ * cmake/ports/pyzy/CMakeLists.txt.
  *
  * The auxiliary-text expectations below are therefore the ones that matter
  * most here: they are the only automated check that the rewrite is in place and

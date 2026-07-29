@@ -1,6 +1,6 @@
 /*
- * Candidate materialization and cursor tracking. Two obligations from the API
- * round live here and nowhere else:
+ * Candidate materialization and cursor tracking. Two obligations the public
+ * API takes on live here and nowhere else:
  *
  *  - Eager materialization. pathime_context_candidate() is documented
  *    callback-safe, which is only true if every candidate the
@@ -9,7 +9,7 @@
  *    hasCandidate(i) is lazy and mutating, so the ordering is a real
  *    constraint, not a formality.
  *
- *  - The currently-shown candidate (docs/design-history.md §2, Finding 2). Neither anthy nor
+ *  - The currently-shown candidate. Neither anthy nor
  *    pyzy durably records which candidate the user is hovering before commit
  *    — anthy records only at anthy_commit_segment() time — so the cursor is
  *    tracked here, per active region, and fed back to the backend when the
@@ -43,8 +43,8 @@
  * a span settles, the next becomes active, and the new one starts hovering its
  * own first candidate — so it belongs with the span structure, and this file
  * is what moves it: the core tracks it because neither anthy nor pyzy durably
- * records it before commit (docs/design-history.md §2, Finding 2), and it reaches the backend
- * only when a selection or a commit makes it real.
+ * records it before commit, and it reaches the backend only when a selection
+ * or a commit makes it real.
  */
 
 namespace {
@@ -120,7 +120,7 @@ void materialize_candidates(pathime_context_t *ctx)
      *    phone-keyboard target settled.
      *  - Every string is copied at the seam. Everything a backend returns is
      *    borrowed and volatile, valid only until its next mutating call
-     *    (docs/design-history.md §2, Finding 4), so aliasing one into the model would hand a
+     *    so aliasing one into the model would hand a
      *    client a dangling slice the moment the next key arrives. The
      *    obligation is the adapter's, stated as rule 1 of backend.h.
      *  - Running out before the cap is normal and is not an error: the cap is
@@ -295,9 +295,10 @@ pathime_status_t pathime_context_select_candidate(pathime_context_t *ctx,
      * the finished text in the Output and the dispatch below delivers it. The
      * client never navigates or resizes spans.
      *
-     * The cursor moves first, because this is the moment Finding 2's bookkeeping
-     * stops being ours: an adapter that must tell its backend which candidate
-     * was chosen reads it from the model rather than being passed it twice.
+     * The cursor moves first, because this is the moment the library's
+     * tracking of the currently-shown candidate stops being ours alone: an
+     * adapter that must tell its backend which candidate was chosen reads it
+     * from the model rather than being passed it twice.
      */
     ctx->model.cursor = index;
     ctx->output.clear();

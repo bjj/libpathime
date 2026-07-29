@@ -4,15 +4,17 @@
  * contract, and the entry points documented to answer for a NULL handle rather
  * than to reject.
  *
- * That is a smaller set than it sounds, and the reason is worth stating. No
- * engine adapter exists yet, so pathime_engine_create() cannot succeed and a C
- * client has no way to obtain the handle every remaining option entry point
- * takes. The descriptor content itself — per-engine `supported`, the value
- * kinds, defaults, bounds and valid_values, the two-level resolution, the
- * kind-typed setters and their rejections — is therefore covered by
- * core.options, which compiles the internal sources directly and builds the
- * handles by hand. Nothing about the options machinery is going untested; it is
- * simply tested from the side of the boundary that can currently reach it.
+ * That is a smaller set than it sounds, and the reason is worth stating. Every
+ * remaining option entry point takes an engine or context handle, and whether
+ * pathime_engine_create() can produce one depends on the build configuration
+ * and on runtime prerequisites, so a suite resting on a handle would be testing
+ * a different thing on every installation. The descriptor content itself —
+ * per-engine `supported`, the value kinds, defaults, bounds and valid_values,
+ * the two-level resolution, the kind-typed setters and their rejections — is
+ * therefore covered by core.options, which compiles the internal sources
+ * directly and builds the handles by hand. Nothing about the options machinery
+ * goes untested; it is simply tested from the side of the boundary that can
+ * reach it unconditionally.
  *
  * What is here is genuinely client-facing, and two claims in it are load
  * bearing beyond this file: pathime_option_count() and pathime_option_name()
@@ -228,9 +230,9 @@ static void check_option_info_rejects(void)
 
     /*
      * The rest of this entry point — the struct_size in-and-out protocol, and
-     * every field it reports for each of the 32 options against each of the 5
-     * engine ids — needs an engine handle, which the public API cannot yet
-     * produce. core.options covers it against hand-built handles.
+     * every field it reports for each of the 31 options against each of the 5
+     * engine ids — needs an engine handle, which this file deliberately holds
+     * none of. core.options covers it against hand-built handles.
      */
 }
 

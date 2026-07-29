@@ -17,8 +17,8 @@
  *                 be reached from here — the digits, which get their own table
  *                 because a different option governs their width; "-", which
  *                 the romaji table already claims for ー and therefore wins;
- *                 and "¥", whose key is not ASCII, the JIS ¥-vs-ろ case
- *                 docs/design-history.md §5 records as unrepresentable.
+ *                 and "¥", whose key is not ASCII — the JIS ¥-vs-ろ case this
+ *                 API's key model cannot represent.
  *   kScriptTable  hiragana_katakana_table (tables.py:594), the per-scalar
  *                 projection behind PATHIME_OPT_ANTHY_KANA_SCRIPT.
  *   kKanaTable    kana_typing_rule_static (tables.py:372) and, with it,
@@ -501,8 +501,8 @@ const ScriptRow kScriptTable[] = {
  * kind of keyboard is attached.
  *
  * 94 of its 95 rows are here. The missing one is '¥' -> ー, whose key is not
- * ASCII and does not exist on US QWERTY at all: the JIS ¥-vs-ろ case TODO.md
- * §5 records as unrepresentable. Nothing else is lost — '|' already gives ー
+ * ASCII and does not exist on US QWERTY at all — the JIS ¥-vs-ろ case this
+ * API's key model cannot represent. Nothing else is lost: '|' already gives ー
  * from the US backslash position, so the character remains typeable.
  *
  * kVoicedKana and kSemiVoicedKana are kana_voiced_consonant_no_rule and

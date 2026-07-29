@@ -46,9 +46,9 @@ using different engines. This model therefore requires that calls never overlap.
 It does not require them to come from one particular thread; only that they are
 serialized. A single dedicated input thread is the ordinary way to satisfy this.
 
-# Participants
+## Participants
 
-## Client
+### Client
 
 The **client** is the application, operating-system component, or text-input implementation that receives the final text.
 
@@ -63,7 +63,7 @@ The client owns:
 
 The client may represent an entire application window, an individual text field, or another independently editable destination.
 
-## Engine
+### Engine
 
 The **engine** implements a particular input method or family of input methods.
 
@@ -80,7 +80,7 @@ The engine receives key events and contextual information, maintains composition
 
 An engine does not directly modify the client's text. It asks the client to perform operations such as committing or deleting text.
 
-## Input context
+### Input context
 
 An **input context** represents one independently editable client destination and the engine state associated with it.
 
@@ -98,9 +98,9 @@ The same engine may serve many input contexts simultaneously. State that depends
 
 **IBus and Fcitx note:** Both frameworks use the term *input context*. IBus describes its input context as the object through which a client invokes an engine. Fcitx describes an input context as representing a client, which may be a window or an individual text field. ([Intelligent Input Bus][1])
 
-# Key input
+## Key input
 
-## Key event
+### Key event
 
 A **key event** represents a key press sent by the client to the engine.
 
@@ -141,7 +141,7 @@ excludes input methods that depend on release timing, such as thumb-shift
 
 Conceptually, the engine is given an opportunity to process the event and must report whether it was handled.
 
-## Handled
+### Handled
 
 A key event is **handled** when the engine accepts responsibility for it.
 
@@ -157,9 +157,9 @@ Because engine output is delivered before the key-processing call completes, an 
 
 Both frameworks additionally provide a *forward key event* operation, by which the engine asks the client to receive a key event as engine output rather than declining the original. Its purpose is to order a declined key against other output when the handled result is reported asynchronously. This model has no such operation: the interface is synchronous, so ordering is already guaranteed, and forwarding is unevenly implemented across client toolkits. Input methods that depend on delivering delayed, transformed, or engine-generated keys are therefore outside this model.
 
-# Composition
+## Composition
 
-## Composition data
+### Composition data
 
 **Composition data** is the current composition-related data produced by the engine for an input context.
 
@@ -185,7 +185,7 @@ Because the whole of it is replaced at once, a client redraws from what it was l
 
 **IBus and Fcitx note:** IBus sends preedit text, auxiliary text, and its lookup table through separate update operations. Fcitx groups related values in an input-panel object containing preedit, upper and lower auxiliary text, and a candidate list. This model instead combines these into one neutral composition-data value and does not model the panel itself. It has **no auxiliary text at all**: see *Preedit text* for where the content both frameworks put there belongs instead. ([Intelligent Input Bus][2])
 
-## Preedit text
+### Preedit text
 
 **Preedit text** is text that represents the user's current composition but has not yet been committed to the client.
 
@@ -212,21 +212,21 @@ The second is a table method whose table supplies *key legends*: a symbol per ke
 
 This is also where the content other frameworks carry as *auxiliary text* belongs. What a user has typed is not supplemental to their composition; it is the composition. Auxiliary text as those frameworks use it in practice is either that same content displaced, or a candidate position indicator, which is presentation derived from the *candidate cursor* and the candidate count.
 
-Preedit text is accompanied by an internal display position which reflects the state of the engine. Text prior to this position is not expected to be changed on commit, while text beyond this position is still subject to change based on user input. For example, if a user has typed a pinyin string and then selected a partial candidate, the preedit display position would move forward to reflect the selected characters.
-
-Preedit text is a single plain-text string. It contains no:
+Preedit text is a single plain-text string. It carries no:
 
 * formatting attributes
 * styled segments
 * underline information
-* internal display position
+* embedded position markers of any kind
 * client-side caret information
+
+Alongside that string, and not inside it, the engine reports a **preedit display position**: a count of characters from the start of the preedit that the engine considers settled. Text before the position is not expected to change; text at or after it is still subject to change as input continues. Selecting a partial candidate moves the position forward over the characters that selection settled.
 
 Empty preedit text means that no preedit text is currently present.
 
 **IBus and Fcitx note:** IBus models a pre-edit buffer with a visibility flag and a position within the buffer. Fcitx distinguishes panel preedit from client preedit and supports formatted text. This model has only one plain preedit string; the client decides where it is shown. ([Intelligent Input Bus][2])
 
-## Candidate list
+### Candidate list
 
 A **candidate list** is an ordered list of plain-text alternatives supplied by the engine.
 
@@ -265,7 +265,7 @@ The order of a candidate list remains meaningful until the engine supplies new c
 **IBus and Fcitx note:** IBus calls its candidate list a *lookup table*. An IBus lookup table also includes page size, a candidate cursor, wrapping behavior, orientation, and candidate labels. Fcitx candidate lists may similarly provide paging, cursor movement, labels, comments, placeholders, and other interfaces. Of those, only the cursor is present here — see *Candidate cursor* — and it is present because it is not merely presentation. Page size, wrapping, orientation, and labels are excluded.
 IBus lookup table pagination is controlled by key press events rather than an API, which is undesirable. ([Intelligent Input Bus][3])
 
-## Candidate cursor
+### Candidate cursor
 
 The **candidate cursor** is the position in the candidate list that a client draws highlighted.
 
@@ -291,7 +291,7 @@ The client owns the key bindings. Which key moves the cursor, in which direction
 
 An engine that produces no candidates has no cursor to move.
 
-## Select candidate
+### Select candidate
 
 **Select candidate** tells the engine that the client has chosen a candidate from the current candidate list.
 
@@ -316,9 +316,9 @@ The client must not select a position from an obsolete candidate list after newe
 
 **IBus note:** IBus candidate selection is engine-specific and controlled via key press events rather than an API. This is undesirable. ([Intelligent Input Bus][2])
 
-# Client text and editing
+## Client text and editing
 
-## Surrounding text
+### Surrounding text
 
 **Surrounding text** is plain text from the client near its current insertion position, supplied to the engine as context.
 
@@ -344,7 +344,7 @@ Availability of surrounding text is negotiated. A client that cannot or should n
 
 **IBus and Fcitx note:** Both IBus and Fcitx surrounding-text representations include a cursor position and a separate anchor position for representing selections. This model retains only one insertion position and ignores selection. ([Intelligent Input Bus][2])
 
-## Commit text
+### Commit text
 
 **Commit text** is a request from the engine to insert finalized plain text into the client.
 
@@ -365,7 +365,7 @@ Committing text does not implicitly define the next composition data. After comm
 
 **IBus and Fcitx note:** IBus uses the term *commit text*. Fcitx calls its equivalent operation *commit string*. ([Intelligent Input Bus][2])
 
-## Delete surrounding text
+### Delete surrounding text
 
 **Delete surrounding text** is a request from the engine for the client to delete part of its existing surrounding text.
 
@@ -396,9 +396,9 @@ The concrete API must define the Unicode unit used for offsets and counts, such 
 
 **IBus and Fcitx note:** Both frameworks expose deletion using an offset relative to the current text position and a character count. IBus describes negative offsets as positions before the cursor; Fcitx describes its deletion lengths in UCS-4 characters. ([Intelligent Input Bus][1])
 
-# Input-context lifecycle
+## Input-context lifecycle
 
-## Focus
+### Focus
 
 **Focus** indicates whether an input context currently corresponds to the client destination receiving input.
 
@@ -419,7 +419,7 @@ An input context begins its lifetime unfocused.
 
 Both frameworks also carry an *activation* concept — IBus enable/disable, Fcitx activate/deactivate — indicating whether the engine is selected and enabled for a context, independently of focus. This model does not. A client that wants direct keyboard input, or that has selected another engine, stops sending key events to the input context; no separate state is required to express it.
 
-## Reset
+### Reset
 
 **Reset** asks the engine to discard its current transient composition state for an input context and return to a neutral state.
 
@@ -439,8 +439,6 @@ Reset may be requested when:
 
 **IBus and Fcitx note:** Both IBus and Fcitx expose reset as a distinct engine operation. Fcitx documents reset as clearing input-context state and, by default, calls it during engine deactivation. ([Intelligent Input Bus][2])
 
-# Negotiation
-
 ## Negotiation
 
 **Negotiation** is the exchange of capabilities, field information, options, and behavioral agreements between the client and engine.
@@ -449,7 +447,7 @@ Negotiation may take place when an input context is created and may be updated d
 
 Negotiated information may include:
 
-### Client capabilities
+#### Client capabilities
 
 Which operations the client supports, such as:
 
@@ -462,7 +460,7 @@ describing them separately. An operation the client has not implemented is one
 it does not support. There is no capability description that can disagree with
 what the client actually does.
 
-### Engine requirements
+#### Engine requirements
 
 The engine may indicate that it:
 
@@ -479,7 +477,9 @@ Requirements are checked when an input context is created. Pairing an engine
 with a client that lacks a required operation is an error at that point, rather
 than a silent loss of engine output later.
 
-### Input purpose and hints
+#### Input purpose and hints
+
+This is the one part of the model libpathime does not implement: no backend consumes it, and the extension is additive whenever one does. It is described here because it is a real part of the negotiation a CJK engine interface has to account for, not because the library accepts it today.
 
 The client may describe the kind of text being edited, such as:
 
@@ -500,7 +500,7 @@ Hints may also request or discourage behaviors such as:
 * automatic capitalization
 * on-screen keyboard use
 
-### Engine options
+#### Engine options
 
 Engine-specific options and configuration values may be included in negotiation.
 
@@ -516,7 +516,7 @@ Examples include:
 
 These are data exchanged with the engine. This core model does not define a menu, language bar, property list, configuration window, or other secondary user interface.
 
-### Behavioral policies
+#### Behavioral policies
 
 Negotiation may define policies such as:
 
@@ -527,7 +527,7 @@ Negotiation may define policies such as:
 
 **IBus and Fcitx note:** IBus represents client display and surrounding-text abilities as capability flags, while input purpose and hints are exposed separately as content type. Fcitx uses a larger capability-flag set containing both client features and field-purpose hints. Those flags exist largely to divide responsibility between the engine and a separate panel component. This model has no such division — the client presents everything — so it has no client capability flags, and describes client support by which operations the client implements. Both frameworks also have separate property or configuration systems; this model groups the information relevant to the library boundary under negotiation and excludes any prescribed configuration UI. ([Intelligent Input Bus][4])
 
-# Plain-text rule
+## Plain-text rule
 
 All textual data in the core model is plain Unicode text:
 
@@ -550,7 +550,7 @@ The core interface does not support:
 
 An implementation may add such features through an optional extension, but they are not part of the concepts defined here.
 
-# Explicitly excluded concepts
+## Explicitly excluded concepts
 
 The following are outside this model:
 
@@ -581,7 +581,7 @@ The following are outside this model:
 
 These may be useful features of a complete input-method framework, but they are not required to define the engine library interface described by this document.
 
-# Canonical vocabulary
+## Canonical vocabulary
 
 The canonical terms used by this documentation are:
 
@@ -595,6 +595,7 @@ The canonical terms used by this documentation are:
 | **Unhandled**               | The client may process the original key event normally.             |
 | **Composition data**        | Preedit text and the candidate list.                                |
 | **Preedit text**            | Provisional text that has not been committed: what the user settled, then what they typed. |
+| **Preedit display position** | How many characters at the start of the preedit the engine considers settled. |
 | **Candidate list**          | The complete ordered list of selectable candidate texts.            |
 | **Candidate cursor**        | Composition data: the highlighted list position. Moving it settles nothing. |
 | **Select candidate**        | Choose a candidate by its absolute position in the current list.    |

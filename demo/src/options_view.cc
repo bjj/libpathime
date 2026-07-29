@@ -246,10 +246,10 @@ pathime_status_t adjust_option(const OptionRow &row,
     case PATHIME_OPTION_FLAGS: {
         /*
          * One bit at a time, which is only worth offering because
-         * pathime_option_value_name() can say which bit it is. This used to be
-         * all-or-nothing: twenty anonymous fuzzy-pinyin bits taught a user
-         * nothing individually, so the panel flipped the whole set. Now each
-         * one has a name, so each one is worth reaching.
+         * pathime_option_value_name() can say which bit it is. Twenty anonymous
+         * fuzzy-pinyin bits would teach a user nothing individually and the
+         * panel would do better to flip the whole set; because each one has a
+         * name, each one is worth reaching.
          *
          * step 0 — the toggle key — flips the bit under the edit cursor; the
          * cursor itself moves with the same Left/Right that walks an enum's

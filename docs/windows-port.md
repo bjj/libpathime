@@ -1,21 +1,22 @@
 # The Windows port
 
-How `libpathime` and its three vendored submodules build and behave on Windows.
-`BUILD.md` is what to install and type; this is what the build is doing behind
-that and where the result still differs from Linux.
+How `libpathime` and the three vendored input-method libraries it wraps build
+and behave on Windows. `BUILD.md` is what to install and type; this is what the
+build is doing behind that and where the result differs from Linux.
 
 Verified on Windows 11 with Visual Studio 2022 (MSVC 19.44) and with
-clang-cl 19 + Ninja, x64, against vcpkg's glib 2.88 and sqlite3 3.53.
-Both presets produce identical `anthy.dic`, `android.db` and compiled
-`table/*.db`, and both pass the full test suite — which is the real check that
-the workarounds below preserve Linux behaviour rather than merely compiling.
+clang-cl 19 + Ninja, x64, against the vcpkg glib and sqlite3 the port was
+developed with (2.88 and 3.53). Both presets produce identical `anthy.dic`,
+`android.db` and compiled `table/*.db`, and both pass the full test suite —
+which is the real check that the workarounds below preserve Linux behaviour
+rather than merely compiling.
 
 ## The rule
 
-Nothing under `engines/` — `libhangul/`, `anthy-unicode/`, `pyzy/` — is ever
-edited. A
-vendored source that will not compile as it stands is handled by one of the
-three mechanisms below, never by a patch to the submodule tree.
+Nothing under `engines/` — `libhangul/`, `anthy-unicode/`, `pyzy/` and the
+`ibus-table-chinese/` table sources — is ever edited. A vendored source that
+will not compile as it stands is handled by one of the three mechanisms below,
+never by a patch to the submodule tree.
 
 ## 1. The compat layer
 
@@ -99,8 +100,8 @@ libhangul and pyzy still produce DLLs under a shared build.
 Runtime gaps, not build failures; none of them affect the artifacts the build
 produces.
 
-- The anthy **runtime** library still opens its private-dictionary and history
-  files in the CRT's default text mode. The binary-mode fix above is
+- The anthy **runtime** library opens its private-dictionary and history files
+  in the CRT's default text mode. The binary-mode fix above is
   deliberately scoped to the codegen executables, which own their process — a
   library must not change `_fmode` under its host. The only observed effect is
   that `textdict`'s newline padding is written twice as long as intended; the
@@ -117,52 +118,45 @@ produces.
 
 ## The table engine on Windows
 
-Built and tested here, on both presets: 33 suites pass under MSVC and under
-clang-cl + Ninja, and the two toolchains produce byte-identical compiled tables.
-It needed nothing structural — SQLite comes from vcpkg, which pyzy already
-requires, and `tools/table-compile` is an ordinary host tool.
+The engine needs nothing structural here — SQLite comes from vcpkg, which pyzy
+already requires, and `tools/table-compile` is an ordinary host tool.
 
-### Glyph coverage: two maps, and why Windows is the interesting one
+### Glyph coverage: why Windows has its own map
 
-Compiled tables are trimmed to what the target can render (BUILD.md, "Glyph
-coverage"), from a map checked into the tree rather than a font read at build
-time. Windows now has its own map, `coverage_data_windows.h`, selected by
-`LIBPATHIME_TABLE_COVERAGE`, which defaults to `windows` here and `noto`
-elsewhere.
+Compiled tables are trimmed to what the target can render, from a map checked
+into the tree rather than a font read at build time. BUILD.md, "Glyph coverage",
+carries the maps, the measurements and the guidance; what is Windows-specific is
+why a second map exists at all.
 
-The measurement that shaped it: the filter is in practice "drop CJK Extension B
-and beyond" — 40,603 of the 40,686 characters the Noto map removes are
-supplementary-plane. And Windows can draw them. A system with the Chinese
-language feature installed carries **SimSun-ExtB** (60,349 supplementary code
-points on its own) and **MingLiU-ExtB**; against the whole Windows CJK font set
-the five shipped tables lose exactly one character out of 70,948. So on Windows
-the filter is not the same bargain it is on Linux, and
-`LIBPATHIME_TABLE_COVERAGE=none` is a sensible setting rather than a footgun —
-it costs about 10 MB of table data and gives back every Extension B character.
+The filter is in practice "drop CJK Extension B and beyond" — and Windows can
+draw those. A system with the Chinese language feature installed carries
+**SimSun-ExtB** (60,349 supplementary code points on its own) and
+**MingLiU-ExtB**; against the whole Windows CJK font set the five shipped tables
+lose exactly one character out of 70,948. So the filter is not the bargain here
+that it is on Linux, and `LIBPATHIME_TABLE_COVERAGE=none` is a sensible setting
+rather than a footgun — it costs about 10 MB of table data and gives back every
+Extension B character.
 
-The `windows` map is therefore the *conservative* reading: the union of the
-in-box faces (SimSun, Microsoft YaHei, Microsoft JhengHei, Yu Gothic, Malgun
-Gothic), which a bare en-US install has without any language feature added. It
-drops 38.5% of rows against Noto's 36.6% — close, because both maps stop at the
-BMP; the Extension B faces are what actually separate the platforms.
+`coverage_data_windows.h`, the default here, is the *conservative* reading: the
+union of the in-box faces (SimSun, Microsoft YaHei, Microsoft JhengHei, Yu
+Gothic, Malgun Gothic), which a bare en-US install has without any language
+feature added. It sits close to the Noto map, because both stop at the BMP; the
+Extension B faces are what actually separate the platforms.
 
-### GetFontUnicodeRanges does not work for this, and the earlier brief was wrong
+### GetFontUnicodeRanges cannot express what this map is deciding about
 
-`tools/generate-coverage.py` used to say the Windows equivalent of `fc-query
---format=%{charset}` was GDI's `GetFontUnicodeRanges`, warning that `WCRANGE` is
-in UTF-16 code *units* so supplementary coverage would arrive as surrogate halves
-needing recombination.
+`tools/generate-coverage.py` reads a font's coverage by parsing its own `cmap`
+table, formats 4 and 12, in about fifty lines of stdlib Python — the same code
+path on both platforms, with no fontconfig on Linux and no platform library
+here.
 
-Measured, it is worse than that: **supplementary coverage does not arrive at
-all.** Against SimSun-ExtB, whose `cmap` covers 60,349 supplementary code points,
-`GetFontUnicodeRanges` reported 97 code units and *zero* surrogates — exactly the
-font's 97 BMP characters, with the entire rest silently absent. A generator built
-to that brief would have produced a Windows map that excluded the one range the
-whole filter is deciding about, and it would have looked plausible.
-
-`read_charset()` now parses the font's own `cmap` table, formats 4 and 12, in
-about fifty lines of stdlib Python. That is correct above the BMP, needs nothing
-installed on either platform, and removed the `sys.platform` dispatch rather than
-adding to it — so the generator is no longer Linux-only and there is no
-fontconfig dependency left. (DirectWrite's `IDWriteFontFace::GetUnicodeRanges`
-uses `UINT32` and would have worked, at the price of COM through ctypes.)
+GDI's `GetFontUnicodeRanges`, the obvious Windows equivalent of `fc-query
+--format=%{charset}`, is unusable for it: `GLYPHSET`/`WCRANGE` count UTF-16 code
+*units*, so supplementary coverage cannot be expressed — which is precisely the
+range the filter decides about. Measured against SimSun-ExtB, whose `cmap`
+covers 60,349 supplementary code points, `GetFontUnicodeRanges` reports 97 code
+units and *zero* surrogates: exactly the font's 97 BMP characters, with the
+entire rest absent. Not surrogate halves needing recombination — simply gone. A
+Windows map built from it would exclude Extension B entirely and look plausible
+doing it. (DirectWrite's `IDWriteFontFace::GetUnicodeRanges` uses `UINT32` and
+does express it, at the price of COM through ctypes.)

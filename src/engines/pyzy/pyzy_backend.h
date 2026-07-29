@@ -7,43 +7,26 @@
  *  - pyzy's InputType is fixed at context creation, so pinyin vs bopomofo is
  *    decided when the pathime context is created, not switched later.
  *  - Its preedit is three parts (selectedText | conversionText | restText)
- *    with the middle provisional and its own focused-candidate index
- *    (Finding 1).
+ *    with the middle provisional and its own focused-candidate index, which
+ *    is why the core keeps a structured composition (composition.h).
  *  - cursor() is a byte offset into the raw ASCII input; never conflate it
- *    with output scalar positions (Finding 4).
+ *    with output scalar positions.
  *  - hasCandidate(i) is lazy and mutating, which is why core materializes
  *    candidates eagerly before dispatching callbacks (candidates.cc); this
  *    adapter is where that pump actually touches pyzy.
  *  - Mutations fire six Observer callbacks synchronously mid-call; the
  *    dirty-flag observer that reconciles push with the core's pull model is
- *    observer.* (Finding 5).
+ *    observer.*.
  *  - pyzy schedules its user-database save through g_timeout_add and a
- *    GTimer, which needs a GMainLoop we do not run — the save would never
- *    fire, so this adapter drives it explicitly (docs/design-history.md §5).
- *  - Input is [a-z] and apostrophe only (Finding 6). Every other printable
- *    ASCII key is therefore this adapter's to emit rather than pyzy's to
- *    take, which is what PATHIME_OPT_LATIN_WIDTH and
- *    PATHIME_OPT_PUNCTUATION_WIDTH govern; punctuation.* is that layer.
+ *    GTimer, which needs a GMainLoop this library does not run — the save
+ *    would never fire, so this adapter drives it explicitly.
+ *  - Input is [a-z] and apostrophe only. Every other printable ASCII key is
+ *    therefore this adapter's to emit rather than pyzy's to take, which is
+ *    what PATHIME_OPT_LATIN_WIDTH and PATHIME_OPT_PUNCTUATION_WIDTH govern;
+ *    punctuation.* is that layer.
  *
- * One claim re-verified here, and the answer is split (docs/design-history.md §1, "One claim
- * to re-check"). Tracing pyzy's bopomofo_table (PinyinParserTable.h:6622) into
- * the pinyin_table entries it points at: of its 479 rows, 75 reach an entry
- * with a non-zero `flags` field, and check_flags() (PinyinParser.cc:34-49)
- * makes parseBopomofo() *stop* at a syllable whose flag bit is clear.
- *
- *   - PATHIME_OPT_PINYIN_FUZZY is reachable from bopomofo. 61 rows carry a
- *     PINYIN_FUZZY_* bit across 16 distinct bits, and the behaviour is
- *     visible: ㄈㄨㄥ parses as "fong" and yields 红 with PINYIN_FUZZY_F_H
- *     set, and parses as "fu" with ㄥ left in restText without it.
- *   - PATHIME_OPT_PINYIN_CORRECTION is not. No row of bopomofo_table reaches
- *     an entry carrying a PINYIN_CORRECT_* bit — the original reasoning holds
- *     for corrections, which are Latin typing slips with no bopomofo spelling.
- *
- * So the option table's `engines` for PATHIME_OPT_PINYIN_FUZZY is narrower
- * than the truth. Widening it is additive and is options.cc's to make; nothing
- * here depends on the change, because the mask is pulled through OptionReader
- * either way and an unsupported option still resolves to its default of every
- * bit — which is pyzy's own default too.
+ * Which of the two FLAGS options reaches bopomofo was measured rather than
+ * assumed; options.cc's descriptor for them carries the evidence.
  */
 
 #ifndef LIBPATHIME_SRC_ENGINES_PYZY_BACKEND_H
@@ -121,8 +104,8 @@ private:
 
     /**
      * Copy out whatever the observer says the last mutation changed. This is
-     * the post-call assembly of Finding 5 and the only place pyzy's borrowed
-     * strings are read.
+     * the post-call assembly step that reconciles pyzy's push with the core's
+     * pull, and the only place pyzy's borrowed strings are read.
      */
     void harvest(const OptionReader &options, Composition *model, Output *out);
 
@@ -163,7 +146,7 @@ private:
 
 /**
  * What the two Chinese engines share. pyzy keeps its dictionaries in a
- * process-global Database rather than per engine (Finding 3), so this holds
+ * process-global Database rather than per engine, so this holds
  * only the id that decides which InputType its contexts are built with —
  * which is the whole reason pyzy_create_engine() takes one.
  */

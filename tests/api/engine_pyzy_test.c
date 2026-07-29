@@ -527,9 +527,8 @@ static void test_eager_materialization(pathime_engine_t *engine)
  * follow it.
  *
  * pyzy tracks a focused candidate and rewrites its conversionText() to match
- * (PhoneticContext::focusCandidate()), and while that string was the preedit
- * this test asserted the preedit followed the cursor. It no longer is: the
- * preedit is what the user typed, and 你好 is candidate 0.
+ * (PhoneticContext::focusCandidate()), but conversionText() is not the
+ * preedit: the preedit is what the user typed, and 你好 is candidate 0.
  *
  * That difference from anthy is the preedit rule doing its job rather than an
  * inconsistency. On anthy the cursor moves *within a conversion the user asked
@@ -844,16 +843,15 @@ static void test_options(pathime_engine_t *pinyin, pathime_engine_t *bopomofo)
      * this option — not one of the four marked resets_composition — has to obey
      * it without disturbing the composition in progress.
      *
-     * Worth asserting rather than assuming, because it did not hold when the
-     * three adapters were first assembled, and the failure was quiet: the store
-     * updated, the getters reported the new value, composition_changed was
-     * dispatched, and the list on screen stayed the old repertoire's until the
-     * user typed one more key. Two things were missing. The core never told the
-     * backend that a resolved value had moved — options are pulled, but pulling
-     * next time is too late when there may be no next time — which is now
-     * ContextBackend::options_changed(). And pyzy's setProperty() stores
-     * without regenerating, firing no candidatesChanged, so the adapter drops
-     * its materialized list and lets the core's pump refill it.
+     * Worth asserting rather than assuming, because the way it fails is quiet:
+     * the store updates, the getters report the new value, composition_changed
+     * is dispatched, and the list on screen stays the old repertoire's until
+     * the user types one more key. Two things keep that from happening. The
+     * core tells the backend when a resolved value has moved — options are
+     * pulled, but pulling next time is too late when there may be no next time
+     * — which is ContextBackend::options_changed(). And pyzy's setProperty()
+     * stores without regenerating, firing no candidatesChanged, so the adapter
+     * drops its materialized list and lets the core's pump refill it.
      *
      * Index 5 must therefore flip from the traditional 離 to the simplified 离
      * with no key pressed in between.
@@ -1197,7 +1195,7 @@ static void test_width_and_punctuation(pathime_engine_t *pinyin,
      * That is the one path where the auxiliary text is not the whole preedit,
      * and without the fallback in harvest() the user would type a zhuyin symbol
      * and watch nothing appear. Asserted exactly rather than as "something
-     * happened", which is what it used to say and what let this hide.
+     * happened", which is a check this failure would slip through.
      */
     PT_CHECK(press(ctx, ','));
     PT_CHECK(log.commit_count == 0);
@@ -1228,8 +1226,7 @@ static void test_width_and_punctuation(pathime_engine_t *pinyin,
  * "nihk" is four keys; "ni hao" is the two syllables they decode to. The
  * preedit shows the syllables, because those are what the user is composing;
  * the keys are an encoding of them and the client already knows which ones it
- * sent. PATHIME_OPT_PINYIN_SHOW_RAW used to put those keys in the auxiliary
- * text, and went when the auxiliary text did.
+ * sent. Nothing in the API surfaces the raw keys.
  */
 static void test_double_pinyin_preedit(pathime_engine_t *pinyin)
 {

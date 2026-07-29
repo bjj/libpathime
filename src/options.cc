@@ -1,10 +1,10 @@
 /*
  * Implementation of the options machinery declared in options.h, plus the
- * nineteen public entry points of the header's Options section.
+ * twenty public entry points of the header's Options section.
  *
  * Everything here is core code: no backend is named, nothing crosses
  * backend.h, and the file compiles identically whatever the PATHIME_WITH_*
- * macros say. That is why it is real rather than stubbed — the descriptor
+ * macros say. That is why it can be complete on its own — the descriptor
  * table, the two-level store, the validation order and the resolution order
  * are all decidable from include/pathime/pathime.h alone.
  *
@@ -69,8 +69,8 @@ constexpr uint32_t kTable    = engine_bit(PATHIME_ENGINE_TABLE);
 /**
  * "Anthy, Pinyin, Bopomofo, Table" — every engine that converts by choosing
  * among candidates, which is every engine except Hangul. Hangul composes
- * syllables from jamo and produces no candidates at all now that hanja is out
- * of scope (docs/design-history.md §1, "Cut in the API review round"), so the options that
+ * syllables from jamo and produces no candidates at all — hanja, libhangul's
+ * only candidate-bearing feature, is out of scope — so the options that
  * describe candidate production report themselves unsupported there.
  */
 constexpr uint32_t kConverting = kAnthy | kPinyin | kBopomofo | kTable;
@@ -177,12 +177,11 @@ constexpr OptionDescriptor kOptions[] = {
     make_int("max-candidates", kConverting, PATHIME_DEFAULT_MAX_CANDIDATES, 1, INT64_MAX),
 
     /*
-     * "Anthy, Table" and not kConverting, which is what it used to be. pyzy is
-     * excluded deliberately, and the exclusion is the whole decision recorded
-     * in docs/design-history.md §4a: pyzy learns *inside* selectCandidate() and commit() via
-     * PhraseEditor::commit(), with no public switch to withhold — only
-     * resetCandidate() to unlearn one entry afterwards. Anthy is implementable
-     * because anthy_commit_segment() is a separate call the adapter can skip.
+     * "Anthy, Table" and not kConverting. pyzy is excluded deliberately: it
+     * learns *inside* selectCandidate() and commit() via PhraseEditor::commit(),
+     * with no public switch to withhold — only resetCandidate() to unlearn one
+     * entry afterwards. Anthy is implementable because anthy_commit_segment()
+     * is a separate call the adapter can skip.
      *
      * The rejected alternative was pointing pyzy's user database at a
      * disposable directory when learning is off. It was turned down because it
@@ -246,11 +245,9 @@ constexpr OptionDescriptor kOptions[] = {
               enum_mask(PATHIME_PINYIN_SCHEME_DOUBLE_XHE + 1), true),
     /*
      * Both FLAGS options default to every bit. Their engine sets differ, and
-     * the difference was measured rather than reasoned — this is docs/design-history.md §1's
-     * "One claim to re-check", answered while writing the pyzy adapter by
-     * tracing bopomofo_table (PinyinParserTable.h:6622, 479 rows) into the
-     * pinyin_table entries it points at, and confirming the result
-     * behaviourally.
+     * the difference was measured rather than reasoned: bopomofo_table
+     * (PinyinParserTable.h:6622, 479 rows) was traced into the pinyin_table
+     * entries it points at, and the result confirmed behaviourally.
      *
      * Fuzzy *is* reachable from bopomofo: 61 of those rows carry a
      * PINYIN_FUZZY_* bit across 16 distinct bits, and check_flags
@@ -262,14 +259,13 @@ constexpr OptionDescriptor kOptions[] = {
      * spellings, and has nothing for these bits to mean.
      *
      * Correction is not reachable: zero rows of bopomofo_table reach an entry
-     * carrying a PINYIN_CORRECT_* bit. The original reasoning holds for this
-     * one — corrections are Latin typing slips, and there is no bopomofo
-     * spelling to slip in.
+     * carrying a PINYIN_CORRECT_* bit. Corrections are Latin typing slips, and
+     * there is no bopomofo spelling to slip in.
      *
      * Both options keep their PATHIME_OPT_PINYIN_ prefix and their place in the
-     * header's Pinyin section even though fuzzy now reaches bopomofo too. The
-     * name describes what the rules are *about* — alternate pinyin spellings —
-     * and bopomofo reaches them only by being parsed into pinyin first.
+     * header's Pinyin section even though fuzzy reaches bopomofo too. The name
+     * describes what the rules are *about* — alternate pinyin spellings — and
+     * bopomofo reaches them only by being parsed into pinyin first.
      */
     make_flags("pinyin-fuzzy", kPyzy,
                static_cast<int64_t>(flags_mask(PATHIME_PINYIN_FUZZY_ING_IN)),
@@ -317,14 +313,14 @@ static_assert(kOptionCount == static_cast<size_t>(PATHIME_OPT_TABLE_PINYIN_FALLB
               "the descriptor table has drifted from pathime_option_t");
 
 /* OptionDescriptor::engines is a uint32_t bitmask; see engine_bit(). */
-static_assert(kEngineCount <= 32, "engine ids no longer fit OptionDescriptor::engines");
+static_assert(kEngineCount <= 32, "too many engine ids for OptionDescriptor::engines");
 
 /* ---------------------------------------------------------------------------
  * Value names
  *
  * The names pathime_option_value_name() hands out, for the two types that have
  * values worth naming. A side table rather than a tenth OptionDescriptor field
- * because only 15 of the 32 options have any: carrying an always-null array
+ * because only 15 of the 31 options have any: carrying an always-null array
  * through every row, and through five constexpr factories, would cost more
  * than the lookup below.
  *
@@ -575,7 +571,7 @@ pathime_str_t resolve_string(const pathime_engine_t *engine,
 /* ---------------------------------------------------------------------------
  * Entry-point prologues
  *
- * The shared validation order, in one place so the nineteen entry points cannot
+ * The shared validation order, in one place so the public entry points cannot
  * disagree about it.
  * ------------------------------------------------------------------------- */
 
@@ -1325,13 +1321,13 @@ pathime_status_t pathime_engine_option_info(const pathime_engine_t *engine,
      * size it allocated; we may write at most that many bytes, and at most as
      * many as we know how to fill.
      *
-     * pathime_option_info_t has had exactly one layout so far, so the only
-     * recognized sizes are that layout and anything larger — a caller compiled
-     * against a newer header, which we serve by writing what we know and telling
-     * it so. Anything smaller is a size no shipped header ever had:
+     * pathime_option_info_t has exactly one layout, so the only recognized
+     * sizes are that layout and anything larger — a caller compiled against a
+     * newer header, which we serve by writing what we know and telling it so.
+     * Anything smaller matches no layout of the struct at all:
      * PATHIME_ERROR_INVALID_ARGUMENT with nothing written. When a second layout
-     * ships, this becomes a lookup against the list of prefix sizes that have
-     * been released, and `writable` starts differing from sizeof().
+     * is added, this becomes a lookup against the list of accepted prefix
+     * sizes, and `writable` starts differing from sizeof().
      */
     if (out_info->struct_size < sizeof(pathime_option_info_t)) {
         return PATHIME_ERROR_INVALID_ARGUMENT;

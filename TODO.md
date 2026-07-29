@@ -9,12 +9,14 @@ deliberate:
   contract, kept in lockstep. The header carries no list of deviations from
   the concepts because there are none.
 - `docs/design-history.md` — the settled design rounds, question by question,
-  with the evidence each was answered against and what the answer cost. Its
-  section numbers (§1, §3, §4a–§4c, §5, §6a–§6c) are the ones code comments
-  cite. **Read it before reopening anything that looks undecided** — most
-  things that look open were closed there, on purpose, with reasons. §2 is the
-  six numbered adapter findings, cited by number from `src/`; §6 is the table
-  engine, and is where most of this file's former bulk went.
+  with the evidence each was answered against and what the answer cost.
+  **Read it before reopening anything that looks undecided** — most things
+  that look open were closed there, on purpose, with reasons.
+
+Everything else in `docs/`, plus every code comment and the public header, is
+written to stand on its own: the three development-only documents (this file,
+`CLAUDE.md`, `docs/design-history.md`) could be deleted with nothing dangling.
+Keep it that way — nothing outside those three should cite them.
 
 Status in one paragraph: the build (Linux and Windows), the core (all 44
 public entry points), **all four** adapters — hangul, anthy, pyzy and the
@@ -23,50 +25,19 @@ client, the preedit rule, and the eager candidate strip are built and tested:
 34 suites, all passing on Linux with every backend enabled
 (`docs/testing.md`), and 33 on Windows under both presets. The table engine
 types real Chinese against tables compiled out of `ibus-table-chinese`, trimmed
-at build time to one of two checked-in glyph-coverage maps or to none. The
-detailed ledger is at the top of `docs/design-history.md`.
+at build time to one of two checked-in glyph-coverage maps or to none.
 
 ---
 
-## The table engine: what landed, and what did not
+## The table engine: what is missing
 
-The engine is real. `src/engines/table/` implements the source `.txt` parser
-(spec §3), the compiled SQLite schema (§4), the user-database schema (§5), the
-composition mapping (§6), the key-event state machine (§7), lookup and
-candidate ordering (§8), select and commit (§9), and Chinese variant
-classification (§11.1) and frequency learning (§10.1). `tools/table-compile`
-compiles tables at build time,
-and five of them ship: cangjie5, quick5, wubi-jidian86, stroke5, zhuyin.
-
-Table enumeration is settled and done. The installed tables are the legal values
-of `PATHIME_OPT_TABLE_FILE`, reported through the introspection already there —
-`pathime_option_info_t::valid_value_count` says how many, and
-`pathime_option_value_name()` names each by index. No new entry points, and no
-display names, icons or language lists: what comes back is the machine-readable
-key the setter accepts, because presentation is the client's domain. The demo
-picks a table with the same Left/Right that steps an enum, which is what it was
-missing.
-
-`src/engines/table/README.md` is the map. What follows is only what is missing.
-
-Two smaller items from the same round are closed and need no entry of their
-own: `LIBPATHIME_WITH_TABLE` already defaults to `ON` with auto-disable when
-SQLite is missing (`cmake/LibpathimeOptions.cmake:77`), and the demo's "engine
-does not implement this operation" on Enter over `table-file` went away with
-table enumeration — `adjust_option()` returned `PATHIME_ERROR_UNSUPPORTED` only
-because `valid_value_count` was 0, and it no longer is.
-
-The behaviour questions this engine raised were answered in the round of
-2026-07-28 and are **built**: char prompts, load-on-set, the pinyin-fallback
-honesty fix, shared full-width conversion, compile-time glyph filtering, and the
-derived `z` wildcard. The reasoning is `docs/design-history.md` §6 — read that
-before reopening any of them; the shape decisions taken while the engine was
-written (the single directory, the header boundary, tier 3 behind the seam,
-build-time compilation, enumeration through the option machinery) are §6a.
+The engine itself is built — `src/engines/table/README.md` is the map, and
+`docs/ibus-table-mapping.md` is the format it reads. What follows is only what
+that engine does not do.
 
 ### Not implemented, in rough priority order
 
-- **User-derived phrases (§10.2). OUT OF SCOPE for the first phase**, decided
+- **User-derived phrases. OUT OF SCOPE for the first phase**, decided
   2026-07-28. Kept here in full because the investigation behind the decision is
   worth not repeating, not because it is queued.
 
@@ -95,7 +66,7 @@ build-time compilation, enumeration through the option machinery) are §6a.
   (`refs/ibus-table/engine/tabsqlitedb.py:1527-1587`).
 
   So it is not learning in the sense `PATHIME_OPT_LEARNING` currently means
-  (reordering by use, §10.1, already implemented). It *creates vocabulary*, under
+  (reordering by use, which is implemented). It *creates vocabulary*, under
   codes the user did not choose.
 
   **How it interacts with typing — and the problem that makes this a discussion
@@ -108,12 +79,12 @@ build-time compilation, enumeration through the option machinery) are §6a.
   Without that display the user gets vocabulary filed under codes they were never
   told, which they can only rediscover by accident.
 
-  **libpathime has no auxiliary text.** That was a deliberate removal — the
-  model says what a user typed is the composition, not something supplemental to
-  it (`docs/CONCEPTS.md`; spec §6.4 and §12 both record it as unused). So the
-  channel this feature depends on for its usability is one we do not have and
-  removed on purpose. Adding it back for one feature of one shipped table is a
-  large decision; shipping the feature without it is shipping the silent half.
+  **libpathime has no auxiliary text**, by design: the model says what a user
+  typed is the composition, not something supplemental to it
+  (`docs/CONCEPTS.md`). So the channel this feature depends on for its
+  usability is one the API does not have. Adding it for one feature of one
+  shipped table is a large decision; shipping the feature without it is
+  shipping the silent half.
 
   Two smaller things worth having in the conversation:
 
@@ -132,11 +103,11 @@ build-time compilation, enumeration through the option machinery) are §6a.
   spec's checkpoint-after-16-updates is a durability detail, and the user
   database is in WAL mode where SQLite checkpoints on its own. Measure before
   writing anything.
-- **Pinyin mode (§11.2) and suggestion mode (§11.3).** **Decided against**, and
-  the reasoning is `docs/design-history.md` §6b — the data would be a third
-  GPL-3 dependency, the modes were never reachable through our key model
-  anyway, and the audience is thinner than it looks. The options remain in the
-  header and now report themselves honestly.
+- **Pinyin mode (§11.2) and suggestion mode (§11.3).** **Decided against**:
+  the data would be a third GPL-3 dependency, the modes are not reachable
+  through this library's key model anyway, and the audience is thinner than it
+  looks. The options remain in the header and report themselves honestly.
+  `docs/design-history.md` §6b has the full argument.
 
   One live note kept here rather than in the history, because it is an
   alternative rather than a decision: if this is ever revisited, the fallback
@@ -146,7 +117,7 @@ build-time compilation, enumeration through the option machinery) are §6a.
   remove a table feature, and it would put pyzy's candidate ordering and
   learning inside a table candidate list.
 - **One of the nine sort keys (§8.2).** Key 2 (the pinyin tone-suffix penalty)
-  is now moot: pinyin mode is not being implemented. Key 8 (Big5 code of the
+  is moot: pinyin mode is not being implemented. Key 8 (Big5 code of the
   first character, Cangjie and Quick only) needs a Big5 mapping this library
   does not carry — the same regenerate-don't-copy situation as the variant
   table, and `tools/generate-variants.py` is the pattern to follow. It affects
@@ -157,16 +128,15 @@ build-time compilation, enumeration through the option machinery) are §6a.
 
 ### Open questions the implementation raised
 
-- **Two behaviours in §7.2 that the spec does not pin down.** At
+- **Two behaviours in the key-event state machine that the format does not pin down.** At
   `MAX_KEY_LENGTH` with `AUTO_COMMIT` off the key is absorbed and discarded
   (letting it through would drop a latin letter into the middle of a
   composition); and the `AUTO_SELECT` retry recurses one level to reprocess the
   character that broke the match. Both are choices, both are commented at the
   code, and neither has a table in the shipped set that exercises it hard.
 - **How compatible are we with a distro `ibus-table-*` package, really?**
-  Raised 2026-07-28. No action proposed — the point is to have the answer
-  written down, because "we read ibus-table's format" is currently claimed more
-  broadly than it is true.
+  No action proposed — the point is to have the answer written down, because
+  "we read ibus-table's format" is claimed more broadly than it is true.
 
   The question is sharp because distros ship **compiled databases**, not source:
   `engines/ibus-table-chinese/tables/CMakeLists.txt` runs `ibus-table-createdb`
@@ -216,16 +186,16 @@ build-time compilation, enumeration through the option machinery) are §6a.
   our tables but us, and the standard key is the more honest description of what
   the table means.
 
-- **`ibus-table-chinese` is GPL-3, and its compiled tables now ship inside
-  `pathime-data/`.** Still open, and now with a standing consequence: **no
-  further GPL data gets vendored until it is resolved.** That is what closed the
+- **`ibus-table-chinese` is GPL-3, and its compiled tables ship inside
+  `pathime-data/`.** Open, with a standing consequence: **no further GPL data
+  gets vendored until it is resolved.** That is what closed the
   pinyin/suggestion question above — the data exists in `refs/ibus-table` and
   taking it would have added a third GPL-3 source. A licensing question about
   what libpathime distributes, not a technical one, and to be pursued
   separately from the engine work.
-- **Glyph-coverage filtering: the runtime half.** The compile-time half is built
-  on both platforms and `docs/design-history.md` §6b and §6d record the shape and
-  the Windows measurements. One thing remains.
+- **Glyph-coverage filtering: the runtime half.** The compile-time half is
+  built on both platforms; `BUILD.md`, "Glyph coverage", has the shape and the
+  measurements. One thing remains.
 
   **The runtime half is deferred**, and not only for effort. An embedder should
   be able to *guarantee* their candidate list stays renderable on their target —
@@ -252,11 +222,11 @@ build-time compilation, enumeration through the option machinery) are §6a.
 ### Not verified
 
 - **The Noto map has not been regenerated with the current parser.**
-  `read_charset()` no longer shells out to `fc-query`; it parses the font's
-  `cmap` directly, which is what made the generator work on Windows. The
-  `windows` map was produced by that parser, but `coverage_data_noto.h` still
-  carries the ranges the fontconfig version emitted — they were left untouched
-  on purpose, so that adding the second map changed no shipped Linux data.
+  `read_charset()` parses the font's `cmap` table directly, which is what makes
+  the generator work on Windows. The `windows` map was produced by that parser;
+  `coverage_data_noto.h` still carries the ranges an earlier fontconfig-based
+  reader emitted, left untouched deliberately so that adding the second map
+  changed no Linux data.
 
   The two readers should agree exactly: fontconfig's charset comes from FreeType
   reading the same table. Confirming it is one command on a machine with Noto
@@ -273,17 +243,81 @@ build-time compilation, enumeration through the option machinery) are §6a.
 
 ## Queued work
 
-- **The header self-explanation pass.** Much of the commentary in
-  `include/pathime/pathime.h` justifies decisions by naming backend behaviour
-  (anthy's write-once personality, pyzy's creation-time `InputType`,
-  libhangul's nine built-in layouts). That was right while the implementation
-  did not exist; now that it does, those notes belong in `docs/*-mapping.md`
-  and `docs/design-history.md`, and the header should keep only the contract.
-  The two tests for whether a passage stays: does a client's behaviour depend
-  on it, and would removing it let someone reopen a question the design
-  closed. The table engine has landed, so this is now unblocked — and it should
-  pick up `PATHIME_OPT_TABLE_*`, whose doc comments were written before there
-  was an implementation to check them against.
+- **The header self-explanation pass — needs a decision before it is done.**
+  The original plan was to strip from `include/pathime/pathime.h` every
+  passage that justifies a decision by naming backend behaviour (anthy's
+  write-once personality, pyzy's creation-time `InputType`, libhangul's nine
+  built-in layouts), moving those notes into `docs/*-mapping.md` and
+  `docs/design-history.md` and leaving the header with only the contract.
+
+  **That plan is now partly self-defeating**, which is why it was not carried
+  out. `docs/design-history.md` is a development-only document that must be
+  deletable; moving contract rationale into it would recreate exactly the
+  coupling the self-containment rule removes. And reading the header through
+  the plan's own two tests — does a client's behaviour depend on this, and
+  would removing it let someone reopen a closed question — almost every
+  passage passes. "pyzy fixes the phonetic scheme at context creation" is why
+  a client must make a new context to switch; "libhangul exposes only the
+  syllable being assembled" is why word mode has the backspace granularity it
+  has. Cutting those makes the header shorter and the client's job harder.
+
+  What is genuinely left is narrower, and someone should decide whether it is
+  worth doing at all:
+
+  - A handful of passages name a vendored library and give a client nothing —
+    `pathime_hangul_layout_t`'s "the nine layouts libhangul builds in", and
+    the paragraph at `pathime_init_params_t::data_dir` explaining that the
+    directory is what lets anthy's "personality" disappear.
+  - The `PATHIME_OPT_TABLE_*` comments were written before the table engine
+    existed. They have not been read back against the implementation.
+
+### Three table options are accepted and do nothing
+
+Found by reading `include/pathime/pathime.h`'s `PATHIME_OPT_TABLE_*` comments
+back against `src/engines/table/`, which had never been done. The header has
+been corrected to describe what actually happens; **the code side is a
+decision, not a task**, because each fix is a behaviour change.
+
+- **`PATHIME_OPT_PREDICTION` on the table engine.** Settable, reads back
+  `true` by default, and appears nowhere under `src/engines/table/`. It was
+  meant to be suggestion mode, which is decided against (above), and
+  `TableProperties::declared_number()` has no case for it either, so there is
+  no tier 3. `wubi-jidian86.txt` declares `SUGGESTION_MODE = TRUE` and ships,
+  so a client that walks the inventory sees an option that promises something.
+  Either drop `kTable` from the descriptor row in `src/options.cc` so it
+  reports itself unsupported — matching what `PATHIME_OPT_TABLE_PINYIN_FALLBACK`
+  already does — or implement the mode.
+- **`PATHIME_OPT_INCOMPLETE_INPUT` on the table engine.** The wildcard *is*
+  appended before searching (`table_db.cc`, `properties.auto_wildcard`), but on
+  the table's own `AUTO_WILDCARD` declaration, never on the option. Setting it
+  false changes nothing. The clean fix is tier 3: give `declared_number()` a
+  case for it, so the table supplies the default and a client can still
+  override. No shipped table declares `AUTO_WILDCARD = FALSE`, so nothing
+  visibly misbehaves today.
+- **`PATHIME_OPT_TABLE_SINGLE_WILDCARD` and `_MULTI_WILDCARD`.** Stored,
+  readable, and never consulted: `build_like_pattern()` takes a
+  `TableProperties` and never sees an `OptionReader`, and `is_input_char()`
+  likewise, so a client-set wildcard is not even accepted as a keystroke.
+  `src/options.cc` half-admits this already ("the table engine's wildcards are
+  the obvious future exception").
+
+Two smaller things from the same read, both cheap:
+
+- `PATHIME_OPT_TABLE_AUTO_COMMIT` has no API-level test at all — only its
+  tier-3 plumbing is pinned, in `tests/core/table_test.cc`. Same for
+  `PATHIME_OPT_TABLE_SINGLE_CHAR_ONLY`.
+- The comment at `src/engines/table/table_backend.cc:196-204` still says "until
+  the first context exists, tier 3 therefore contributes nothing." Setting
+  `PATHIME_OPT_TABLE_FILE` populates the cache, which is what makes the
+  header's "resolves against the new table's declarations immediately" true.
+
+## Decisions wanted
+
+- **Does `docs/CONCEPTS.md` keep "Input purpose and hints"?** It is the one
+  section of the model the library does not implement, and it is now labelled
+  as such in place. Either it stays as a description of the concept space the
+  library sits in, or it comes out and the deferral lives only here. Left in,
+  labelled, pending a call.
 
 ## Open questions
 
@@ -291,8 +325,8 @@ build-time compilation, enumeration through the option machinery) are §6a.
   have paid for it.** anthy and pyzy decline Left/Right/Home/End while
   composing, because there is no position for them to move and nothing the
   client could be told about the result. The table engine now declines them for
-  the same reason, and gives up more than the other two in doing so: spec §6.3
-  and §7.3 describe a caret that moves among pre-committed segments and edits in
+  the same reason, and gives up more than the other two in doing so: ibus-table
+  has a caret that moves among pre-committed segments and edits in
   the middle, which is a *documented ibus-table feature* rather than an
   incidental capability. Flattening it away is why `Composition::tail` is
   always empty for this engine. For pyzy the decision was forced rather than
@@ -307,6 +341,25 @@ build-time compilation, enumeration through the option machinery) are §6a.
 - **Thread-safety is a documented requirement, not an enforced one.** Nothing
   detects overlapping calls. If that proves to be a common client bug, a debug
   build could catch it cheaply with a non-recursive in-call flag per context.
+- **Is anthy's own prediction API worth exposing?** `PATHIME_OPT_PREDICTION`
+  on anthy is the eager-conversion strip, not history completion. The
+  completion API is separately reachable, and its prediction cache is entirely
+  separate from `ac->seg_list`, so driving it cannot disturb conversion — the
+  obstruction that pushed `PATHIME_OPT_LEARNING` to unsupported on pyzy does
+  not exist here. What is in doubt is the value, not the feasibility: the
+  completions are empty on a fresh profile and whenever learning is off. If
+  they are ever merged into the same candidate list, the option does not
+  change meaning; the header already says so.
+
+## Build limitations, stated in BUILD.md as facts
+
+Neither is a bug, and both are recorded here so they are tracked rather than
+only described:
+
+- **Cross-compiling is not supported.** anthy's dictionary is built by host
+  tools at build time.
+- **No CMake package config is installed**, so a consumer names the include
+  directory and the library itself.
 
 ## Deferred, deliberately
 

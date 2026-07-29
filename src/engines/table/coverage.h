@@ -40,11 +40,10 @@
  * measurements.
  *
  * Each map is taken from a deliberately *inclusive* reading of its target,
- * because it is the upper bound on what a shipped table can offer. An embedder
- * needing something narrower should be able to remove more at runtime — that
- * half is deferred, and TODO.md records the four questions it has to answer
- * first — and runtime narrowing only works if nothing has to be added back to a
- * table that no longer carries it.
+ * because it is the upper bound on what a shipped table can offer. Narrowing
+ * further at runtime is not implemented, and an inclusive build-time map is
+ * what keeps it possible: runtime narrowing can only ever remove, so anything
+ * a table does not carry is out of reach for good.
  */
 
 #ifndef LIBPATHIME_SRC_ENGINES_TABLE_COVERAGE_H

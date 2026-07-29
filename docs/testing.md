@@ -1,7 +1,6 @@
 # Testing
 
-Everything under `tests/`, how to run it, and the things about it that are
-deliberate and should not be "fixed".
+Everything under `tests/`, how to run it, and the conventions the suites follow.
 
 ## Running the suites
 
@@ -18,10 +17,11 @@ On Windows add `-C Release` to the `ctest` line; the Visual Studio generator is
 multi-config. Tests are named `<area>.<name>`, so `ctest -R '^anthy\.'` runs one
 backend's suite and `ctest -R '^api\.'` runs the public-API tests.
 
-**Skip protocol.** A test whose subject is not implemented yet, or whose data is
-absent, exits 77 — `SKIP_RETURN_CODE`, which ctest reports as *skipped* rather
-than passed or failed. As implementation lands, replace the skip with real
-checks. Never delete a registration.
+**Skip protocol.** A test whose backend or data is absent is still registered,
+and exits 77 — `SKIP_RETURN_CODE`, which ctest reports as *skipped* rather than
+passed or failed. Deciding it in the source rather than in CMake is what keeps
+the loss visible: a configuration that drops a backend produces skips in the
+ctest output, not a quietly shorter list.
 
 ## The four kinds of test
 
@@ -30,21 +30,28 @@ checks. Never delete a registration.
 Links the built library and touches only exported symbols. Plain C11 against
 `<pathime/pathime.h>`, which doubles as proof that the header works from strict
 C and that every symbol a client needs is actually exported. Holds the ABI,
-lifecycle and options suites, plus one end-to-end test per engine that types
-real Korean, Japanese and Chinese through the public API.
+lifecycle and options suites, plus one end-to-end test per engine —
+`api.engine_hangul`, `api.engine_anthy`, `api.engine_pyzy` and
+`api.engine_table` — each typing real Korean, Japanese or Chinese through the
+public API. `api.engine_pyzy_nodb` is the negative half of the pyzy one: it
+gives the engine a resource directory that will never hold a database and
+asserts it reports itself unavailable instead of pretending to work.
 
 `api.engine_table` carries a job the other three do not. For hangul, anthy and
 pyzy the vendored library is the authority on what correct output looks like and
 the test records what it does; the table engine has no such authority, because
-libpathime wrote it. So that test *is* where the behaviour of
-`docs/ibus-table-mapping.md` §6–§9 is pinned down, and it deliberately runs against
-the real tables the build compiles out of `ibus-table-chinese` rather than a
-fixture — the format is an interoperability contract, and a table this
-repository invented would prove much less about it.
+libpathime wrote it. So that test *is* where the behaviour
+`docs/ibus-table-mapping.md` specifies is pinned down — §8, the lookup and the
+candidate ordering, and §11's negotiated options. It runs against the real
+tables the build compiles out of `ibus-table-chinese` rather than a fixture,
+because the format is an interoperability contract and a table this repository
+invented would prove much less about it.
 
-Nothing here may link a backend library. The public header is the whole
-interface these tests are entitled to, and on Windows linking anthy alongside
-libpathime is actively broken — see "Runtime data" below.
+**Nothing here may link a backend library.** The public header is the whole
+interface these tests are entitled to — and it is also the only linkage that
+works, since anthy is static on Windows and a test that linked it would get a
+second, independent copy of anthy's process-global state. See
+`docs/anthy-mapping.md`, "Why the anthy family is built static on Windows".
 
 ### `tests/core/` — `core.<name>`
 
@@ -54,7 +61,7 @@ C++17, covering `utf8.*`, `composition.*`, the options machinery, and the table
 engine's data layer at seams the public API cannot reach.
 
 `core.table` is also a structural assertion, not only a functional one. Its
-source list is six files from `engines/table/` plus `paths.cc` and `utf8.cc` —
+source list is six files from `src/engines/table/` plus `paths.cc` and `utf8.cc` —
 no core, no adapter — because everything below `table_backend.cc` is meant to be
 usable without the engine. A link error there would be the first sign that
 something in the parser, the database or the ranking had reached back across the
@@ -99,22 +106,22 @@ environment variable or a working directory to arrange it.
   `pyzy_set_data_dir(…)`, both with absolute paths the build supplied as
   compile definitions.
 
-The three end-to-end engine tests under `tests/api/` are the only ones there
-gated on a `LIBPATHIME_WITH_*` option, because they are the only ones whose data
-has to exist.
+The four end-to-end engine tests are where the data actually has to exist, and
+they are registered all the same: each compiles to a skip when its
+`PATHIME_WITH_*` macro is 0. What the `if(LIBPATHIME_WITH_*)` arms in
+`tests/api/CMakeLists.txt` hold is the wiring around them — the `data_dir`
+compile definitions and the `.clean` fixtures — plus `api.engine_pyzy_nodb`,
+which has nothing to assert without the pyzy adapter present.
 
-Each engine test is additionally confined to its own `data_dir` under the build
-tree, so a run never touches the developer's real `~/.config/anthy` or pyzy user
-database. Both backends learn on commit, so each has a `.clean` fixture test
-that wipes that directory before the run — without it a run would be graded
-against whatever the previous run taught it.
-
-One rule holds for `tests/api/`: **nothing there may link a backend library.**
-These are API-surface tests, so the public header is the whole interface they
-are entitled to — and it is also the only linkage that works, since anthy is
-static on Windows and a test that linked it would get a second, independent copy
-of anthy's process-global state. See `docs/anthy-mapping.md`, "Why the anthy
-family is built static on Windows".
+The anthy, pyzy and table tests are each confined to a `data_dir` of their own
+under the build tree, so a run never touches the developer's real
+`~/.config/anthy` or pyzy user database. `api.engine_hangul` needs no such
+confinement: libhangul compiles its tables into the library and writes nothing.
+The other three all learn on commit — two of the shipped tables declare
+`DYNAMIC_ADJUST` — so `api.engine_anthy.clean`,
+`api.engine_pyzy.clean` and `api.engine_table.clean` wipe that directory before
+the run. Without them a run would be graded against whatever the previous run
+taught it.
 
 ## Conditional registrations
 
@@ -135,8 +142,8 @@ Before reading anything into a test's absence:
 
 `pyzy`'s own `src/tests/basic.cc` is not wired up: its `DummyObserver` declares
 the `InputContext::Observer` callbacks with the wrong constness, so nothing
-overrides, the class stays abstract, and the file has not compiled in a long
-time. What it was written to check is covered by the tests in `tests/pyzy/`,
+overrides, the class stays abstract, and the file does not compile. What it was
+written to check is covered by the tests in `tests/pyzy/`,
 which take their expected values from it.
 
 One upstream bug has no test because it cannot have one:

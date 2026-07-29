@@ -1,7 +1,7 @@
 /*
- * The input context object — the per-context layer of the two-layer lifetime
- * (docs/design-history.md §2, Finding 3): one independently editable client destination and
- * the engine state belonging to it.
+ * The input context object — the bottom layer of the lifetime, beneath the
+ * engine and process-global init: one independently editable client
+ * destination and the engine state belonging to it.
  *
  * This header defines `struct pathime_context` because candidates.cc and
  * options.cc both reach inside it, and it carries the storage behind the two
@@ -11,9 +11,8 @@
  *    pointers valid "until the next call that mutates the same input context".
  *    Everything they point into is owned here, and rebuilt in place by the
  *    post-mutation assembly step in context.cc.
- *  - Everything a backend returns is volatile until its next mutating call
- *    (Finding 4), so it is copied into these members at the seam, never
- *    aliased.
+ *  - Everything a backend returns is volatile until its next mutating call,
+ *    so it is copied into these members at the seam, never aliased.
  */
 
 #ifndef LIBPATHIME_SRC_CONTEXT_H
@@ -74,9 +73,10 @@ struct pathime_context {
 
     /**
      * The flat value handed out by pathime_context_composition() and passed to
-     * composition_changed. Recomputed in place from the structured model on
-     * every change, never patched incrementally (Finding 1); its pathime_str_t
-     * members point into the two strings below.
+     * composition_changed. It is a projection: the structured model below is
+     * richer, and this is recomputed in place from it on every change, never
+     * patched incrementally. Its pathime_str_t members point into the two
+     * strings below.
      */
     pathime_composition_t composition{};
 

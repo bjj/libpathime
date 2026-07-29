@@ -121,9 +121,9 @@ struct TableProperties {
     /**
      * LANGUAGE_FILTER as a pathime_chinese_variant_t, or -1 when the table
      * declares none. `cm0`–`cm4` map onto the enum in order, which is not a
-     * coincidence — the enum was given ibus-table's five modes deliberately
-     * (docs/design-history.md §1), and it is why the table engine accepts all
-     * five values where pyzy accepts two.
+     * coincidence — pathime_chinese_variant_t was given ibus-table's five modes
+     * deliberately, and it is why the table engine accepts all five values
+     * where pyzy accepts two.
      */
     int language_filter = -1;
 

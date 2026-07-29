@@ -1,6 +1,6 @@
 /*
  * src/composition.cc — the structured model and its projection to the flat
- * public value (docs/design-history.md §2, Finding 1, and §3 question 1's answer).
+ * public value.
  *
  * The projection is short enough to look obviously correct, which is exactly
  * why it is worth testing: the one thing it can get silently wrong is

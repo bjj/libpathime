@@ -334,8 +334,8 @@ void App::input_key(const Term::Key &key)
          * The arrows move the hover, and they are bound *here* — before the
          * key is offered to the engine — because that is what owning the
          * binding means. An engine that saw them first and reported them
-         * handled would take the decision back; anthy used to do exactly that
-         * and no longer does.
+         * handled would take the decision back, and a client that draws its own
+         * candidate list cannot have that decision made for it.
          *
          * The result is visible rather than cosmetic: on an engine that
          * previews its candidates, the preedit rewrites itself to whatever is
