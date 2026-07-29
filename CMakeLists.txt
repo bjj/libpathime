@@ -23,6 +23,7 @@ project(libpathime
 list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 include(LibpathimeOptions)       # build-wide preamble + LIBPATHIME_WITH_* options
+include(LibpathimeCoverage)      # test-coverage instrumentation; before any target
 include(LibpathimeCompat)        # libpathime_add_win32_compat() + win32 shim lib
 include(LibpathimeDependencies)  # probe deps, gate backends, print the summary
 include(LibpathimeRuntimeData)   # the pathime-data/ the library reads at runtime

@@ -139,6 +139,19 @@ endfunction()
 
 option(LIBPATHIME_BUILD_TESTS "Build the test suites: libpathime's own, plus each submodule's where available" OFF)
 
+# Instrument the build for *test* coverage — which lines of src/ the suites
+# reach — and offer the `pathime-test-coverage` target that reports it.
+#
+# Note the name against LIBPATHIME_TABLE_COVERAGE thirty lines above: that one
+# is *glyph* coverage, which characters a font can render. The two are
+# unrelated, which is why this one is never spelled `LIBPATHIME_COVERAGE`.
+#
+# The machinery is in LibpathimeCoverage.cmake, which the top-level CMakeLists
+# includes next; it needs LIBPATHIME_BUILD_TESTS and a gcov-style toolchain, and
+# says so rather than quietly doing nothing.
+option(LIBPATHIME_TEST_COVERAGE
+  "Instrument the build for test coverage and offer the pathime-test-coverage target" OFF)
+
 # The interactive terminal demo under demo/. Off by default, and for a
 # different reason than the tests: it is not part of verifying the library, and
 # it pulls in the cpp-terminal submodule, which nothing else needs.

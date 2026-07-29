@@ -113,6 +113,7 @@ developer command prompt, and remember to re-set `VCPKG_ROOT` afterwards.
 | `LIBPATHIME_TABLE_COVERAGE_FONT` | per platform | The fonts that target reads, as a list — the Windows map is the union of several. Only consulted when the option above is `ON`. |
 | `LIBPATHIME_REQUIRE_BACKENDS` | `OFF` | Turn "missing dependency ⇒ skip" into a hard error (for CI). |
 | `LIBPATHIME_BUILD_TESTS` | `OFF` | Build the test suites — see `docs/testing.md`. |
+| `LIBPATHIME_TEST_COVERAGE` | `OFF` | Instrument the build for **test** coverage and offer the `pathime-test-coverage` target. Needs the option above, `gcovr`, and a gcov-style toolchain. Nothing to do with `LIBPATHIME_TABLE_COVERAGE` — see "Test coverage" below. |
 | `LIBPATHIME_BUILD_DEMO` | `OFF` | Build the interactive terminal demo — see `demo/README.md`. Needs the `demo/cpp-terminal` submodule. |
 | `PYZY_BUILD_DB_ANDROID` | `ON` | Build pyzy's bundled Android pinyin database (needs Python 3). |
 | `BUILD_SHARED_LIBS` | `ON` | Shared vs. static libraries. One exception ignores it: on Windows cpp-terminal — which only the demo links — is always static, because its published globals carry no `dllimport` and a DLL build of it therefore cannot be linked against on Windows at all. |
@@ -252,6 +253,65 @@ is a list, because the Windows map is the union of several in-box faces; an entr
 may be `PATH#FACE` to pick out of a TrueType collection.
 `tools/generate-coverage.py --help` and its module docstring carry the rest.
 Per-table opt-out is `pathime-table-compile --no-glyph-filter`.
+
+## Test coverage
+
+A different subject from the section above, sharing an unfortunate word. *Glyph*
+coverage is which characters a font can render. **Test coverage is which lines of
+`src/` the suites under `tests/` execute**, and it is what
+`LIBPATHIME_TEST_COVERAGE` and the `pathime-test-coverage` target are about.
+Nothing connects the two.
+
+```bash
+cmake -S . -B build/coverage -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+      -DLIBPATHIME_BUILD_TESTS=ON -DLIBPATHIME_TEST_COVERAGE=ON
+cmake --build build/coverage
+cmake --build build/coverage --target pathime-test-coverage
+```
+
+The two build lines are in that order because the target runs the suites and
+does not build them. It writes `build/coverage/coverage/`: `index.html`
+(annotated source, per file), `coverage.txt`, and `coverage.xml` (Cobertura, for
+CI). Needs `gcovr` — `pip install gcovr` or `apt-get install gcovr`.
+
+Requires GCC or Clang with the GNU driver, and `LIBPATHIME_BUILD_TESTS=ON`;
+either missing is a configure error naming the reason rather than a silently
+inert option. The whole tree is instrumented, as it is under the sanitizers, and
+`-O0 -g` is forced over the build type — gcov's line counts describe optimised
+code as the optimiser left it, not as it was written. The report's filter is what
+narrows the result back to `src/`, so the vendored libraries do not appear.
+
+**The target clears the counters before it runs, and that matters more than it
+sounds.** gcov accumulates into `.gcda` files, and `pathime-table-compile`
+compiles several of the table engine's own sources and then runs during the
+build to produce the shipped tables. Those runs are real executions of
+`src/engines/table/`, but they are the build's, not the suites' — counted, they
+credit the tests with a chunk of `table_db.cc` that no test touches — worth
+about three points overall, and twenty-five on that one file.
+
+### Test coverage on Windows
+
+Not wired into the build, because neither Windows toolchain uses gcov. Both
+recipes are manual:
+
+- **MSVC (`windows-msvc` preset)** — [OpenCppCoverage][occ]. It reads PDBs
+  rather than instrumenting, so there are no extra flags and no separate build;
+  configure `Debug` or `RelWithDebInfo` and wrap the test run:
+
+  ```bat
+  OpenCppCoverage --sources src --export_type html:coverage -- ctest --test-dir build\windows-msvc -C Debug
+  ```
+
+- **clang-cl (`windows-ninja` preset)** — LLVM's source-based coverage, which is
+  the more precise of the two and gives real branch data. Build with
+  `-fprofile-instr-generate -fcoverage-mapping` on the compile flags and
+  `-fprofile-instr-generate` on the link flags, run the suites with
+  `LLVM_PROFILE_FILE=%%p.profraw`, then `llvm-profdata merge` and `llvm-cov
+  report`. The LLVM tools must match the clang-cl version.
+
+Visual Studio Enterprise also has coverage built in, if that is the SKU to hand.
+
+[occ]: https://github.com/OpenCppCoverage/OpenCppCoverage
 
 ## Consuming the library
 

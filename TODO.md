@@ -297,6 +297,142 @@ One smaller thing from the same read, cheap:
   `PATHIME_OPT_TABLE_FILE` populates the cache, which is what makes the
   header's "resolves against the new table's declarations immediately" true.
 
+## Test coverage: measured gaps
+
+First measurement of what the suites actually execute, 2026-07-29, on Linux with
+every backend enabled (`LIBPATHIME_TEST_COVERAGE=ON`, then
+`pathime-test-coverage`; BUILD.md, "Test coverage"). **82.9% of lines in `src/`,
+95.7% of functions, 56.8% of branches.**
+
+Every item below is a line the suites never reach, with the file and line
+numbers the report gave. They are listed in the order they are worth doing, and
+the order is not the order of the percentages: the lowest number in the tree is
+also the least interesting one.
+
+Re-measure before working an item. These are line numbers, and they rot.
+
+### 1. The table compiler is untested end to end
+
+The two worst files in the tree, and the only gap that is a whole component
+rather than a set of cases: `table_db.cc` at 51%, `table_source.cc` at 73%.
+
+- **`compile_table()` (`table_db.cc:269-442`) is entirely unexecuted by tests** —
+  the whole SQLite writer, every statement it prepares, every error path.
+- **So is most of the source reader**: `parse_table_source_file()` (`:258-268`),
+  `derive_single_wildcard()` (`:295-318`), and every diagnostic
+  `parse_table_source()` can produce — `line_error()` itself (`:93-98`) has
+  never run, so no message it formats has ever been seen by a test.
+- The `GOUCIMA` section parser (`:218-232`) is unreached by tests, though the
+  build runs it — `wubi-jidian86` compiles 30,166 goucima every time. That is
+  the pattern for this whole item in miniature: exercised daily, asserted on
+  never.
+
+What makes this the top item is not the percentage but *why* it was invisible:
+these sources are compiled into both the library and `pathime-table-compile`,
+and the tool runs during every build to produce the shipped tables. Counting
+those runs — which is what happens if the counters are not cleared first — puts
+`table_db.cc` at 76% and hides the whole thing. "The build succeeded" is the
+only assertion standing behind the compiler today, and it cannot fail on a
+wrong-but-parseable table.
+
+A fixture-driven suite under `tests/core/` is the shape: hand-written table
+sources, compile them, assert on what lands in the database and on the exact
+diagnostic for each malformed input.
+
+### 2. `keys.cc` — the public key-event decoder
+
+74%, and the uncovered part is the half a client can reach directly.
+
+- **`key_event_from_public()`'s rejections have never fired**: a null event or
+  unknown `struct_size` (`:30` in the helper, `:42` at the return) and
+  `keysym == 0` (`:52`). The second is described in place as catching "the
+  commonest client mistake"; no test makes it.
+- **The X11 Unicode-keysym path is entirely unexecuted** (`:84-92`) — the
+  `0x01000000 | scalar` encoding, which is how every character above U+00FF
+  arrives, together with its rejection of surrogates and out-of-range values.
+  The suites type ASCII, so nothing has ever sent one.
+- `DEL` as a non-printable (`:78`), and the caps-lock inversion (`:146-149`).
+
+Cheap to fix and disproportionately valuable: this is unit-testable in
+`tests/core/` with no backend at all.
+
+### 3. Nothing exercises a backend's default vtable entries
+
+`backend.h` reports 52% because all four backends override every optional
+method, so the base implementations are dead in this build:
+`set_cursor()` → `UNSUPPORTED` (`:288-295`), `declared_text()` → `nullptr`
+(`:401-406`), `prepare_string()` → `OK` (`:434-438`).
+
+The caller's side is uncovered for the same reason: `candidates.cc:236-246`, the
+contract that `UNSUPPORTED` from `set_cursor()` means *rejected, composition
+intact* while any other failure means indeterminate, is asserted nowhere. That
+is a header promise with no test behind it.
+
+A stub `ContextBackend` in `tests/core/` that overrides nothing covers both
+sides at once, and is the only way to check what a fifth backend would inherit.
+
+### 4. Option matrices that are set but never swept
+
+Each of these is an option a client can set, whose effect is unmeasured:
+
+- **anthy's period and symbol styles.** `project_styles()`
+  (`romaji.cc:836-871`) has never run: no test sets
+  `PATHIME_ANTHY_PERIOD_FULLWIDTH` or any `PATHIME_ANTHY_SYMBOL_*` variant, so
+  the whole re-projection — the feature that makes an option change apply to
+  text already typed — is unverified.
+- **pyzy's layouts and schemes.** `bopomofo_schema()` and
+  `double_pinyin_schema()` (`pyzy_backend.cc:209-243`) keep most of their
+  `switch` arms untaken: `PATHIME_BOPOMOFO_LAYOUT_*` beyond the default, and
+  most of `PATHIME_PINYIN_SCHEME_DOUBLE_*`.
+- **The romaji dead-end rule** (`romaji.cc:948-969`) — the branch that emits an
+  unresolvable leading character as itself, and the one place libpathime
+  knowingly differs from ibus-anthy. The divergence is argued for in a comment
+  and pinned by nothing.
+
+### 5. The table engine's edit paths
+
+`table_backend.cc` at 79%, concentrated in three places a user reaches by
+correcting themselves rather than by typing forward:
+
+- **`take_backspace()` unstaging** (`:699-733`) — backspacing an invalid-key
+  tail, and taking apart the most recent staged segment. The comment calls this
+  "what makes a mis-staged segment repairable"; nothing tests it.
+- **`PATHIME_OPT_TABLE_AUTO_SELECT`'s commit-and-restart** (`:682-693`),
+  including the one-level-deep recursion the comment argues is bounded.
+- **`PATHIME_OPT_TABLE_INVALID_INPUT = COMMIT_CANDIDATE`** (`:877-908`).
+
+### 6. Allocation-failure rollback — needs a decision, not just a test
+
+`context.cc` keeps three recovery paths that no test can currently reach: the
+`std::bad_alloc` unwind during context registration (`:198-201`), the
+unregister-and-delete when `create_context()` fails (`:218-222`), and the
+surrounding-text setter clearing its snapshot on OOM (`:444-448`). All three are
+careful, all three are reasoned about in comments, and none has ever run.
+
+Reaching them needs an allocation-failure injection hook, which is a real
+addition to the library for testing's sake. **Either add one or record these as
+deliberately unreachable** — the current state, where they look like ordinary
+untested code, is the one option that teaches a future reader nothing.
+
+### 7. `module_path.cc` — mostly not a test gap
+
+45%, the lowest figure in the tree, and listed last because the number is
+misleading. Most of it is the `/proc/self/exe` fallback (`:122-139`), which only
+runs when libpathime is linked statically; the report is taken from a shared
+build, where `dladdr()` answers first. The fix is to take the report once more
+with `BUILD_SHARED_LIBS=OFF` rather than to write a test.
+
+What is a real gap is small: `parent_of()`'s no-separator and root-directory
+cases (`:54`, `:59`), the second of which exists because losing it "turns an
+absolute path into a relative one".
+
+### The number that is not in the list
+
+**Branch coverage is 56.8% against 82.9% of lines**, and no item above is
+derived from it. Line coverage says a statement ran; the 26-point gap is where
+statements ran down one side only. Nothing has been read against the branch
+report yet, and it is the most likely place for a found bug.
+
 ## Decisions wanted
 
 - **Does `docs/CONCEPTS.md` keep "Input purpose and hints"?** It is the one

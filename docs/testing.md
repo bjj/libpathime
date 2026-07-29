@@ -56,6 +56,29 @@ it creates nor the library. It is vendored code testing vendored code, left as
 upstream wrote it. Everything else passes with leak detection on, and nothing
 reports a memory error or undefined behaviour.
 
+## Measuring what the suites reach
+
+`LIBPATHIME_TEST_COVERAGE=ON` instruments the build; `pathime-test-coverage`
+clears the counters, runs the suites and writes an annotated report. BUILD.md,
+"Test coverage", has the commands, the Windows recipes, and what the option
+requires; it is worth reading once for the reason the counters are cleared,
+which is not obvious and was hiding a real gap.
+
+Two things about the numbers themselves:
+
+- **Branch coverage sits far below line coverage** — around 57% against 83%.
+  That gap is where the untested cases mostly are, so a file at 90% lines is not
+  the reassurance it looks like. Read `index.html`, which marks partially taken
+  branches, rather than the summary.
+- **A file's number depends on the build's shape, not only on the suites.**
+  `src/module_path.cc` reports the lowest figure in the tree, and most of the
+  shortfall is its `/proc/self/exe` fallback, which exists for static builds and
+  cannot run in the shared one the report is normally taken from.
+
+This document describes the suites that exist; the report is how you find out
+what they miss, and it is meant to be re-run rather than summarised here, where
+a copied figure would be stale by the next commit.
+
 ## The four kinds of test
 
 ### `tests/api/` — `api.<name>`

@@ -29,6 +29,17 @@
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
     },
     {
+      "name": "linux-coverage",
+      "inherits": "linux-base",
+      "displayName": "Linux · test coverage (Ninja)",
+      "description": "Instrumented for test coverage. Build it, then `cmake --build --preset linux-coverage --target pathime-test-coverage` — the target runs the suites but does not build them. Needs gcovr. See BUILD.md, \"Test coverage\".",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "LIBPATHIME_BUILD_TESTS": "ON",
+        "LIBPATHIME_TEST_COVERAGE": "ON"
+      }
+    },
+    {
       "name": "windows-msvc",
       "displayName": "Windows · MSVC (Visual Studio 2022)",
       "description": "Needs VCPKG_ROOT set and `vcpkg install glib sqlite3` for pyzy (uuid comes from the bundled Rpcrt4 shim). Pass -DCMAKE_INSTALL_PREFIX here rather than to `cmake --install --prefix`: libhangul bakes absolute install paths at configure time. See BUILD.md.",
@@ -66,6 +77,7 @@
   "buildPresets": [
     { "name": "linux-debug",   "configurePreset": "linux-debug" },
     { "name": "linux-release", "configurePreset": "linux-release" },
+    { "name": "linux-coverage", "configurePreset": "linux-coverage" },
     { "name": "windows-msvc",  "configurePreset": "windows-msvc",  "configuration": "Release", "jobs": 0 },
     { "name": "windows-ninja", "configurePreset": "windows-ninja" }
   ]
