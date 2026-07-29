@@ -152,7 +152,16 @@ void App::on_delete(void *user_data, ptrdiff_t offset, std::size_t count)
      * wrong thing, and saying so out loud is more useful in a demo than
      * silently doing nothing.
      */
-    if (app->document_ != app->snapshot_) {
+    /*
+     * The snapshot is a *suffix* of the document, not necessarily all of it —
+     * under Surrounding::Fragment it is one scalar. So the test is whether the
+     * document still ends with what was supplied, which is the fragment-aware
+     * form of "has the document moved on since". Comparing the two whole
+     * strings would decline every deletion the moment a fragment was offered.
+     */
+    if (app->document_.size() < app->snapshot_.size() ||
+        app->document_.compare(app->document_.size() - app->snapshot_.size(),
+                               app->snapshot_.size(), app->snapshot_) != 0) {
         app->note_callback(line + "  — declined, snapshot is stale");
         return;
     }
@@ -170,8 +179,16 @@ void App::on_delete(void *user_data, ptrdiff_t offset, std::size_t count)
      * deletion whose coordinates this one would invalidate — and all deletions
      * arrive before any commit, so the document is in the state the engine
      * described before anything is inserted into it.
+     *
+     * @a start above is a position in the *snapshot*, which is only the same
+     * position in the document when the snapshot is the whole document. The
+     * translation is this simple because both end at the caret: an offset back
+     * from the end means the same thing in either. Doing the arithmetic in the
+     * document's own terms is what makes a fragment work.
      */
-    erase_scalars(&app->document_, static_cast<std::size_t>(start), count);
+    const ptrdiff_t doc_start =
+        static_cast<ptrdiff_t>(scalar_count(app->document_)) + offset;
+    erase_scalars(&app->document_, static_cast<std::size_t>(doc_start), count);
     app->note_callback(line);
 }
 
@@ -301,6 +318,10 @@ bool App::hotkey(const Term::Key &key)
         note_info("field left: text kept, engine context forgotten");
         return true;
     }
+
+    case Term::Key::Ctrl_U:
+        cycle_surrounding();
+        return true;
 
     case Term::Key::Ctrl_D:
         document_.clear();
@@ -761,17 +782,57 @@ void App::refresh_surrounding_text()
      * engine progressively unable to revise its own output, which under
      * PATHIME_HANGUL_PREEDIT_NONE means syllables stop assembling.
      *
-     * The cursor is always at the end of the document because this program's
-     * caret is: it is a demo text field, not an editor. text.len is in bytes,
-     * the cursor is in scalar values, and getting that pair the wrong way round
-     * is the easiest mistake in this API.
+     * Except under Surrounding::None, which is here to show exactly that. A
+     * client that stops refreshing does not thereby retract what it already
+     * supplied — there is no call for that and no need of one — so the library
+     * keeps the last snapshot and it goes stale under it. That is what the log
+     * shows: deletions declined because this program can see its own document
+     * has moved on.
      */
-    snapshot_ = document_;
+    if (surrounding_ == Surrounding::None) {
+        return;
+    }
+
+    /*
+     * The cursor is always at the end of what is supplied because this
+     * program's caret is always at the end of its document: it is a demo text
+     * field, not an editor. text.len sizes a buffer and is in bytes, the cursor
+     * locates a position and is in scalar values, and getting that pair the
+     * wrong way round is the easiest mistake in this API.
+     */
+    snapshot_ = surrounding_ == Surrounding::Full ? document_ : last_scalars(document_, 1);
     snapshot_cursor_ = scalar_count(snapshot_);
+
     const pathime_str_t text{snapshot_.c_str(), snapshot_.size()};
+    const std::uint64_t call =
+        note_call("context_set_surrounding_text  " + std::to_string(snapshot_cursor_) +
+                  " scalars, cursor=" + std::to_string(snapshot_cursor_));
     const pathime_status_t st =
         pathime_context_set_surrounding_text(ctx(), text, snapshot_cursor_);
+    note_result(call, st);
     if (st != PATHIME_OK) note_status("set_surrounding_text", st);
+}
+
+void App::cycle_surrounding()
+{
+    switch (surrounding_) {
+    case Surrounding::Full:     surrounding_ = Surrounding::Fragment; break;
+    case Surrounding::Fragment: surrounding_ = Surrounding::None;     break;
+    case Surrounding::None:     surrounding_ = Surrounding::Full;     break;
+    }
+
+    switch (surrounding_) {
+    case Surrounding::Full:
+        note_info("surrounding text: the whole document");
+        break;
+    case Surrounding::Fragment:
+        note_info("surrounding text: one scalar — enough for \"1.5\", not for quotes");
+        break;
+    case Surrounding::None:
+        note_info("surrounding text: none — the last snapshot is now going stale");
+        break;
+    }
+    refresh_surrounding_text();
 }
 
 std::uint64_t App::note_call(const std::string &line)

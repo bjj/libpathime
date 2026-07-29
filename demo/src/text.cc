@@ -173,6 +173,13 @@ void erase_scalars(std::string *s, std::size_t start, std::size_t count)
     s->erase(from, to - from);
 }
 
+std::string last_scalars(const std::string &s, std::size_t count)
+{
+    const std::size_t total = scalar_count(s);
+    if (count >= total) return s;
+    return s.substr(byte_offset_of_scalar(s, total - count));
+}
+
 std::string utf8_encode(std::uint32_t scalar)
 {
     std::string out;

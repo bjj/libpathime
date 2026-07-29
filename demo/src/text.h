@@ -68,6 +68,15 @@ std::string pad_to_width(const std::string &s, std::size_t columns);
 void erase_scalars(std::string *s, std::size_t start, std::size_t count);
 
 /**
+ * The last @a count scalars of @a s, or all of it when it is shorter.
+ *
+ * For supplying a deliberately short surrounding-text fragment. The result is
+ * a suffix, which is what makes the demo's delete_surrounding_text arithmetic
+ * work for a fragment and for a whole document alike: both end at the caret.
+ */
+std::string last_scalars(const std::string &s, std::size_t count);
+
+/**
  * @a text with control characters replaced by a visible escape, for showing a
  * string inside the event log. Quotes are not added.
  */

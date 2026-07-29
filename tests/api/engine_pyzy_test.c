@@ -1209,6 +1209,39 @@ static void test_width_and_punctuation(pathime_engine_t *pinyin,
     }
     pathime_context_destroy(ctx);
 
+    /*
+     * How short a fragment still helps, which is where the two rules part
+     * company and the reason the demo can supply exactly one scalar.
+     *
+     * One scalar is all the digit look-behind ever needs: it asks about the
+     * character immediately before the caret and nothing else. It is never
+     * enough for the quote alternation, which has to reach back to the last
+     * quotation mark — so with a one-scalar snapshot that rule falls back to
+     * what the engine tracked, even though the real document has a quote in it
+     * a few characters back.
+     */
+    ctx = open_context(pinyin, &client, &log);
+    {
+        /* The document is `“ab1`, but only the `1` is supplied. */
+        const char *fragment = "1";
+        pathime_str_t text;
+        text.bytes = fragment;
+        text.len = strlen(fragment);
+        PT_CHECK_STATUS(pathime_context_set_surrounding_text(ctx, text, 1), PATHIME_OK);
+
+        log_reset(&log);
+        PT_CHECK(press(ctx, '.'));
+        check_str("one scalar is enough for the decimal point", log.commits, ".");
+
+        /* The same one scalar cannot reach the “ that really precedes it, so
+         * the next quote is whatever the engine had tracked — opening, since
+         * this context has emitted none. */
+        log_reset(&log);
+        PT_CHECK(press(ctx, '"'));
+        check_str("one scalar is not enough for the quote", log.commits, QUOTE_OPEN);
+    }
+    pathime_context_destroy(ctx);
+
     /* --- Mid-composition: ended first, never lost ------------------------ */
 
     ctx = open_context(pinyin, &client, &log);

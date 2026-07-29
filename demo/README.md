@@ -87,9 +87,28 @@ it while the options panel has the keyboard.
   program supplies surrounding text after every dispatch, so the engine reads
   the `1` out of the document rather than out of its own memory. Quotes behave
   the same way — `"` alternates by looking at the last one in the document, not
-  by counting its own. Comment out the `refresh_surrounding_text()` call at the end of
-  `App::input_key()` and both rules fall back to the engine's memory, which is
-  where the difference shows.
+  by counting its own.
+- **Press `Ctrl+U` to change how much surrounding text is supplied**, and try
+  the two rules again at each setting. The heading above the document says
+  which one is in force, and every `set_surrounding_text` call is in the log.
+  - **whole document** — both rules read the document. This is what a real
+    client should do.
+  - **1 scalar** — the fragment case, and the one worth understanding. The
+    header says the supplied text may be a fragment whose ends are *not*
+    document boundaries, so an engine reads it as evidence and never as the
+    whole truth. One scalar is all the digit rule ever needs, so `1.5` still
+    works; it can never reach back to the last quotation mark, so quotes fall
+    back to the engine's own memory. Under Hangul with `hangul-preedit = none`
+    it is *also* enough to keep syllables assembling, because the only thing
+    that mode asks is whether the one character it just wrote can still be
+    deleted.
+  - **none** — this program stops calling, and does not thereby retract what it
+    already supplied: there is no call for that and no need of one. So the
+    engine keeps a snapshot that goes stale, and the log fills with deletions
+    declined because this program can see its own document has moved on. Type
+    `gks` under Hangul with `hangul-preedit = none` to watch a syllable fail to
+    assemble, which is the failure `PATHIME_REQUIRES_SURROUNDING_TEXT` warns
+    about in as many words.
 - **Set `hangul-preedit` to `none` in the options panel, then type `gks`.**
   This is the one mode where the document *is* the composition: each jamo is
   committed, then deleted and recommitted one component fuller. One

@@ -300,6 +300,7 @@ std::vector<std::string> help_page()
     lines.push_back("   Ctrl+T          commit: end the composition, keep the text");
     lines.push_back("   Ctrl+R          reset: discard the composition, commit nothing");
     lines.push_back("   Ctrl+O          leave the field: commit, then reset");
+    lines.push_back("   Ctrl+U          cycle how much surrounding text is supplied");
     lines.push_back("   Ctrl+D  Ctrl+L  clear the document / clear the event log");
     lines.push_back("   Ctrl+Y          copy the document to the clipboard (OSC 52)");
     lines.push_back("   Ctrl+Q          quit");
@@ -369,8 +370,18 @@ std::string render(const App &app, std::size_t rows, std::size_t columns)
         const std::uint32_t bits = app.requirements();
         if (bits & PATHIME_REQUIRES_SURROUNDING_TEXT) req += " surrounding-text";
         if (bits & PATHIME_REQUIRES_DELETE_SURROUNDING) req += " delete-surrounding";
+        /* What this program supplies is as much a part of the picture as what
+         * the engine asks for, and it is the one input the user cannot see on
+         * screen — so it is shown next to the requirement it answers. */
+        std::string supplied;
+        switch (app.surrounding()) {
+        case Surrounding::Full:     supplied = "whole document"; break;
+        case Surrounding::Fragment: supplied = "1 scalar";       break;
+        case Surrounding::None:     supplied = "none";           break;
+        }
         lines.push_back(heading("document") +
-                        dim("   engine requires:" + (req.empty() ? " nothing" : req)));
+                        dim("   engine requires:" + (req.empty() ? " nothing" : req)) +
+                        dim("   supplying: " + supplied + " (Ctrl+U)"));
         std::size_t caret_col = 1;
         const std::string doc = document_line(app, columns, &caret_col);
         caret_row = lines.size() + 1;

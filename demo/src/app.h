@@ -52,6 +52,27 @@ struct EngineSlot {
 enum class Pane { Input, Options };
 
 /**
+ * How much surrounding text this program offers the engine.
+ *
+ * A real client has one answer and keeps it. This one cycles, because the
+ * three answers produce visibly different engine behaviour and that difference
+ * is otherwise invisible — the snapshot is the one input to the library a user
+ * cannot see on screen.
+ *
+ * `Fragment` is the instructive middle. The header says the supplied text may
+ * be a fragment whose ends are not document boundaries, and that an engine must
+ * therefore read it as evidence rather than as the whole truth. One scalar is
+ * enough for the digit look-behind, which needs only the character before the
+ * caret, and never enough for the quote alternation, which has to find the last
+ * quotation mark. So the two rules visibly part company here.
+ */
+enum class Surrounding {
+    None,      /**< Never call. The engine keeps whatever it last had. */
+    Fragment,  /**< One scalar before the caret. */
+    Full       /**< The whole document. */
+};
+
+/**
  * What a line of the event log is, which is the whole point of the log: the
  * traffic across the API boundary runs in both directions, and a reader who
  * cannot tell which way a line went cannot learn anything from it.
@@ -140,6 +161,7 @@ public:
     Pane pane() const { return pane_; }
     bool engine_level() const { return engine_level_; }
     bool help_visible() const { return help_; }
+    Surrounding surrounding() const { return surrounding_; }
     const std::vector<OptionRow> &options() const { return options_; }
     std::size_t option_index() const { return option_index_; }
 
@@ -197,6 +219,8 @@ private:
 
     void set_active(std::size_t index);
     void refresh_surrounding_text();
+    /** Cycle how much surrounding text is supplied, and say so. */
+    void cycle_surrounding();
 
     /* ---- The log. One entry-point per direction, so that no call site can
      * accidentally record traffic as the wrong kind. ---- */
@@ -229,6 +253,7 @@ private:
      * on since is exactly the case the header says a client may decline. */
     std::string snapshot_;
     std::size_t snapshot_cursor_ = 0;
+    Surrounding surrounding_ = Surrounding::Full;
 
     std::size_t page_ = 0;
     std::deque<LogEntry> log_;

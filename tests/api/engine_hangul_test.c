@@ -1101,6 +1101,68 @@ static void test_preedit_none_reset(pathime_engine_t *engine)
 }
 
 /*
+ * How short a snapshot PATHIME_HANGUL_PREEDIT_NONE actually needs.
+ *
+ * The mode is the library's heaviest user of surrounding text, so "must supply
+ * it" reads like "must supply all of it" — and it does not. What the adapter
+ * asks is whether the syllable it wrote a moment ago can still be deleted, and
+ * that syllable is one scalar. A one-scalar fragment answers that, so a client
+ * with only a keyhole onto its document can still drive this mode.
+ *
+ * Worth pinning down because it is not what a reader would assume, and because
+ * it is the difference between the mode being usable and unusable for a client
+ * that cannot cheaply produce its whole document.
+ */
+static void test_preedit_none_one_scalar_snapshot(pathime_engine_t *engine)
+{
+    pathime_client_t client;
+    pathime_context_t *ctx = NULL;
+    client_log_t log;
+
+    log_reset(&log);
+    memset(&client, 0, sizeof(client));
+    client.struct_size = sizeof(client);
+    client.commit_text = on_commit;
+    client.delete_surrounding_text = on_delete;
+
+    PT_CHECK_STATUS(pathime_context_create(engine, &client, &log, &ctx), PATHIME_OK);
+    PT_CHECK_STATUS(pathime_context_set_option_int(ctx, PATHIME_OPT_HANGUL_PREEDIT,
+                                                   PATHIME_HANGUL_PREEDIT_NONE),
+                    PATHIME_OK);
+
+    /* Supply only the final scalar of the document each time, which is the
+     * least a client could offer and still be offering anything. */
+    {
+        size_t i;
+        const char keys[] = {'g', 'k', 's'};
+        for (i = 0; i < sizeof(keys); i++) {
+            const size_t scalars = doc_scalars(log.doc);
+            const char *tail = log.doc;
+            pathime_str_t text;
+            size_t skip = scalars > 0 ? scalars - 1 : 0;
+
+            /* Walk forward to the last scalar's lead byte. */
+            while (skip > 0) {
+                tail++;
+                if ((((unsigned char)*tail) & 0xC0) != 0x80) skip--;
+            }
+            text.bytes = tail;
+            text.len = strlen(tail);
+            PT_CHECK_STATUS(pathime_context_set_surrounding_text(
+                                ctx, text, doc_scalars(tail)),
+                            PATHIME_OK);
+            PT_CHECK(press(ctx, keys[i]));
+        }
+    }
+
+    /* 한, assembled through a snapshot that never showed more than one
+     * character at a time. */
+    check_str("none/keyhole: 한 assembled from a one-scalar snapshot", log.doc, HAN);
+
+    pathime_context_destroy(ctx);
+}
+
+/*
  * The recovery path: a client that does not refresh the snapshot.
  *
  * The header fixes what happens rather than leaving it undefined — the engine
@@ -1180,6 +1242,7 @@ int main(void)
         test_preedit_none_backspace(engine);
         test_preedit_none_end_composition(engine);
         test_preedit_none_reset(engine);
+        test_preedit_none_one_scalar_snapshot(engine);
         test_preedit_none_stale_snapshot(engine);
     }
 
