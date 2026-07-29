@@ -186,13 +186,19 @@ that engine does not do.
   our tables but us, and the standard key is the more honest description of what
   the table means.
 
-- **`ibus-table-chinese` is GPL-3, and its compiled tables ship inside
-  `pathime-data/`.** Open, with a standing consequence: **no further GPL data
-  gets vendored until it is resolved.** That is what closed the
-  pinyin/suggestion question above — the data exists in `refs/ibus-table` and
-  taking it would have added a third GPL-3 source. A licensing question about
-  what libpathime distributes, not a technical one, and to be pursued
-  separately from the engine work.
+- **GPL data in `pathime-data/` is a packaging matter.** Two files are compiled
+  from GPL sources: `table/*.db` from ibus-table-chinese (GPL-3), and
+  `anthy/anthy.dic` from anthy's own dictionary (GPL-2 — `alt-cannadic/*` and
+  the `mkworddic/*.t` that `dict.args` reads; anthy's `COPYING` says so).
+  `THIRD-PARTY.md` records both.
+
+  What remains is a habit rather than a question: the data stays separable and
+  labelled. `LIBPATHIME_WITH_ANTHY=OFF -DLIBPATHIME_WITH_TABLE=OFF` builds and
+  passes with only pyzy's data in `pathime-data/`, and that should stay true.
+
+  The standing consequence survives: **no further GPL data gets vendored
+  without a reason.** That is still what closed the pinyin/suggestion question
+  above.
 - **Glyph-coverage filtering: the runtime half.** The compile-time half is
   built on both platforms; `BUILD.md`, "Glyph coverage", has the shape and the
   measurements. One thing remains.

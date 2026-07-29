@@ -122,6 +122,7 @@ Using the library:
 - `docs/CONCEPTS.md` — definition of terms: engine, client, composition, candidates
 - `BUILD.md` — how to build, and every build option
 - `demo/README.md` — the interactive terminal demo, and what to try in it
+- `THIRD-PARTY.md` — what libpathime links and ships, and under what terms
 
 Working on the library:
 
@@ -135,3 +136,14 @@ Working on the library:
   does with each part of it
 - `docs/japanese-input-model.md` — measured anthy and ibus-anthy behaviour, behind
   the Japanese design decisions
+
+## License
+
+libpathime is **MIT** (`LICENSE`).
+
+The libraries it wraps are not. libhangul, anthy-unicode and pyzy are LGPL-2.1,
+and each is built and loaded as a shared library. Two of the data files in
+`pathime-data/` are compiled from GPL sources: anthy's dictionary and the
+ibus-table-chinese tables. A build can be configured without either.
+
+`THIRD-PARTY.md` is the full inventory.

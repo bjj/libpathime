@@ -89,6 +89,9 @@ the reasoning in the history.
 - `src/engines/table/README.md` — the table engine's own map, including the
   data/behaviour boundary inside that directory and what the ibus-table data
   contract costs.
+- `THIRD-PARTY.md` — what libpathime links and ships, and under what terms.
+  Read before changing how a vendored library is built or linked, before
+  vendoring anything new, and before adding a file to `pathime-data/`.
 - `BUILD.md`, `docs/windows-port.md`, `demo/README.md` — build (including
   "Shipping the data"), the Windows port, the demo.
 
