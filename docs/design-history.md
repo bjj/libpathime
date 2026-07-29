@@ -1692,3 +1692,55 @@ guidance, which had been missing entirely: the model has no caret notification,
 so moving one is told to the engine by supplying surrounding text, and a
 composition in flight needs the same commit-or-reset decision that leaving the
 field does. To the model those are the same event.
+
+---
+
+## 10. Hangul does not resume a syllable it finds in the document (2026-07-29)
+
+Asked after §9: under `PATHIME_HANGUL_PREEDIT_NONE` the composition *is* the
+client's text, so when a client comes back to a field whose last character is a
+half-built syllable, should the engine pick it up and let the user carry on?
+**No, and the evidence is one-sided.**
+
+**libhangul cannot do it.** The whole `HangulInputContext` API is
+`hangul_ic_process()`, `hangul_ic_reset()`, `hangul_ic_backspace()` and
+`hangul_ic_flush()` (`engines/libhangul/hangul/hangul.h:125-149`). Nothing seeds
+a context with existing text. `hangul_syllable_to_jamo()` exists, so 하 can be
+taken apart, but putting it back means mapping each jamo to a *keystroke* and
+replaying it — and that mapping is layout-specific and not reliably invertible,
+since a doubled jamo is reachable either by shift or by combination rules
+depending on the layout and `HANGUL_IC_OPTION_COMBI_ON_DOUBLE_STROKE`. It would
+be reconstruction, not resumption.
+
+**ibus-hangul deliberately does not do it.** `check_caret_pos_sanity()`
+(`refs/ibus-hangul/src/engine.c:751-784`) is the reference implementation's
+entire use of surrounding text in `PREEDIT_MODE_NONE`, and on a mismatch
+between its cached preedit and the text at the cursor it calls
+`hangul_ic_reset()` and clears the preedit. It abandons. `enable()` only
+*requests* surrounding text (`:1718`) and seeds nothing from it. That is the
+same recovery `prepare_revision()` already performs here, so current behaviour
+matches the reference exactly.
+
+**And the document cannot answer the question anyway.** Once the state is gone,
+a 하 the user deliberately finished is byte-identical to a 하 they were halfway
+through — that is what "the state is gone" means. So the rule could not be
+scoped to leaving a field: it would have to read "any Hangul syllable
+immediately before the caret is resumable", with no expiry. Put the caret after
+a 하 typed last week, press ㄴ, and get 한.
+
+**The cost, which is real.** After the break, Backspace deletes the whole
+syllable rather than walking it back a jamo at a time: `hangul_ic_backspace()`
+returns false on an empty context, `PREEDIT_NONE` is not `PREEDIT_WORD` so the
+settled-prefix arm does not apply, and the key is declined for the client to
+act on. During composition 하 backspaces to ㅎ; after it, 하 goes entirely. A
+user who meant to add a jongseong must delete and retype the syllable.
+
+Decomposing on Backspace was considered as the cheaper half and rejected for
+the same reason as resumption: it would apply to text of any age, because
+nothing distinguishes recent from old.
+
+**What is *not* settled here.** Whether Korean users would prefer resumption is
+a question about people, and nothing above answers it — ibus-hangul's behaviour
+is the best proxy available from source and it is only a proxy. If that
+question is ever reopened it needs a Korean user, not another reading of
+libhangul.
