@@ -102,6 +102,16 @@ function(libpathime_compile_tables)
     list(APPEND _outputs "${_output}")
   endforeach()
 
+  # A custom command runs only for a target that consumes its output, and the
+  # tables have two consumers that are both conditional: the staging target
+  # below, which exists only for the demo and the tests, and an install rule,
+  # which is not a target at all and so cannot pull them into the build. Without
+  # a target of their own an ordinary build would compile no table and then fail
+  # in `cmake --install` looking for one.
+  if(_outputs)
+    add_custom_target(pathime-tables ALL DEPENDS ${_outputs})
+  endif()
+
   set(LIBPATHIME_TABLE_OUTPUTS "${_outputs}" PARENT_SCOPE)
 endfunction()
 
@@ -146,16 +156,11 @@ endfunction()
 # libpathime_install_runtime_data()
 #
 # Installs the data beside the installed libpathime, which is what makes the
-# default resource_dir correct for an installed tree: the library goes to
-# CMAKE_INSTALL_LIBDIR (or BINDIR for a Windows DLL), so the data goes into
-# `pathime-data` under the same one.
+# default resource_dir correct for an installed tree. Which directory that is —
+# CMAKE_INSTALL_LIBDIR, or BINDIR for a Windows DLL — is settled once by
+# LIBPATHIME_INSTALL_DATADIR in cmake/LibpathimeInstall.cmake, because the CMake
+# package and the .pc file both have to name the same place.
 function(libpathime_install_runtime_data)
-  if(WIN32 AND BUILD_SHARED_LIBS)
-    set(_libdir "${CMAKE_INSTALL_BINDIR}")
-  else()
-    set(_libdir "${CMAKE_INSTALL_LIBDIR}")
-  endif()
-
   libpathime_runtime_data_files(_sources _destinations)
   list(LENGTH _sources _count)
   if(_count EQUAL 0)
@@ -170,7 +175,7 @@ function(libpathime_install_runtime_data)
     # RENAME because the installed name is ours, not the producing build's:
     # pyzy's android.db is what its Database::open() calls main.db.
     install(FILES "${_source}"
-      DESTINATION "${_libdir}/${LIBPATHIME_RUNTIME_DATA_DIRNAME}/${_subdir}"
+      DESTINATION "${LIBPATHIME_INSTALL_DATADIR}/${_subdir}"
       RENAME "${_name}")
   endforeach()
 endfunction()

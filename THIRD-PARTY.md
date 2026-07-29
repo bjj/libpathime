@@ -58,7 +58,10 @@ Not linked into `libpathime` and not shipped in an install.
 ## Linkage
 
 The default build (`BUILD_SHARED_LIBS=ON`) produces libhangul, anthy and pyzy
-as separate shared libraries beside `libpathime`.
+as separate shared libraries, installed into a private `pathime/` directory
+beside `libpathime` (`BUILD.md`, "What gets produced"). Being separate
+replaceable files is what makes them straightforward to satisfy the LGPL for:
+the private directory changes where they sit, not what they are.
 
 `BUILD_SHARED_LIBS=OFF` builds them into `libpathime` instead. That changes
 what is being distributed and the terms that apply to it; anyone shipping such

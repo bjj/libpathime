@@ -1,0 +1,47 @@
+# The find_package(pathime) entry point, generated from
+# cmake/pathime-config.cmake.in by cmake/LibpathimeInstall.cmake.
+#
+#   find_package(pathime REQUIRED)
+#   target_link_libraries(app PRIVATE libpathime::pathime)
+#
+# That one target carries the include directory, the PATHIME_STATIC definition
+# a static build needs, and the library itself. The vendored backends are not
+# named here and are not linkable: in a shared build they are behind
+# libpathime's own RPATH, which is the arrangement cmake/LibpathimeInstall.cmake
+# describes.
+
+@PACKAGE_INIT@
+
+# Which backends this build has, matching the PATHIME_WITH_* of
+# <pathime/config.h> so a consumer can branch in CMake as well as in C.
+set(PATHIME_WITH_HANGUL @PATHIME_WITH_HANGUL@)
+set(PATHIME_WITH_ANTHY  @PATHIME_WITH_ANTHY@)
+set(PATHIME_WITH_PYZY   @PATHIME_WITH_PYZY@)
+set(PATHIME_WITH_TABLE  @PATHIME_WITH_TABLE@)
+set(PATHIME_STATIC_BUILD @PATHIME_BUILT_STATIC@)
+
+# The engines' read-only data, for a consumer that copies it next to its own
+# binary rather than keeping libpathime and the data together. See BUILD.md,
+# "Shipping the data"; pathime_init_params_t::resource_dir is the other half.
+set_and_check(PATHIME_DATA_DIR "@PACKAGE_LIBPATHIME_INSTALL_DATADIR@")
+
+# A static libpathime puts the vendored backends on the consumer's link line,
+# so the external libraries those backends need have to be found again here.
+# A shared build needs none of it: they are resolved inside libpathime.so.
+if(PATHIME_STATIC_BUILD)
+  include(CMakeFindDependencyMacro)
+  if(PATHIME_WITH_PYZY OR PATHIME_WITH_TABLE)
+    find_dependency(SQLite3)
+  endif()
+  if(PATHIME_WITH_PYZY)
+    find_dependency(PkgConfig)
+    pkg_check_modules(GLIB REQUIRED IMPORTED_TARGET GLOBAL glib-2.0>=2.24.0)
+    if(NOT WIN32 AND NOT APPLE)
+      pkg_check_modules(UUID REQUIRED IMPORTED_TARGET GLOBAL uuid)
+    endif()
+  endif()
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/pathime-targets.cmake")
+
+check_required_components(pathime)

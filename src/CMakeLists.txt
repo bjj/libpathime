@@ -136,10 +136,31 @@ if(LIBPATHIME_WITH_TABLE)
   target_link_libraries(pathime PRIVATE SQLite::SQLite3)
 endif()
 
+# The ABI version. SOVERSION is the major number alone, so a consumer links
+# `libpathime.so.0` and keeps working across 0.1.1; VERSION carries the rest for
+# anything that reads it. At 0.x the promise that buys is small, and
+# cmake/LibpathimeInstall.cmake's package version file says the same thing in
+# the other direction by requiring a matching minor.
+set_target_properties(pathime PROPERTIES
+  VERSION "${PROJECT_VERSION}"
+  SOVERSION "${PROJECT_VERSION_MAJOR}")
+
+# The installed library, and the export set that cmake/LibpathimeInstall.cmake
+# turns into pathime-targets.cmake. INCLUDES DESTINATION is what makes the
+# INSTALL_INTERFACE above resolve for a consumer.
+#
+# The private link libraries above reach the export set through
+# libpathime_install_vendored(), which puts every vendored target in it. What
+# the generated targets file then says about them differs by link mode and is
+# right both times: archives on a static consumer's link line, and nothing but
+# an RPATH hint for a shared one. cmake/LibpathimeInstall.cmake has the detail.
+libpathime_set_install_rpath(pathime)
 install(TARGETS pathime
+  EXPORT ${LIBPATHIME_EXPORT_SET}
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
+  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 # The table databases, compiled from engines/ibus-table-chinese by the tool in
 # tools/. Declared here rather than there because an add_custom_command output

@@ -116,6 +116,7 @@ developer command prompt, and remember to re-set `VCPKG_ROOT` afterwards.
 | `LIBPATHIME_TEST_COVERAGE` | `OFF` | Instrument the build for **test** coverage and offer the `pathime-test-coverage` target. Needs the option above, `gcovr`, and a gcov-style toolchain. Nothing to do with `LIBPATHIME_TABLE_COVERAGE` — see "Test coverage" below. |
 | `LIBPATHIME_BUILD_DEMO` | `OFF` | Build the interactive terminal demo — see `demo/README.md`. Needs the `demo/cpp-terminal` submodule. |
 | `PYZY_BUILD_DB_ANDROID` | `ON` | Build pyzy's bundled Android pinyin database (needs Python 3). |
+| `LIBPATHIME_INSTALL_VENDORED` | `OFF` | Install the vendored backend libraries and their headers as ordinary system libraries, rather than into the private directory beside `libpathime` that the default uses. For a distribution package that intends to replace the system's `libhangul`, `libanthy-unicode` and `libpyzy` with ours; see "What gets produced". |
 | `BUILD_SHARED_LIBS` | `ON` | Shared vs. static libraries. One exception ignores it: on Windows cpp-terminal — which only the demo links — is always static, because its published globals carry no `dllimport` and a DLL build of it therefore cannot be linked against on Windows at all. |
 
 Which backends survived the gating is recorded in the generated
@@ -131,6 +132,8 @@ answers false for a backend whose runtime data is missing as well.
   `include/pathime/config.h`.
 - **Vendored libraries**: `libhangul`, `libanthy-unicode` (+
   `libanthydic-unicode`, `libanthyinput-unicode`), `libpyzy-1.0`.
+- **Consumer metadata**: `lib/cmake/pathime/` for `find_package(pathime)` and
+  `lib/pkgconfig/pathime.pc`. See "Consuming the library".
 - **Data**: `pathime-data/`, holding `anthy/anthy.dic` (built by anthy's
   four-stage codegen, ~20 MB), `pyzy/main.db` (~3.4 MB / 16 tables) plus
   `pyzy/phrases.txt`, and `table/*.db` (5–9 MB for the five default tables,
@@ -139,13 +142,29 @@ answers false for a backend whose runtime data is missing as well.
 - **With `LIBPATHIME_BUILD_DEMO=ON`**: `bin/pathime-demo`, plus the
   `cpp-terminal` library it draws with. Neither is installed.
 
-Pass `-DCMAKE_INSTALL_PREFIX=...` at **configure** time if you plan to
-install. libhangul's upstream CMake installs to `CMAKE_INSTALL_FULL_LIBDIR`,
-an absolute path baked in during configure, so `cmake --install --prefix`
-cannot relocate it afterwards.
+Pass `-DCMAKE_INSTALL_PREFIX=...` at **configure** time if you plan to install.
+The generated `pathime.pc` records absolute paths, so `cmake --install --prefix`
+cannot relocate the result afterwards.
 
-`cmake --install` lays out headers under `include/pathime/`, libraries under
-`lib/`, and DLLs under `bin/`.
+`cmake --install` lays out headers under `include/pathime/`, `libpathime` under
+`lib/` (the DLL under `bin/`), and the vendored backend libraries under
+`lib/pathime/` — a **private directory that is on no library search path**.
+libpathime reaches them through an RPATH of `$ORIGIN/pathime`; on Windows,
+which has no RPATH, they sit beside `pathime.dll` in `bin/` instead.
+
+That is deliberate, and it is the layout an engine shipping libpathime wants.
+Our libhangul, anthy-unicode and pyzy are not the system's: two of the three
+carry portability commits on their own `libpathime` branch (`THIRD-PARTY.md`),
+and all three are built with this project's options and compat layer. Installed
+as system libraries they would collide with a distribution's packages of the
+same names, and an engine that resolved one of those instead would be running a
+library this project has never tested. No vendored header is installed at all,
+because nothing outside this build compiles against one.
+
+`LIBPATHIME_INSTALL_VENDORED=ON` puts the libraries and their headers in the
+ordinary system places instead — for a packager who intends exactly that and
+has decided to deal with the consequences. `cmake/LibpathimeInstall.cmake` is
+the whole of the layout, in one file.
 
 ## Shipping the data
 
@@ -321,13 +340,41 @@ backend header or links a backend library. On Windows that is a hard
 requirement rather than a style preference for anthy — see
 `docs/anthy-mapping.md`.
 
-No CMake package config is installed, so a consumer names the include directory
-and library itself. A consumer of a **static** build must define
-`PATHIME_STATIC` when compiling against the header, to match
-`PATHIME_BUILT_STATIC` in `<pathime/config.h>`; without it the declarations pick
-up `__declspec(dllimport)` on Windows. Within this build tree the `pathime`
-target carries both the include directories and that definition, so anything
-linking `libpathime::pathime` needs no further wiring.
+An installed libpathime is consumed either way round:
+
+```cmake
+find_package(pathime REQUIRED)
+target_link_libraries(app PRIVATE libpathime::pathime)
+```
+
+```sh
+cc app.c $(pkg-config --cflags --libs pathime)
+```
+
+The imported target carries the include directory, the library, and the
+`PATHIME_STATIC` definition a static build needs — that one matters, because
+without it the declarations pick up `__declspec(dllimport)` on Windows to match
+`PATHIME_BUILT_STATIC` in `<pathime/config.h>`. `pkg-config` puts the same
+definition in `--cflags`. Within this build tree the `pathime` target already
+carries all of it, so anything linking `libpathime::pathime` needs no wiring
+either way.
+
+Two things a **static** consumer has to know, both because the vendored
+archives end up on its own link line rather than inside a shared library:
+
+- **A C project must `enable_language(CXX)`** (or `project(app C CXX)`).
+  libpathime is C++ behind a C header; the export records that, but CMake can
+  only act on it if the project has a C++ compiler to name. Without it the link
+  fails on `std::` symbols. The `pkg-config` route names the C++ runtime in
+  `Libs.private` and needs nothing extra.
+- **The external libraries come back**: `find_package(pathime)` calls
+  `find_dependency()` for SQLite3, GLib and libuuid, so those must be findable
+  where the consumer builds. A consumer of a shared build needs none of them.
+
+The generated `pathime-targets.cmake` does name the vendored libraries, because
+CMake needs them named to work out RPATHs and static link lines. That does not
+make them part of the interface: there is no installed header to compile
+against them with, and the library they belong to is `libpathime::pathime`.
 
 ## How the pieces fit together
 
@@ -335,6 +382,10 @@ linking `libpathime::pathime` needs no further wiring.
   `LIBPATHIME_WITH_*` options.
 - `cmake/LibpathimeDependencies.cmake` — probes dependencies, gates backends,
   prints the configuration summary.
+- `cmake/LibpathimeInstall.cmake` — the installed layout: where the vendored
+  libraries go and why, the RPATHs that reach them, and the `find_package` and
+  `pkg-config` files generated from `cmake/pathime-config.cmake.in` and
+  `cmake/pathime.pc.in`.
 - `cmake/LibpathimeCompat.cmake`, `cmake/compat/win32/` — the Windows compat
   layer; `docs/windows-port.md`.
 - `engines/libhangul/` ships modern CMake, so the build descends into its `hangul/`

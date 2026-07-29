@@ -111,6 +111,13 @@ if(LIBPATHIME_ANTHY_SINGLE_LIBRARY)
   endforeach()
 
   set(_anthy_install_targets anthy-unicode)
+  # No artifacts of their own, but libpathime links two of them by name, so they
+  # have to be in the export set for the generated targets file to resolve —
+  # whatever the library shape. Passing them to the install helper costs nothing
+  # else: an INTERFACE library installs no file.
+  set(_anthy_internal_targets anthy_diclib anthy_ordering anthy_split
+                              anthydic-unicode anthyinput-unicode)
+  set(_anthy_internal_always TRUE)
 else()
   # Internal static libraries (meson: static_library), absorbed into the
   # installed shared ones below.
@@ -141,7 +148,13 @@ else()
   target_link_libraries(anthyinput-unicode PRIVATE anthy-unicode anthydic-unicode)
   set_target_properties(anthyinput-unicode PROPERTIES VERSION 0.0.0 SOVERSION 0)
 
-  set(_anthy_install_targets anthy-unicode anthydic-unicode anthyinput-unicode)
+  # Listed dependents-first, which is the order a static link line needs and
+  # the order cmake/LibpathimeInstall.cmake writes into Libs.private.
+  set(_anthy_install_targets anthyinput-unicode anthy-unicode anthydic-unicode)
+  # Real archives here, absorbed into the shared libraries above — so they
+  # travel only when there are no shared libraries to absorb them.
+  set(_anthy_internal_targets anthy_ordering anthy_split anthy_diclib)
+  set(_anthy_internal_always FALSE)
 endif()
 
 add_library(libpathime::anthy ALIAS anthy-unicode)
@@ -327,13 +340,15 @@ if(LIBPATHIME_BUILD_TESTS)
 endif()
 
 # --- install ----------------------------------------------------------------
-install(TARGETS ${_anthy_install_targets}
-  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
-install(FILES
-  "${ANTHY_SRC}/anthy/anthy.h" "${ANTHY_SRC}/anthy/dicutil.h" "${ANTHY_SRC}/anthy/input.h"
-  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/anthy-unicode-1.0/anthy")
+# Into the private directory beside libpathime, and no headers unless the build
+# was asked for the system-wide layout — cmake/LibpathimeInstall.cmake explains
+# why our anthy is not the system's.
+libpathime_install_vendored(${_anthy_install_targets})
+if(_anthy_internal_always OR NOT BUILD_SHARED_LIBS)
+  libpathime_install_vendored(${_anthy_internal_targets})
+endif()
+libpathime_install_vendored_headers(anthy-unicode-1.0/anthy
+  "${ANTHY_SRC}/anthy/anthy.h" "${ANTHY_SRC}/anthy/dicutil.h" "${ANTHY_SRC}/anthy/input.h")
 # anthy.dic is not installed here: libpathime tells anthy where its dictionary
 # is, so the copy that matters is the one under pathime-data/ that
 # cmake/LibpathimeRuntimeData.cmake installs.

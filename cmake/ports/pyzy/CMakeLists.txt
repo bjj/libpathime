@@ -124,14 +124,13 @@ else()
 endif()
 
 # --- install ----------------------------------------------------------------
-install(TARGETS pyzy
-  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
-install(FILES
+# Into the private directory beside libpathime, and no headers unless the build
+# was asked for the system-wide layout — cmake/LibpathimeInstall.cmake explains
+# why our pyzy is not the system's.
+libpathime_install_vendored(pyzy)
+libpathime_install_vendored_headers(pyzy-1.0/PyZy
   "${_pyzy_dir}/Const.h" "${_pyzy_dir}/DataDir.h"
-  "${_pyzy_dir}/InputContext.h" "${_pyzy_dir}/Variant.h"
-  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pyzy-1.0/PyZy")
+  "${_pyzy_dir}/InputContext.h" "${_pyzy_dir}/Variant.h")
 # phrases.txt is not installed here, for the same reason android.db is not:
 # libpathime tells pyzy where to look, so the copy that matters is the one
 # under pathime-data/ that cmake/LibpathimeRuntimeData.cmake installs.

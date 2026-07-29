@@ -27,6 +27,7 @@ include(LibpathimeCoverage)      # test-coverage instrumentation; before any tar
 include(LibpathimeCompat)        # libpathime_add_win32_compat() + win32 shim lib
 include(LibpathimeDependencies)  # probe deps, gate backends, print the summary
 include(LibpathimeRuntimeData)   # the pathime-data/ the library reads at runtime
+include(LibpathimeInstall)       # the installed layout and the find_package() half
 
 # --- Korean: libhangul ships modern, target-based CMake for its `hangul`
 # library. We descend straight into that library directory rather than the
@@ -43,14 +44,19 @@ if(LIBPATHIME_WITH_HANGUL)
   set(LIBHANGUL_SOVERSION_MAJOR 1)  # values from engines/libhangul/CMakeLists.txt:24-26
   set(LIBHANGUL_SOVERSION_MINOR 1)
   set(LIBHANGUL_SOVERSION_PATCH 0)
-  add_subdirectory(engines/libhangul/hangul)
+  # EXCLUDE_FROM_ALL for the install rules rather than the build: it drops the
+  # subdirectory from the generated install script, and upstream's rules are the
+  # wrong ones for us twice over — they install to an absolute
+  # CMAKE_INSTALL_FULL_LIBDIR, and on Windows they give a single bare
+  # DESTINATION that puts the DLL in lib/ where the loader will never look.
+  # libpathime_install_vendored() below installs the target the way
+  # cmake/LibpathimeInstall.cmake lays the tree out. The `hangul` target itself
+  # still builds, because libpathime links it.
+  add_subdirectory(engines/libhangul/hangul EXCLUDE_FROM_ALL)
   add_library(libpathime::hangul ALIAS hangul)
-  # Upstream's install() gives a single bare DESTINATION, which on Windows puts
-  # the DLL in lib/ alongside its import library — where the loader will never
-  # look. Add a copy in bin/ so the installed tree is actually runnable.
-  if(WIN32 AND BUILD_SHARED_LIBS)
-    install(FILES $<TARGET_FILE:hangul> DESTINATION ${CMAKE_INSTALL_BINDIR})
-  endif()
+  libpathime_install_vendored(hangul)
+  libpathime_install_vendored_headers(hangul-1.0
+    "${CMAKE_CURRENT_SOURCE_DIR}/engines/libhangul/hangul/hangul.h")
 endif()
 
 # --- Japanese: anthy-unicode has no CMake — use our native port. ---
@@ -100,6 +106,10 @@ install(FILES "${PROJECT_BINARY_DIR}/include/pathime/config.h"
 # directories and the PATHIME_BUILD/PATHIME_STATIC definitions, so a consumer
 # that links libpathime::pathime needs no further wiring.
 add_subdirectory(src)
+
+# --- The find_package(pathime) and pkg-config halves of the install. After
+# src/, which is the last directory to put anything in the export set.
+libpathime_install_package()
 
 # --- Build-time tools. Currently one: the table compiler, which turns the
 # source tables of engines/ibus-table-chinese into the databases the engine

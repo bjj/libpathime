@@ -234,6 +234,29 @@ that engine does not do.
 
 ## Queued work
 
+- **Guarded names for the vendored libraries, as a build option.** The install
+  layout keeps our libhangul, anthy-unicode and pyzy in a private
+  `lib/pathime/` (`cmake/LibpathimeInstall.cmake`), which stops them colliding
+  with a distribution's packages on disk. It does not change their SONAMEs: ours
+  are still `libanthy-unicode.so.0` and the rest, so a process that has already
+  loaded a distribution's copy of that SONAME satisfies libpathime's `DT_NEEDED`
+  with it — the RPATH is only consulted when nothing by that name is loaded yet.
+
+  That is not the ordinary case for this library, which is why it is queued and
+  not urgent: an IBus-style engine is its own process on the bus, not a library
+  loaded into arbitrary applications, so there is usually nothing else in the
+  address space to have pulled in the system copies. It becomes real for an
+  embedder who does put libpathime inside a larger process, and the failure is
+  a silent wrong-library one rather than a link error.
+
+  So: an option — `LIBPATHIME_GUARDED_VENDOR_NAMES`, off by default — that gives
+  each vendored target an `OUTPUT_NAME` of its own (`pathime-hangul`,
+  `pathime-anthy-unicode`, `pathime-pyzy`). Feasible for all three even though
+  libhangul is unmodified upstream, since the target properties are set from our
+  build rather than from the submodule. What has to be decided with it: whether
+  the guarded names should be what a release artifact ships, given that turning
+  it on renames files in every shipped tree.
+
 - **The header self-explanation pass — needs a decision before it is done.**
   The original plan was to strip from `include/pathime/pathime.h` every
   passage that justifies a decision by naming backend behaviour (anthy's
@@ -479,13 +502,10 @@ with.
 
 ## Build limitations, stated in BUILD.md as facts
 
-Neither is a bug, and both are recorded here so they are tracked rather than
-only described:
+Not a bug, and recorded here so it is tracked rather than only described:
 
 - **Cross-compiling is not supported.** anthy's dictionary is built by host
   tools at build time.
-- **No CMake package config is installed**, so a consumer names the include
-  directory and the library itself.
 
 ## Not verified
 

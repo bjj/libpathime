@@ -56,6 +56,14 @@ include(GNUInstallDirs)
 
 option(BUILD_SHARED_LIBS "Build submodule libraries as shared libraries" ON)
 
+# Where the vendored backend libraries land when the build is installed. OFF
+# puts them in a private directory beside libpathime and installs no header for
+# them; ON puts both in the system places, which is what a distribution package
+# wants and what an application shipping libpathime does not. The reasoning, and
+# the whole installed layout, is cmake/LibpathimeInstall.cmake.
+option(LIBPATHIME_INSTALL_VENDORED
+  "Install the vendored backend libraries and headers as system libraries" OFF)
+
 # --- Backend selection. The first three map to one vendored submodule each. ---
 option(LIBPATHIME_WITH_HANGUL "Build the Korean (libhangul) backend"        ON)
 option(LIBPATHIME_WITH_ANTHY  "Build the Japanese (anthy-unicode) backend"  ON)
