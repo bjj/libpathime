@@ -107,6 +107,18 @@ target_link_libraries(core_options_test PRIVATE
 target_compile_definitions(core_options_test PRIVATE
   $<TARGET_PROPERTY:pathime,COMPILE_DEFINITIONS>)
 
+# core.backend_defaults needs the same sources core.options does, and for the
+# same reason: it drives public entry points against hand-built handles, so it
+# reaches context.cc, candidates.cc and everything those pull in. Reusing the
+# list rather than restating it keeps the two from drifting apart.
+libpathime_add_core_test(backend_defaults SOURCES ${_lpi_options_sources})
+target_include_directories(core_backend_defaults_test PRIVATE
+  $<TARGET_PROPERTY:pathime,INCLUDE_DIRECTORIES>)
+target_link_libraries(core_backend_defaults_test PRIVATE
+  $<TARGET_PROPERTY:pathime,LINK_LIBRARIES>)
+target_compile_definitions(core_backend_defaults_test PRIVATE
+  $<TARGET_PROPERTY:pathime,COMPILE_DEFINITIONS>)
+
 libpathime_add_core_test(composition SOURCES
   "${PROJECT_SOURCE_DIR}/src/composition.cc"
   "${PROJECT_SOURCE_DIR}/src/utf8.cc")

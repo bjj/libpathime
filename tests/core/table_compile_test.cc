@@ -116,6 +116,20 @@ bool has_sql_table(const std::string &path, const char *name)
     return found;
 }
 
+/* A database holding exactly @a sql and nothing else. */
+bool make_raw_db(const std::string &path, const char *sql)
+{
+    std::remove(path.c_str());
+    sqlite3 *db = nullptr;
+    bool ok = false;
+    if (sqlite3_open_v2(path.c_str(), &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE,
+                        nullptr) == SQLITE_OK) {
+        ok = sqlite3_exec(db, sql, nullptr, nullptr, nullptr) == SQLITE_OK;
+    }
+    sqlite3_close(db);
+    return ok;
+}
+
 bool file_exists(const std::string &path)
 {
     std::ifstream in(path.c_str(), std::ios::binary);
@@ -553,6 +567,191 @@ void test_path_needing_escapes()
 }
 
 /*
+ * Databases that open but are damaged, which is a different problem from
+ * databases that are not databases.
+ *
+ * `PATHIME_OPT_TABLE_FILE` takes any path a client cares to name, so a table
+ * that is a real ibus-table database with a piece missing is a live input: a
+ * truncated download, a half-finished copy, a table from a newer ibus-table
+ * that dropped a table this reader still queries. The library's answer must be
+ * an empty result or a false, never a crash and never invented data — every
+ * query below prepares SQL against a schema that is not there.
+ *
+ * These are also, incidentally, the only way to reach those failure branches
+ * without injecting faults into SQLite itself.
+ */
+void test_damaged_databases()
+{
+    std::string error;
+
+    /*
+     * `ime` is present, so this is recognizably an ibus-table database and
+     * opens — but `phrases` is gone, so every lookup prepares against nothing.
+     */
+    {
+        const std::string path = temp_path("no-phrases.db");
+        PT_CHECK(make_raw_db(path,
+                             "CREATE TABLE ime (attr TEXT, val TEXT);"
+                             "INSERT INTO ime VALUES ('name', 'NoPhrases');"));
+
+        error.clear();
+        std::unique_ptr<TableDatabase> table = TableDatabase::open(path, "", &error);
+        if (table == nullptr) {
+            PT_FAILF("open(no-phrases) failed: %s", error.c_str());
+        } else {
+            PT_CHECK_STR(table->properties().name, "NoPhrases");
+            std::vector<PhraseMatch> matches;
+            /* False, not a crash and not a silent empty success. */
+            PT_CHECK(!table->lookup("a", &matches));
+        }
+    }
+
+    /*
+     * The declaration says the table carries word-formation codes; the goucima
+     * table it would read them from is absent. goucima() answers "" — the same
+     * answer as a character the table simply does not list, which is right:
+     * both mean "no code available", and a caller has nothing different to do.
+     */
+    {
+        const std::string path = temp_path("no-goucima.db");
+        PT_CHECK(make_raw_db(path,
+                             "CREATE TABLE ime (attr TEXT, val TEXT);"
+                             "INSERT INTO ime VALUES ('name', 'NoGouci');"
+                             "INSERT INTO ime VALUES ('user_can_define_phrase', 'TRUE');"
+                             "CREATE TABLE phrases (id INTEGER PRIMARY KEY, tabkeys TEXT,"
+                             " phrase TEXT, freq INTEGER, user_freq INTEGER);"));
+
+        error.clear();
+        std::unique_ptr<TableDatabase> table = TableDatabase::open(path, "", &error);
+        if (table == nullptr) {
+            PT_FAILF("open(no-goucima) failed: %s", error.c_str());
+        } else {
+            PT_CHECK(table->properties().user_can_define_phrase);
+            PT_CHECK_STR(table->goucima("X"), "");
+        }
+    }
+
+    /*
+     * A NULL in the `ime` value column. SQL NULL is not the empty string, and
+     * the reader has to turn it into one rather than into a null pointer it
+     * then constructs a std::string from.
+     */
+    {
+        const std::string path = temp_path("null-attr.db");
+        PT_CHECK(make_raw_db(path,
+                             "CREATE TABLE ime (attr TEXT, val TEXT);"
+                             "INSERT INTO ime VALUES ('name', 'NullVal');"
+                             "INSERT INTO ime VALUES ('max_key_length', NULL);"
+                             "INSERT INTO ime VALUES (NULL, 'orphan');"
+                             "CREATE TABLE phrases (id INTEGER PRIMARY KEY, tabkeys TEXT,"
+                             " phrase TEXT, freq INTEGER, user_freq INTEGER);"));
+
+        error.clear();
+        std::unique_ptr<TableDatabase> table = TableDatabase::open(path, "", &error);
+        if (table == nullptr) {
+            PT_FAILF("open(null-attr) failed: %s", error.c_str());
+        } else {
+            PT_CHECK_STR(table->properties().name, "NullVal");
+            /* An unparseable value leaves the documented default standing. */
+            PT_CHECK(table->properties().max_key_length > 0);
+        }
+    }
+
+    /*
+     * A `phrases` table whose columns hold the wrong types. SQLite is happy to
+     * store them; the reader must not produce a phrase that is a number or a
+     * frequency that is a sentence.
+     */
+    {
+        const std::string path = temp_path("wrong-types.db");
+        PT_CHECK(make_raw_db(path,
+                             "CREATE TABLE ime (attr TEXT, val TEXT);"
+                             "INSERT INTO ime VALUES ('name', 'WrongTypes');"
+                             "INSERT INTO ime VALUES ('auto_wildcard', 'FALSE');"
+                             "CREATE TABLE phrases (id INTEGER PRIMARY KEY, tabkeys TEXT,"
+                             " phrase TEXT, freq INTEGER, user_freq INTEGER);"
+                             "INSERT INTO phrases (tabkeys, phrase, freq, user_freq)"
+                             " VALUES ('a', 42, 'not-a-number', NULL);"));
+
+        error.clear();
+        std::unique_ptr<TableDatabase> table = TableDatabase::open(path, "", &error);
+        if (table == nullptr) {
+            PT_FAILF("open(wrong-types) failed: %s", error.c_str());
+        } else {
+            std::vector<PhraseMatch> matches;
+            PT_CHECK(table->lookup("a", &matches));
+            PT_CHECK(matches.size() == 1);
+            if (matches.size() == 1) {
+                /* Coerced, deterministically, rather than read as raw bytes. */
+                PT_CHECK_STR(matches[0].phrase, "42");
+                PT_CHECK(matches[0].freq == 0);
+                PT_CHECK(matches[0].user_freq == 0);
+            }
+        }
+    }
+
+    /*
+     * A file with a plausible SQLite header and nothing behind it. This is the
+     * truncated-copy case, and it must be refused rather than half-read.
+     */
+    {
+        const std::string source = compile(kBasicTable, "to-truncate.db");
+        std::string head(200, '\0');
+        {
+            std::ifstream in(source.c_str(), std::ios::binary);
+            in.read(&head[0], static_cast<std::streamsize>(head.size()));
+            head.resize(static_cast<size_t>(in.gcount()));
+        }
+        const std::string path = temp_path("truncated.db");
+        {
+            std::ofstream out(path.c_str(), std::ios::binary);
+            out.write(head.data(), static_cast<std::streamsize>(head.size()));
+        }
+
+        error.clear();
+        /* Either answer is defensible — what matters is that it is an answer. */
+        std::unique_ptr<TableDatabase> table = TableDatabase::open(path, "", &error);
+        if (table == nullptr) {
+            PT_CHECK(!error.empty());
+        } else {
+            std::vector<PhraseMatch> matches;
+            table->lookup("a", &matches);  /* must not crash */
+        }
+    }
+}
+
+/*
+ * A user database that cannot be created is not fatal: the table still types
+ * and only learning is lost. Reporting the whole input method unavailable
+ * because a home directory is read-only would be the wrong trade, so open()
+ * swallows the failure and has_user_db() is how a caller finds out.
+ *
+ * The unopenable path here is one *under a regular file*, which no filesystem
+ * will turn into a directory.
+ */
+void test_unusable_user_database_is_not_fatal()
+{
+    const std::string system_path = compile(kBasicTable, "learner-ro.db");
+    const std::string user_path = system_path + "/not-a-directory/user.db";
+
+    std::string error;
+    std::unique_ptr<TableDatabase> table =
+        TableDatabase::open(system_path, user_path, &error);
+    if (table == nullptr) {
+        PT_FAILF("open with an unusable user path failed: %s", error.c_str());
+        return;
+    }
+
+    PT_CHECK(!table->has_user_db());
+    PT_CHECK(!table->record_selection("a", "\xCE\xB1"));
+
+    /* The table itself is entirely usable. */
+    std::vector<PhraseMatch> matches;
+    PT_CHECK(table->lookup("a", &matches));
+    PT_CHECK(matches.size() == 1);
+}
+
+/*
  * The parser's diagnostics. These exist for one caller — tools/table-compile,
  * printing to whoever is adding a table to the build — so the thing worth
  * asserting is that the message names the line, which is the only part that
@@ -718,6 +917,8 @@ int main(void)
     test_user_database_learning();
     test_failed_compilation_leaves_no_file();
     test_open_rejects_non_tables();
+    test_damaged_databases();
+    test_unusable_user_database_is_not_fatal();
     test_path_needing_escapes();
     test_source_diagnostics();
     test_parse_table_source_file();
