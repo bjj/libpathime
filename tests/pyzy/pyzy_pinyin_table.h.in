@@ -5,20 +5,20 @@
  * to include it the same way. The include is absolute for the reason given in
  * pyzy_private.h.in.
  *
- * On Windows this is the *rewritten* copy — the one whose GNU labelled-field
- * initialisers (`text : "a",`) the port stripped on the assumption that the
- * labels appeared in struct-declaration order. Compiling it here is the point:
- * if that assumption is ever wrong the fields are silently permuted, and the
- * invariants pinyin_parser_test.cc checks over this array are what notices.
+ * Compiling it here is the point. The table's GNU labelled-field initialisers
+ * (`text : "a",`) were dropped on the assumption that the labels appeared in
+ * struct-declaration order; if that is ever wrong the fields are silently
+ * permuted, and the invariants pinyin_parser_test.cc checks over this array
+ * are what notices.
  */
 #ifndef LIBPATHIME_TESTS_PYZY_PINYIN_TABLE_H
 #define LIBPATHIME_TESTS_PYZY_PINYIN_TABLE_H
 
-#include "@PYZY_EFFECTIVE_SRC_DIR@/Const.h"   /* PINYIN_CORRECT_* / PINYIN_FUZZY_* */
-#include "@PYZY_EFFECTIVE_SRC_DIR@/Types.h"   /* struct Pinyin, PINYIN_ID_*        */
+#include "@PYZY_SRC_DIR@/Const.h"   /* PINYIN_CORRECT_* / PINYIN_FUZZY_* */
+#include "@PYZY_SRC_DIR@/Types.h"   /* struct Pinyin, PINYIN_ID_*        */
 
 namespace PyZy {
-#include "@PYZY_EFFECTIVE_SRC_DIR@/PinyinParserTable.h"
+#include "@PYZY_SRC_DIR@/PinyinParserTable.h"
 }
 
 #endif  /* LIBPATHIME_TESTS_PYZY_PINYIN_TABLE_H */

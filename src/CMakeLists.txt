@@ -99,21 +99,19 @@ if(LIBPATHIME_WITH_PYZY)
   #
   # This is the same trick tests/pyzy/CMakeLists.txt uses, minus the generated
   # forwarding headers — those exist there to reach pyzy's *private* headers,
-  # which an adapter has no business touching. Copying from
-  # PYZY_EFFECTIVE_SRC_DIR rather than engines/pyzy/src matters on Windows, where it is
-  # the rewritten mirror the DLL was actually built from.
-  if(NOT PYZY_EFFECTIVE_SRC_DIR)
+  # which an adapter has no business touching.
+  if(NOT PYZY_SRC_DIR)
     message(FATAL_ERROR
-      "src: PYZY_EFFECTIVE_SRC_DIR is not set. It is published by "
+      "src: PYZY_SRC_DIR is not set. It is published by "
       "cmake/ports/pyzy/CMakeLists.txt, which must be processed first.")
   endif()
-  # DataDir.h joins them: it is the port's, not upstream's, and it is how the
-  # adapter tells pyzy where the database is.
+  # DataDir.h joins them: it is how the adapter tells pyzy where the database
+  # is, and it is pyzy's only header that upstream does not also have.
   file(COPY
-    "${PYZY_EFFECTIVE_SRC_DIR}/Const.h"
-    "${PYZY_EFFECTIVE_SRC_DIR}/DataDir.h"
-    "${PYZY_EFFECTIVE_SRC_DIR}/InputContext.h"
-    "${PYZY_EFFECTIVE_SRC_DIR}/Variant.h"
+    "${PYZY_SRC_DIR}/Const.h"
+    "${PYZY_SRC_DIR}/DataDir.h"
+    "${PYZY_SRC_DIR}/InputContext.h"
+    "${PYZY_SRC_DIR}/Variant.h"
     DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/include/PyZy")
   target_include_directories(pathime PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/include")
 endif()

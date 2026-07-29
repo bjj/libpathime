@@ -17,11 +17,10 @@ A vendored source that will not compile or behave as it stands is fixed **in
 the submodule**, as a titled commit on its `libpathime` branch — never by a
 rewrite applied while the build runs. `libhangul/` and the
 `ibus-table-chinese/` table sources need nothing; `anthy-unicode/` and `pyzy/`
-each carry a short series of portability fixes on that branch.
+each carry a short series of commits, and `git log` in each is the list.
 
-What stays here is what is *not* a fix to anthy or pyzy: the compat layer
-below, the build files, and the one configure-time rewrite that expresses
-libpathime's own contract with anthy rather than a bug in it.
+What stays here is what is not part of those libraries at all: the compat layer
+below, and the build files that replace their meson and autotools.
 
 ## 1. The compat layer
 
@@ -38,39 +37,21 @@ instead, because those headers must not be shadowed.
 This is also where pyzy's UUID provider comes from: the shim forwards to
 `Rpcrt4`, so there is no `libuuid` to install.
 
-## 2. Generated source variants
+## 2. Getting pyzy's headers without its directory on the -I path
 
-Where a vendored library cannot be *told* something libpathime needs to tell
-it, the port compiles a fixed *copy* produced at configure time. Editing a
-submodule therefore needs a re-run of CMake for the change to reach the copy.
+`engines/pyzy/src/String.h` shadows the C library's `<string.h>` on a
+case-insensitive filesystem, so that directory must never appear in an include
+path. pyzy's own sources dodge it by sitting *in* `src/` and including each
+other with quotes, which resolve relative to the including file.
 
-Both are about where a library finds its data, both apply on every platform,
-and neither is a bug in the library it rewrites — which is why they are here
-rather than in the submodule:
-
-- `engines/anthy-unicode/src-diclib/conf.c` expands `${NAME}` references inside every
-  value stored, and reads its compiled-in conf file unconditionally. The copy
-  stores `anthy_conf_override()` values verbatim and treats an empty `CONFFILE`
-  as "there is no conf file", which together make the override API an exact and
-  complete way to configure anthy.
-- `engines/pyzy/src/Database.cc` and `SpecialPhraseTable.cc` name their data by a
-  compiled-in `PKGDATADIR` and by the process's working directory. The copies
-  take it from `pyzy_set_data_dir()` instead — `DataDir.h`, which the port adds
-  to pyzy.
-
-The portability fixes each library needs in order to compile and behave on
-Windows at all are commits on its submodule's `libpathime` branch, not
-rewrites: pointer arithmetic through `unsigned long` under LLP64, the
-POSIX-only path walk that cannot create `%USERPROFILE%\.config\anthy`, the
-narrow `open()` that decodes in the active code page, pyzy's GNU labelled-field
-initialisers, its missing `operator<<` overloads, its `class`/`struct`
-mismatch, and its `wchar_t`-as-UCS-4 cast. `git log` in each submodule is the
-list.
-
-Consumers of pyzy's headers must use `PYZY_EFFECTIVE_SRC_DIR` rather than
-`engines/pyzy/src`: the mirror is what the library was actually built from, on every
-platform. `src/CMakeLists.txt` does this when it stages the public headers for
-the adapter.
+Anything else reaches them two ways, both configure-time copies out of
+`PYZY_SRC_DIR`: the **public** headers are staged into the layout
+`cmake --install` produces and included as `<PyZy/InputContext.h>`, which is
+what `src/CMakeLists.txt` does for the adapter; the **private** ones are
+reached through generated forwarding headers that include them by absolute
+path, which is what `tests/pyzy/` does. `DataDir.h` is among the public ones —
+it is how a program tells pyzy where its data is, and pyzy's only header that
+upstream does not also have.
 
 ## 3. Build-time behaviour
 

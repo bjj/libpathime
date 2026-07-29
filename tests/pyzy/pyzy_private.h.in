@@ -1,8 +1,7 @@
 /* Access to pyzy's private headers, without putting its src/ on the -I path.
  *
  * Configured into the build tree by tests/pyzy/CMakeLists.txt; @VAR@ is
- * substituted with the directory whose sources the pyzy library was actually
- * built from (engines/pyzy/src on Unix, the rewritten mirror on Windows).
+ * substituted with the directory the pyzy library is built from.
  *
  * Why the indirection: engines/pyzy/src/String.h shadows the C library's <string.h> on
  * a case-insensitive filesystem, so that directory must never appear in an
@@ -16,10 +15,10 @@
 #ifndef LIBPATHIME_TESTS_PYZY_PRIVATE_H
 #define LIBPATHIME_TESTS_PYZY_PRIVATE_H
 
-#include "@PYZY_EFFECTIVE_SRC_DIR@/String.h"
-#include "@PYZY_EFFECTIVE_SRC_DIR@/Types.h"
-#include "@PYZY_EFFECTIVE_SRC_DIR@/PinyinArray.h"
-#include "@PYZY_EFFECTIVE_SRC_DIR@/PinyinParser.h"
-#include "@PYZY_EFFECTIVE_SRC_DIR@/SimpTradConverter.h"
+#include "@PYZY_SRC_DIR@/String.h"
+#include "@PYZY_SRC_DIR@/Types.h"
+#include "@PYZY_SRC_DIR@/PinyinArray.h"
+#include "@PYZY_SRC_DIR@/PinyinParser.h"
+#include "@PYZY_SRC_DIR@/SimpTradConverter.h"
 
 #endif  /* LIBPATHIME_TESTS_PYZY_PRIVATE_H */

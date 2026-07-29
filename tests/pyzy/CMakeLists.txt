@@ -10,15 +10,13 @@
 # stays abstract, and the file fails where it tries to instantiate one. That is
 # an upstream bug in the test, not something this build caused.
 #
-# It could be worked around: the port's mechanism for unbuildable vendored
-# sources (mirror into the build tree, rewrite the copy, guard the rewrite with
-# a FATAL_ERROR) would need one `string(REPLACE "const InputContext *context"
-# "InputContext *context")` here. Two reasons not to.
+# It could be fixed the way every other vendored defect here is — a commit on
+# pyzy's `libpathime` branch correcting the six signatures. Two reasons not to.
 #
-# The first is what that rewrite would be doing. Every other rewrite in this
-# port repairs a *library* source so it compiles as its author meant it to.
-# This one would have the build system edit the declarations of a test, which
-# is the one kind of file whose text is the thing being trusted.
+# The first is what that commit would be changing. The others repair a
+# *library* source so it compiles as its author meant it to. This one would
+# edit the declarations of a test, which is the one kind of file whose text is
+# the thing being trusted.
 #
 # The second is that nobody knows what basic.cc asserts any more. It cannot
 # have been run since the signature changed, and much of it is pinned to
@@ -37,9 +35,9 @@
 # on Windows cannot tell us whether Windows behaves like Linux, which is the
 # entire reason this directory exists.
 
-if(NOT PYZY_EFFECTIVE_SRC_DIR)
+if(NOT PYZY_SRC_DIR)
   message(FATAL_ERROR
-    "tests/pyzy: PYZY_EFFECTIVE_SRC_DIR is not set. It is published by "
+    "tests/pyzy: PYZY_SRC_DIR is not set. It is published by "
     "cmake/ports/pyzy/CMakeLists.txt, which must be processed first.")
 endif()
 
@@ -53,20 +51,15 @@ endif()
 #     produces, so tests include them exactly as an outside consumer would:
 #     <PyZy/InputContext.h>. The staging directory holds nothing else, so
 #     there is nothing for a system header to collide with. DataDir.h is among
-#     them: the port adds it, and it is how a program says where the data is.
+#     them: it is how a program says where the data is.
 #   * the *private* headers are reached through generated forwarding headers
 #     that #include them by absolute path. Their own quoted includes then
 #     resolve relative to themselves, as they do when pyzy compiles itself.
-#
-# Both are configure-time copies of ${PYZY_EFFECTIVE_SRC_DIR} — on Windows the
-# rewritten mirror, not engines/pyzy/src. Building a test against the raw submodule
-# headers there would give it a String with a different operator<< set from
-# the one inside the DLL.
 file(COPY
-  "${PYZY_EFFECTIVE_SRC_DIR}/Const.h"
-  "${PYZY_EFFECTIVE_SRC_DIR}/DataDir.h"
-  "${PYZY_EFFECTIVE_SRC_DIR}/InputContext.h"
-  "${PYZY_EFFECTIVE_SRC_DIR}/Variant.h"
+  "${PYZY_SRC_DIR}/Const.h"
+  "${PYZY_SRC_DIR}/DataDir.h"
+  "${PYZY_SRC_DIR}/InputContext.h"
+  "${PYZY_SRC_DIR}/Variant.h"
   DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/include/PyZy")
 
 configure_file(pyzy_private.h.in      "${CMAKE_CURRENT_BINARY_DIR}/pyzy_private.h"      @ONLY)
