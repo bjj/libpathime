@@ -757,6 +757,309 @@ static void test_engine_cap(pathime_engine_t *engine)
 }
 
 /*
+ * PATHIME_OPT_TABLE_AUTO_COMMIT, both of the things the header says it does:
+ * a run matching exactly one entry commits that entry outright, mid-run, and a
+ * run that has reached MAX_KEY_LENGTH stages what stands rather than absorbing
+ * the next key.
+ *
+ * It takes two tables, because the default is the table's to declare and the
+ * two shipped answers are opposite: stroke5 declares AUTO_COMMIT = TRUE and
+ * cangjie5 declares FALSE. So the same three keystrokes deliver text through
+ * one table and not through the other, with no client involved — and a client
+ * setting the option overrides either, tier 1 over tier 3.
+ */
+static void test_auto_commit(pathime_engine_t *engine)
+{
+    client_log_t log;
+    pathime_context_t *ctx;
+    char candidate[64];
+    char standing[64];
+    bool value = false;
+
+    /* 好 U+597D — the one row cangjie5's `vnd` reaches. */
+    const char *const hao = "\xE5\xA5\xBD";
+    /* 介 U+4ECB — likewise the only row under stroke5's `,.,/`. */
+    const char *const jie = "\xE4\xBB\x8B";
+
+    /* cangjie5 declares AUTO_COMMIT = FALSE, so nothing commits by itself. */
+    ctx = open_context(engine, &log, "cangjie5");
+    if (ctx == NULL) {
+        return;
+    }
+
+    PT_CHECK(press(ctx, 'v'));
+    PT_CHECK(press(ctx, 'n'));
+    PT_CHECK(press(ctx, 'd'));
+
+    PT_CHECK_STATUS(pathime_context_get_option_bool(ctx, PATHIME_OPT_TABLE_AUTO_COMMIT,
+                                                    &value),
+                    PATHIME_OK);
+    PT_CHECK(!value);
+
+    /* One candidate left, and it is waiting to be selected rather than sent. */
+    PT_CHECK_SIZE(log.last_candidates, 1);
+    PT_CHECK(log.commit_count == 0);
+    candidate_at(ctx, 0, candidate, sizeof(candidate));
+    PT_CHECK(strcmp(candidate, hao) == 0);
+
+    pathime_context_destroy(ctx);
+
+    /* The same keys, with the client asking for auto-commit. */
+    ctx = open_context(engine, &log, "cangjie5");
+    if (ctx == NULL) {
+        return;
+    }
+
+    PT_CHECK_STATUS(pathime_context_set_option_bool(ctx, PATHIME_OPT_TABLE_AUTO_COMMIT,
+                                                    true),
+                    PATHIME_OK);
+    PT_CHECK(press(ctx, 'v'));
+    PT_CHECK(press(ctx, 'n'));
+    PT_CHECK(press(ctx, 'd'));
+
+    /*
+     * The third key delivered text on its own: `vnd` is an exact match and the
+     * only match, so there was nothing left to choose between. Cangjie's
+     * MAX_KEY_LENGTH is 5 — this is the mid-run half of the option, not the
+     * boundary half.
+     */
+    PT_CHECK(strcmp(log.commits, hao) == 0);
+    PT_CHECK(strcmp(log.last_preedit, "") == 0);
+
+    pathime_context_destroy(ctx);
+
+    /* stroke5 declares it, so the same behaviour arrives without a client. */
+    ctx = open_context(engine, &log, "stroke5");
+    if (ctx == NULL) {
+        return;
+    }
+
+    PT_CHECK(press(ctx, ','));
+    PT_CHECK_STATUS(pathime_context_get_option_bool(ctx, PATHIME_OPT_TABLE_AUTO_COMMIT,
+                                                    &value),
+                    PATHIME_OK);
+    PT_CHECK(value);
+    PT_CHECK(!pathime_context_option_is_set(ctx, PATHIME_OPT_TABLE_AUTO_COMMIT));
+
+    PT_CHECK(press(ctx, '.'));
+    PT_CHECK(press(ctx, ','));
+    PT_CHECK(press(ctx, '/'));
+    PT_CHECK(strcmp(log.commits, jie) == 0);
+    PT_CHECK(strcmp(log.last_preedit, "") == 0);
+
+    pathime_context_destroy(ctx);
+
+    /*
+     * The boundary half. `/nm/m` is five keys, stroke5's MAX_KEY_LENGTH, and it
+     * matches far too many rows to have committed on the way. A sixth key can
+     * neither extend the run nor be thrown away, so with auto-commit on it
+     * stages the candidate standing at that moment and starts a fresh run
+     * behind it.
+     */
+    ctx = open_context(engine, &log, "stroke5");
+    if (ctx == NULL) {
+        return;
+    }
+
+    PT_CHECK(press(ctx, '/'));
+    PT_CHECK(press(ctx, 'n'));
+    PT_CHECK(press(ctx, 'm'));
+    PT_CHECK(press(ctx, '/'));
+    PT_CHECK(press(ctx, 'm'));
+    PT_CHECK(log.last_candidates > 1);
+    PT_CHECK(log.commit_count == 0);
+
+    /*
+     * Read the standing candidate rather than naming it: what stages is the
+     * one under the cursor, and stroke5 learns, so an earlier test's choices
+     * are entitled to have moved it.
+     */
+    candidate_at(ctx, 0, standing, sizeof(standing));
+    PT_CHECK(standing[0] != '\0');
+
+    PT_CHECK(press(ctx, 'n'));
+
+    /*
+     * Staged, not committed: the phrase is now the settled head of the preedit,
+     * with the new run's prompt after it. Every stroke5 phrase is one
+     * character, so that head is one scalar value long.
+     */
+    PT_CHECK(log.commit_count == 0);
+    PT_CHECK_SIZE(log.last_settled, 1);
+    PT_CHECK(strncmp(log.last_preedit, standing, strlen(standing)) == 0);
+    PT_CHECK(strlen(log.last_preedit) > strlen(standing));
+
+    /* Discard rather than commit: this test has no business teaching stroke5. */
+    PT_CHECK_STATUS(pathime_context_reset(ctx), PATHIME_OK);
+    pathime_context_destroy(ctx);
+
+    /* With the client turning it off, the same key is absorbed instead. */
+    ctx = open_context(engine, &log, "stroke5");
+    if (ctx == NULL) {
+        return;
+    }
+
+    PT_CHECK_STATUS(pathime_context_set_option_bool(ctx, PATHIME_OPT_TABLE_AUTO_COMMIT,
+                                                    false),
+                    PATHIME_OK);
+    PT_CHECK(press(ctx, '/'));
+    PT_CHECK(press(ctx, 'n'));
+    PT_CHECK(press(ctx, 'm'));
+    PT_CHECK(press(ctx, '/'));
+    PT_CHECK(press(ctx, 'm'));
+
+    {
+        const size_t before = log.last_candidates;
+        char preedit_before[256];
+
+        snprintf(preedit_before, sizeof(preedit_before), "%s", log.last_preedit);
+
+        /*
+         * Handled, because letting it through would drop a stroke key into the
+         * client's document in the middle of a composition — but nothing about
+         * the composition moves.
+         */
+        PT_CHECK(press(ctx, 'n'));
+        PT_CHECK(strcmp(log.last_preedit, preedit_before) == 0);
+        PT_CHECK_SIZE(log.last_candidates, before);
+        PT_CHECK_SIZE(log.last_settled, 0);
+        PT_CHECK(log.commit_count == 0);
+    }
+
+    pathime_context_destroy(ctx);
+}
+
+/* Unicode scalar values in a NUL-terminated UTF-8 string. */
+static size_t scalar_count(const char *text)
+{
+    size_t count = 0;
+    size_t i;
+
+    for (i = 0; text[i] != '\0'; i++) {
+        if (((unsigned char)text[i] & 0xC0) != 0x80) {
+            count++;
+        }
+    }
+    return count;
+}
+
+/* The whole candidate list, as NUL-terminated copies. Returns how many. */
+static size_t collect_candidates(pathime_context_t *ctx, size_t count,
+                                 char out[][32], size_t out_max)
+{
+    size_t i;
+
+    for (i = 0; i < count && i < out_max; i++) {
+        candidate_at(ctx, i, out[i], 32);
+    }
+    return i;
+}
+
+/*
+ * PATHIME_OPT_TABLE_SINGLE_CHAR_ONLY: the multi-character phrases leave the
+ * candidate list and the single characters stay in the order they were already
+ * in. It is a client's narrowing of what it wants to see rather than one of the
+ * table's ordering rules, which is why the surviving order has to be the same
+ * order — a filter that re-ranked would be a different feature.
+ *
+ * wubi-jidian86 is the shipped table this is visible in: cangjie5, quick5 and
+ * stroke5 hold nothing but single characters, so the option would pass through
+ * them unnoticed. `ggg` reaches a list with both kinds in it.
+ *
+ * Nothing here names a candidate. The glyph-coverage map the build chose
+ * decides which rows survived compilation (BUILD.md, "Glyph coverage"), so the
+ * list's contents are a property of the configuration; that the filter keeps
+ * exactly the single characters, in order, is not.
+ */
+static void test_single_char_only(pathime_engine_t *engine)
+{
+    client_log_t log;
+    pathime_context_t *ctx = open_context(engine, &log, "wubi-jidian86");
+    char unfiltered[100][32];
+    char filtered[100][32];
+    char restored[100][32];
+    size_t n_unfiltered, n_filtered, n_restored;
+    size_t singles = 0;
+    size_t phrases = 0;
+    size_t i, at;
+    bool value = true;
+
+    if (ctx == NULL) {
+        return;
+    }
+
+    /* No table declares this one, so it starts at the library default. */
+    PT_CHECK_STATUS(pathime_context_get_option_bool(ctx, PATHIME_OPT_TABLE_SINGLE_CHAR_ONLY,
+                                                    &value),
+                    PATHIME_OK);
+    PT_CHECK(!value);
+    PT_CHECK(!pathime_context_option_is_set(ctx, PATHIME_OPT_TABLE_SINGLE_CHAR_ONLY));
+
+    PT_CHECK(press(ctx, 'g'));
+    PT_CHECK(press(ctx, 'g'));
+    PT_CHECK(press(ctx, 'g'));
+
+    n_unfiltered = collect_candidates(ctx, log.last_candidates, unfiltered,
+                                      sizeof(unfiltered) / sizeof(unfiltered[0]));
+    for (i = 0; i < n_unfiltered; i++) {
+        if (scalar_count(unfiltered[i]) == 1) {
+            singles++;
+        } else {
+            phrases++;
+        }
+    }
+
+    /* The premise: this code reaches both kinds. */
+    PT_CHECK(singles > 0);
+    PT_CHECK(phrases > 0);
+
+    /*
+     * Set it mid-composition, which is also the assertion that the option
+     * reaches a list already on screen rather than only the next lookup.
+     */
+    PT_CHECK_STATUS(pathime_context_set_option_bool(ctx, PATHIME_OPT_TABLE_SINGLE_CHAR_ONLY,
+                                                    true),
+                    PATHIME_OK);
+
+    n_filtered = collect_candidates(ctx, log.last_candidates, filtered,
+                                    sizeof(filtered) / sizeof(filtered[0]));
+    PT_CHECK_SIZE(n_filtered, singles);
+    PT_CHECK(n_filtered < n_unfiltered);
+
+    /* Every survivor is one character, and they are the survivors in order. */
+    at = 0;
+    for (i = 0; i < n_unfiltered; i++) {
+        if (scalar_count(unfiltered[i]) != 1) {
+            continue;
+        }
+        if (at < n_filtered) {
+            PT_CHECK(strcmp(filtered[at], unfiltered[i]) == 0);
+        }
+        at++;
+    }
+    for (i = 0; i < n_filtered; i++) {
+        PT_CHECK_SIZE(scalar_count(filtered[i]), 1);
+    }
+
+    /* The preedit is the key run either way: this narrows the list, not the run. */
+    PT_CHECK(strcmp(log.last_preedit, "ggg") == 0);
+    PT_CHECK(log.commit_count == 0);
+
+    /* And it is a filter, not a rebuild: turning it off restores the list. */
+    PT_CHECK_STATUS(pathime_context_set_option_bool(ctx, PATHIME_OPT_TABLE_SINGLE_CHAR_ONLY,
+                                                    false),
+                    PATHIME_OK);
+    n_restored = collect_candidates(ctx, log.last_candidates, restored,
+                                    sizeof(restored) / sizeof(restored[0]));
+    PT_CHECK_SIZE(n_restored, n_unfiltered);
+    for (i = 0; i < n_restored && i < n_unfiltered; i++) {
+        PT_CHECK(strcmp(restored[i], unfiltered[i]) == 0);
+    }
+
+    pathime_context_destroy(ctx);
+}
+
+/*
  * Enumeration: the installed tables reported as the legal values of
  * PATHIME_OPT_TABLE_FILE, so a client can offer a choice without knowing where
  * the resource directory landed. This is what lets the demo build a picker, and
@@ -1299,6 +1602,8 @@ int main(void)
         test_enumeration(engine);
         test_max_candidates(engine);
         test_engine_cap(engine);
+        test_auto_commit(engine);
+        test_single_char_only(engine);
         test_commit(engine);
         test_reset_discards(engine);
         test_frequency_augmented_order(engine);
