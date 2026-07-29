@@ -225,28 +225,6 @@ that engine does not do.
     their own output; filtering theirs means intercepting it at the adapter, or
     it means patching submodules, which is the rule this project does not break.
 
-### Not verified
-
-- **The Noto map has not been regenerated with the current parser.**
-  `read_charset()` parses the font's `cmap` table directly, which is what makes
-  the generator work on Windows. The `windows` map was produced by that parser;
-  `coverage_data_noto.h` still carries the ranges an earlier fontconfig-based
-  reader emitted, left untouched deliberately so that adding the second map
-  changed no Linux data.
-
-  The two readers should agree exactly: fontconfig's charset comes from FreeType
-  reading the same table. Confirming it is one command on a machine with Noto
-  Sans CJK installed, and the expected diff is empty:
-
-  ```bash
-  cmake -S . -B build -DLIBPATHIME_TABLE_REGENERATE_COVERAGE=ON \
-        -DLIBPATHIME_TABLE_COVERAGE=noto
-  cmake --build build --target pathime-table-coverage && git diff --stat
-  ```
-
-  If it is not empty, the difference is the answer to which reader was right, and
-  the provenance note at the top of `coverage_data_noto.h` comes out either way.
-
 ## Queued work
 
 - **The header self-explanation pass — needs a decision before it is done.**
@@ -307,11 +285,8 @@ decision, not a task**, because each fix is a behaviour change.
   `src/options.cc` half-admits this already ("the table engine's wildcards are
   the obvious future exception").
 
-Two smaller things from the same read, both cheap:
+One smaller thing from the same read, cheap:
 
-- `PATHIME_OPT_TABLE_AUTO_COMMIT` has no API-level test at all — only its
-  tier-3 plumbing is pinned, in `tests/core/table_test.cc`. Same for
-  `PATHIME_OPT_TABLE_SINGLE_CHAR_ONLY`.
 - The comment at `src/engines/table/table_backend.cc:196-204` still says "until
   the first context exists, tier 3 therefore contributes nothing." Setting
   `PATHIME_OPT_TABLE_FILE` populates the cache, which is what makes the
@@ -366,6 +341,16 @@ only described:
   tools at build time.
 - **No CMake package config is installed**, so a consumer names the include
   directory and the library itself.
+
+## Not verified
+
+- **The sanitizers have only been run on Linux, and only over the suites.**
+  `docs/testing.md` has the configuration and what a clean run looks like.
+  MSVC's `/fsanitize=address` has no UBSan half and has not been tried, so a
+  Windows-only memory error would not have been caught — nor would one on a
+  path the suites do not walk, which is most of the demo.
+- **The table engine has only been exercised on Linux** beyond the suites,
+  which do pass on Windows under both presets.
 
 ## Deferred, deliberately
 

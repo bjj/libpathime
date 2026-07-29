@@ -23,6 +23,39 @@ passed or failed. Deciding it in the source rather than in CMake is what keeps
 the loss visible: a configuration that drops a backend produces skips in the
 ctest output, not a quietly shorter list.
 
+## Running under AddressSanitizer and UBSan
+
+No preset carries the sanitizers; they go on the compiler flags, and the whole
+tree — the library, the four adapters, the three vendored libraries and every
+suite — is built with them:
+
+```bash
+cmake -S . -B build/asan -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+      -DLIBPATHIME_BUILD_TESTS=ON \
+      -DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -g" \
+      -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -g" \
+      -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined" \
+      -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=address,undefined"
+ASAN_OPTIONS=detect_leaks=0 cmake --build build/asan
+ctest --test-dir build/asan --output-on-failure
+```
+
+**The build needs `detect_leaks=0`; the tests do not.** anthy's dictionary is
+generated during the build by host tools compiled from the same sources, and
+those tools exit without freeing — a build-time program has no reason to. Under
+LeakSanitizer they exit non-zero and the build stops.
+
+A `ctest -j` run whose pyzy user database does not exist yet can log
+`database is locked` from the tests that share one: several processes create it
+at the same moment. It is contention between test programs rather than anything
+a client would see, and it does not recur once the file is there.
+
+One suite is not leak-clean: **`anthy.vendor.main`** is upstream's own test
+program, which converts several hundred lines and releases neither the contexts
+it creates nor the library. It is vendored code testing vendored code, left as
+upstream wrote it. Everything else passes with leak detection on, and nothing
+reports a memory error or undefined behaviour.
+
 ## The four kinds of test
 
 ### `tests/api/` — `api.<name>`
