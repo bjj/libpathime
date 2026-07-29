@@ -7,14 +7,8 @@
  * LIBPATHIME_TABLE_COVERAGE; BUILD.md, "Glyph coverage", is the guidance,
  * and the generator's docstring carries the measurements behind it.
  *
- * Source font: Noto Sans CJK JP 131334
+ * Source font: Noto Sans CJK JP 131334 (NotoSansCJK-Regular.ttc)
  * Code points: 44810 in 2032 ranges
- *
- * The ranges below are carried over unchanged from the fontconfig-based
- * generator this file predates; only the surrounding declarations were
- * rewritten when the second map arrived. Regenerating with the current
- * cmap parser should reproduce them exactly, and has not yet been run
- * against the same Noto build to confirm it.
  */
 
 #ifndef LIBPATHIME_SRC_ENGINES_TABLE_COVERAGE_DATA_NOTO_H
