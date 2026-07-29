@@ -150,6 +150,64 @@ void test_malformed_rows_are_skipped()
     PT_CHECK(source.skipped_rows == 3);
 }
 
+/*
+ * Three shapes the format allows that the ordinary tables do not exercise. Each
+ * is a tolerance rather than a feature: the parser accepts them because real
+ * tables somewhere do, and a stricter reading would refuse data ibus-table
+ * loads.
+ */
+void test_parser_edge_forms()
+{
+    /*
+     * `KEY == VALUE` alongside `KEY = VALUE` (§3.1). The second `=` belongs to
+     * the separator, not to the value, so a table written either way declares
+     * the same thing.
+     */
+    {
+        const TableSource source = parse(
+            "BEGIN_DEFINITION\nNAME == Doubled\nMAX_KEY_LENGTH = 4\nEND_DEFINITION\n"
+            "BEGIN_TABLE\na\tX\t1\nEND_TABLE\n");
+        PT_CHECK(source.properties.name == "Doubled");
+    }
+
+    /*
+     * An empty frequency column. Distinct from a non-numeric one, which the
+     * malformed-row test covers: this reaches a different rejection, because
+     * there is no text to convert rather than text that will not convert.
+     *
+     * It needs the optional fourth column to exist at all — without something
+     * after it, the trailing tab is trimmed off the line and the row is short
+     * two columns instead, which is the case above.
+     */
+    {
+        const TableSource source = parse(
+            "BEGIN_DEFINITION\nNAME = N\nEND_DEFINITION\n"
+            "BEGIN_TABLE\n"
+            "a\tX\t1\n"
+            "b\tY\t\tfourth\n"
+            "END_TABLE\n");
+        PT_CHECK(source.phrases.size() == 1);
+        PT_CHECK(source.skipped_rows == 1);
+    }
+
+    /*
+     * A char-prompts line carrying only a key and no prompt. Skipped rather
+     * than stored as an empty prompt, which would put a blank hint on a key.
+     */
+    {
+        const TableSource source = parse(
+            "BEGIN_DEFINITION\nNAME = P\n"
+            "BEGIN_CHAR_PROMPTS_DEFINITION\n"
+            "a \xE6\x97\xA5\n"
+            "lonely\n"
+            "END_CHAR_PROMPTS_DEFINITION\n"
+            "END_DEFINITION\n"
+            "BEGIN_TABLE\na\tX\t1\nEND_TABLE\n");
+        PT_CHECK(source.properties.char_prompts.size() == 1);
+        PT_CHECK(source.properties.char_prompts.count(U'l') == 0);
+    }
+}
+
 void test_char_prompts()
 {
     const TableSource source = parse(
@@ -548,6 +606,7 @@ int main(void)
     test_comments_and_scim_header();
     test_nosymbol_and_extra_column();
     test_malformed_rows_are_skipped();
+    test_parser_edge_forms();
     test_char_prompts();
     test_goucima_derivation();
     test_rules();

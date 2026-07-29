@@ -41,6 +41,12 @@ endfunction()
 
 libpathime_add_core_test(utf8 SOURCES "${PROJECT_SOURCE_DIR}/src/utf8.cc")
 
+# core.keys needs keys.cc and nothing else — backend.h, which carries KeyEvent,
+# is all inline. The short source list is the same assertion it is for
+# core.table below: the key layer is engine-agnostic, and a link error here
+# would be the first sign that it had stopped being so.
+libpathime_add_core_test(keys SOURCES "${PROJECT_SOURCE_DIR}/src/keys.cc")
+
 # core.options builds pathime_engine and pathime_context handles by hand — the
 # only way to reach the two-level option store, the per-engine descriptors and
 # the resolution rules without going through pathime_engine_create(), which can
@@ -133,4 +139,24 @@ if(LIBPATHIME_WITH_TABLE)
   # default. test_coverage() is written to hold for either.
   libpathime_table_coverage_definitions(_coverage_defines)
   target_compile_definitions(core_table_test PRIVATE ${_coverage_defines})
+
+  # core.table_compile is the half core.table deliberately excludes: it writes
+  # databases and reads them back. Same sources minus the coverage map, which
+  # only the compile tool applies, plus a directory of its own to write into.
+  #
+  # The directory is made at configure time rather than by the test, so that a
+  # failure to create it is a build error rather than a puzzling run-time skip.
+  # Its contents are disposable: every case removes what it is about to write.
+  libpathime_add_core_test(table_compile SOURCES
+    "${PROJECT_SOURCE_DIR}/src/engines/table/table_source.cc"
+    "${PROJECT_SOURCE_DIR}/src/engines/table/table_properties.cc"
+    "${PROJECT_SOURCE_DIR}/src/engines/table/table_db.cc"
+    "${PROJECT_SOURCE_DIR}/src/paths.cc"
+    "${PROJECT_SOURCE_DIR}/src/utf8.cc")
+  target_link_libraries(core_table_compile_test PRIVATE SQLite::SQLite3)
+
+  set(_table_compile_dir "${CMAKE_CURRENT_BINARY_DIR}/tmp/core_table_compile")
+  file(MAKE_DIRECTORY "${_table_compile_dir}")
+  target_compile_definitions(core_table_compile_test PRIVATE
+    "PATHIME_TABLE_COMPILE_TEST_DIR=\"${_table_compile_dir}\"")
 endif()

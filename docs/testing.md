@@ -130,8 +130,30 @@ where a backend gets driven directly.
 
 Compiles the internal sources under test directly into each executable, because
 internal helpers carry no `PATHIME_API` and a shared build does not export them.
-C++17, covering `utf8.*`, `composition.*`, the options machinery, and the table
-engine's data layer at seams the public API cannot reach.
+C++17, covering `utf8.*`, `composition.*`, `keys.*`, the options machinery, and
+the table engine's data layer at seams the public API cannot reach.
+
+`core.keys` is the clearest case of that reach. `key_event_from_public()`'s two
+rejections are statuses a client provokes by getting the struct wrong, which the
+API tests have no reason to do, and the keysym decoding is otherwise observable
+only through an engine that has already folded the answer into a composition.
+Called directly, each rule of the X11 mapping the public header commits to — the
+Latin-1 identity below U+0100, the `0x01000000 | scalar` form above it, and the
+surrogate and out-of-range rejections inside that form — is one assertion.
+
+`core.table` and `core.table_compile` split the table engine's data layer along
+one line: `core.table` opens nothing, and `core.table_compile` writes databases
+and reads them back. Keeping them apart is what lets `core.table` stay a
+structural assertion about a parser that knows nothing of SQLite, while the
+compiler — which is nothing but SQLite — is still covered. The round trip is the
+point of the second: the compiled format is an interoperability contract, so a
+matched pair of bugs on both sides of our own writer and reader would be
+invisible to a test that went only one way.
+
+`core.table_compile` also carries the paths a client can name through
+`PATHIME_OPT_TABLE_FILE` but is unlikely to think about — a directory whose name
+holds `#`, `%` or an apostrophe, each of which is syntax to one of the two
+layers of quoting `TableDatabase::open()` builds its `ATTACH` out of.
 
 `core.table` is also a structural assertion, not only a functional one. Its
 source list is six files from `src/engines/table/` plus `paths.cc` and `utf8.cc` —

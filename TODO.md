@@ -22,8 +22,9 @@ Status in one paragraph: the build (Linux and Windows), the core (all 44
 public entry points), **all four** adapters — hangul, anthy, pyzy and the
 table engine — options and negotiation including tier 3, the terminal demo
 client, the preedit rule, and the eager candidate strip are built and tested:
-34 suites, all passing on Linux with every backend enabled
-(`docs/testing.md`), and 33 on Windows under both presets. The table engine
+36 suites, all passing on Linux with every backend enabled
+(`docs/testing.md`), and 33 on Windows under both presets — the two newest,
+`core.keys` and `core.table_compile`, have not been run there yet. The table engine
 types real Chinese against tables compiled out of `ibus-table-chinese`, trimmed
 at build time to one of two checked-in glyph-coverage maps or to none.
 
@@ -299,10 +300,10 @@ One smaller thing from the same read, cheap:
 
 ## Test coverage: measured gaps
 
-First measurement of what the suites actually execute, 2026-07-29, on Linux with
-every backend enabled (`LIBPATHIME_TEST_COVERAGE=ON`, then
-`pathime-test-coverage`; BUILD.md, "Test coverage"). **82.9% of lines in `src/`,
-95.7% of functions, 56.8% of branches.**
+Measured on Linux with every backend enabled (`LIBPATHIME_TEST_COVERAGE=ON`,
+then `pathime-test-coverage`; BUILD.md, "Test coverage"). **88.3% of lines in
+`src/`, 97.6% of functions, 62.4% of branches**, as of 2026-07-29 — up from
+82.9% / 95.7% / 56.8% at the first measurement the same day.
 
 Every item below is a line the suites never reach, with the file and line
 numbers the report gave. They are listed in the order they are worth doing, and
@@ -311,52 +312,34 @@ also the least interesting one.
 
 Re-measure before working an item. These are line numbers, and they rot.
 
-### 1. The table compiler is untested end to end
+### 1. The table compiler: the SQLite failure branches are what is left
 
-The two worst files in the tree, and the only gap that is a whole component
-rather than a set of cases: `table_db.cc` at 51%, `table_source.cc` at 73%.
+`core.table_compile` now covers the compiler end to end — compile, reopen, and
+assert on what came back — which took `table_db.cc` from 51% to 86% and
+`table_source.cc` from 73% to 100%. It found one real bug on the way: `quote()`
+tripled an apostrophe instead of doubling it, so any table or user database
+under a path like `Ben's tables` failed to open with a SQL syntax error.
 
-- **`compile_table()` (`table_db.cc:269-442`) is entirely unexecuted by tests** —
-  the whole SQLite writer, every statement it prepares, every error path.
-- **So is most of the source reader**: `parse_table_source_file()` (`:258-268`),
-  `derive_single_wildcard()` (`:295-318`), and every diagnostic
-  `parse_table_source()` can produce — `line_error()` itself (`:93-98`) has
-  never run, so no message it formats has ever been seen by a test.
-- The `GOUCIMA` section parser (`:218-232`) is unreached by tests, though the
-  build runs it — `wubi-jidian86` compiles 30,166 goucima every time. That is
-  the pattern for this whole item in miniature: exercised daily, asserted on
-  never.
+What remains in `table_db.cc` is almost entirely **SQLite failure branches** —
+every `sqlite3_prepare_v2` that returns non-OK (`:381-384`, `:394-398`,
+`:411-414`, `:423-427`), the transaction rollback (`:437`, `:442`), and the
+matching arms in `open()` and `lookup()` (`:474-482`, `:599`, `:611`, `:660`,
+`:697`). Reaching them needs a failing SQLite, which means fault injection —
+so this is the same decision as item 5 below, not a test someone can just sit
+down and write.
 
-What makes this the top item is not the percentage but *why* it was invisible:
-these sources are compiled into both the library and `pathime-table-compile`,
-and the tool runs during every build to produce the shipped tables. Counting
-those runs — which is what happens if the counters are not cleared first — puts
-`table_db.cc` at 76% and hides the whole thing. "The build succeeded" is the
-only assertion standing behind the compiler today, and it cannot fail on a
-wrong-but-parseable table.
+Two smaller things there *are* reachable:
 
-A fixture-driven suite under `tests/core/` is the shape: hand-written table
-sources, compile them, assert on what lands in the database and on the exact
-diagnostic for each malformed input.
+- `uri_for()`'s `?` and `\` escapes and its Windows drive-letter branch
+  (`:64`, `:69-71`, `:78-80`). The `#`, `%` and apostrophe cases are covered;
+  these three are not, because `?` and `\` are not legal in Windows filenames
+  and the case would have to be skipped on the platform the backslash branch
+  exists for. Worth doing as a direct unit test if `uri_for()` is ever lifted
+  out of its anonymous namespace.
+- `to_text()`'s NULL-column path (`:119`) and `table_has_rows()`'s
+  false answer (`:137`).
 
-### 2. `keys.cc` — the public key-event decoder
-
-74%, and the uncovered part is the half a client can reach directly.
-
-- **`key_event_from_public()`'s rejections have never fired**: a null event or
-  unknown `struct_size` (`:30` in the helper, `:42` at the return) and
-  `keysym == 0` (`:52`). The second is described in place as catching "the
-  commonest client mistake"; no test makes it.
-- **The X11 Unicode-keysym path is entirely unexecuted** (`:84-92`) — the
-  `0x01000000 | scalar` encoding, which is how every character above U+00FF
-  arrives, together with its rejection of surrogates and out-of-range values.
-  The suites type ASCII, so nothing has ever sent one.
-- `DEL` as a non-printable (`:78`), and the caps-lock inversion (`:146-149`).
-
-Cheap to fix and disproportionately valuable: this is unit-testable in
-`tests/core/` with no backend at all.
-
-### 3. Nothing exercises a backend's default vtable entries
+### 2. Nothing exercises a backend's default vtable entries
 
 `backend.h` reports 52% because all four backends override every optional
 method, so the base implementations are dead in this build:
@@ -371,7 +354,7 @@ is a header promise with no test behind it.
 A stub `ContextBackend` in `tests/core/` that overrides nothing covers both
 sides at once, and is the only way to check what a fifth backend would inherit.
 
-### 4. Option matrices that are set but never swept
+### 3. Option matrices that are set but never swept
 
 Each of these is an option a client can set, whose effect is unmeasured:
 
@@ -389,7 +372,7 @@ Each of these is an option a client can set, whose effect is unmeasured:
   knowingly differs from ibus-anthy. The divergence is argued for in a comment
   and pinned by nothing.
 
-### 5. The table engine's edit paths
+### 4. The table engine's edit paths
 
 `table_backend.cc` at 79%, concentrated in three places a user reaches by
 correcting themselves rather than by typing forward:
@@ -401,7 +384,7 @@ correcting themselves rather than by typing forward:
   including the one-level-deep recursion the comment argues is bounded.
 - **`PATHIME_OPT_TABLE_INVALID_INPUT = COMMIT_CANDIDATE`** (`:877-908`).
 
-### 6. Allocation-failure rollback — needs a decision, not just a test
+### 5. Allocation-failure rollback — needs a decision, not just a test
 
 `context.cc` keeps three recovery paths that no test can currently reach: the
 `std::bad_alloc` unwind during context registration (`:198-201`), the
@@ -414,7 +397,7 @@ addition to the library for testing's sake. **Either add one or record these as
 deliberately unreachable** — the current state, where they look like ordinary
 untested code, is the one option that teaches a future reader nothing.
 
-### 7. `module_path.cc` — mostly not a test gap
+### 6. `module_path.cc` — mostly not a test gap
 
 45%, the lowest figure in the tree, and listed last because the number is
 misleading. Most of it is the `/proc/self/exe` fallback (`:122-139`), which only
@@ -492,6 +475,19 @@ only described:
   path the suites do not walk, which is most of the demo.
 - **The table engine has only been exercised on Linux** beyond the suites,
   which do pass on Windows under both presets.
+- **`api.lifecycle` has failed intermittently, twice, and is not reproducible on
+  demand.** Both failures were the first `ctest` run against a freshly built
+  tree; it passed in isolation immediately afterwards and on every re-run, and a
+  deliberate attempt to reproduce it — fresh build directory, the suite run once
+  — did not. Seen twice in roughly ten full runs, on Linux, before and after the
+  coverage work, so it is neither new nor caused by the instrumentation.
+
+  The test creates a relative directory, initializes against it, shuts down and
+  removes it (`tests/api/lifecycle_test.c:204-212`), which makes leftover state
+  from a previous run the obvious suspect — but that reading predicts a failure
+  on the *second* run, not the first, so it does not fit. Left recorded rather
+  than chased: an intermittent failure nobody has written down is one that gets
+  rediscovered.
 
 ## Deferred, deliberately
 
