@@ -27,6 +27,47 @@ These are settled and the rest of the document assumes them:
   - a **demo package**, for someone who just wants to try the thing: the
     `pathime-demo` executable, the libraries it needs, `pathime-data/`. Stands
     alone, downloadable, runnable.
+- **And only two — no separate runtime package.** The runtime/devel split is
+  *distribution* practice: it exists so a dependency resolver can install
+  `libfoo` under an application without dragging headers along. Nothing plays
+  that role on a GitHub release page, and nothing installs `libpathime.so`
+  system-wide — the whole layout is built around an application *bundling* the
+  library beside itself. A runtime-only artifact therefore has no consumer,
+  and the library package carries the runtime libraries the way every
+  developer-facing C SDK release does. The component model in 4.5 keeps the
+  split cheap to add later if a consumer materialises.
+- **One archive per platform–architecture pair; no arch subdirectories.** The
+  generated `pathime-targets.cmake` describes exactly one triplet, so a
+  combined SDK with `lib/x64`-style subdirectories (SDL's devel zips are the
+  precedent) needs a hand-written dispatching config on top — a second,
+  unverified statement of the install layout, free to drift from the generated
+  truth. Folding would deduplicate the ~25 MB arch-independent
+  `pathime-data/`, but at the price of every consumer downloading every
+  architecture; per-arch archives spend the bytes on our side of the wire, not
+  theirs. macOS universal binaries, the platform-native fold, are blocked
+  anyway: Homebrew's glib is single-arch.
+- **Windows artifacts ship their external runtime DLLs; POSIX artifacts ship
+  no external libraries.** On Linux and macOS, glib, sqlite3 and libuuid come
+  from the system or Homebrew, are on the loader's path, and shipping our own
+  copies would be a collision hazard with no benefit. On Windows there is no
+  system glib — the only ABI-compatible `glib-2.0-0.dll` in existence is the
+  one this build's vcpkg produced — so both packages carry the five-DLL
+  closure 4.3a measured. This is a fact about Windows and pyzy, not about
+  vcpkg; 4.3c has the rule and the alternatives considered.
+- **The source tarball is a release artifact, not an option.** Both binary
+  packages are GPL-3 as a whole (6.4), and a complete source tarball on the
+  same release page is the zero-argument corresponding-source story — where
+  "clone recursively, two submodules from a personal fork" leans on GPLv3
+  §6d's "clear directions to a different server" and rots if a fork ever
+  moves. GitHub's auto-generated tarball omits submodules and cannot serve.
+  6.5 has the mechanics.
+- **One `THIRD-PARTY.md`, written artifact-relative, plus shipped licence
+  texts.** The summary document is restructured to say *where each component
+  lands* rather than making tense-dependent claims ("not shipped in an
+  install"), so the identical file drops into the repository, both binary
+  packages and the source tarball. What is generated per artifact is the set
+  of licence *texts*, which MIT and the LGPL/GPLs all require to accompany a
+  distribution and which nothing installs today. 4.8 and 6.4 split the work.
 - **Nothing ships the tests.** Not the library package, not the demo package.
   This is already true — `tests/` installs nothing — so it is an invariant to
   assert in CI, not work to do. Same for `pathime-table-compile`, which is a
@@ -436,19 +477,81 @@ Item 4 of the macOS list is done with them.
   the loader's path. It surfaces now because it is exactly what a Windows library
   artifact would ship. Copying those five files in by hand makes the install pass
   every consumer check, so the gap is the packaging rule and nothing more.
+  **4.3c is that rule.**
 
   It does not arise for a static install in the same way: there the external
   libraries are the consumer's own declared `Requires.private` dependencies and
   theirs to deploy — and per "Decisions already taken", no static artifact ships
   regardless.
 
+- **4.3b — Make `pathime.pc` relocatable, and prove it with a moved prefix.**
+  `cmake/pathime.pc.in` hardcodes `prefix=@CMAKE_INSTALL_PREFIX@`, deliberately
+  and with a comment citing `BUILD.md`. That stance is right for a built tree
+  and wrong for a release archive, which by definition is extracted to a prefix
+  that is not the CI runner's — as shipped, `pkg-config --cflags pathime` from
+  a downloaded SDK would emit paths onto a destroyed VM. The CMake half already
+  has this right: `configure_package_config_file` computes the prefix from the
+  config file's own location, `PATHIME_DATA_DIR` included. Either derive the
+  `.pc`'s `prefix` from `${pcfiledir}` (the standard relocatable form) or strip
+  the `.pc` from release archives and declare them `find_package`-only; the
+  former is the recommendation, and `BUILD.md`'s "cannot relocate the result"
+  paragraph changes with it. Then extend 4.3's consumer job to **consume from
+  a prefix that was moved after install** — installing and consuming at the
+  same prefix, which is all 4.3 does otherwise, structurally cannot catch this
+  class of bug, for either half.
+
+- **4.3c — The Windows runtime-DLL install rule, resolving 4.3a.** On `WIN32`
+  only: `install(TARGETS pathime RUNTIME_DEPENDENCY_SET ...)` plus an
+  `install(RUNTIME_DEPENDENCY_SET ...)` whose filters state the actual policy —
+  include what resolves from the vcpkg installed tree, exclude the OS
+  (`PRE_EXCLUDE_REGEXES` for `api-ms-`/`ext-ms-`, `POST_EXCLUDE_REGEXES` for
+  system32). Not a hand-copied list of the five current names: that list goes
+  stale silently on a vcpkg baseline bump — pcre2 is exactly the kind of
+  transitive dependency that changes — where the dependency-set form encodes
+  the rule and fails loudly.
+
+  On whether the DLLs are vcpkg's fault, since the question comes up: no. They
+  follow from Windows having no system-wide home for third-party libraries and
+  from pyzy requiring glib; no dependency source changes either fact.
+  Considered and rejected:
+
+  - **MSYS2/MinGW glib** — a different toolchain family. The ucrt64 flavour
+    makes CRT mixing technically workable for a C library, but it adds the GCC
+    runtime DLLs to the closure, comes from a rolling repository that cannot be
+    pinned in a manifest, and puts a second package ecosystem in CI. More DLLs
+    and less reproducibility, not fewer.
+  - **gvsbuild** — the MSVC-native GTK-stack builder. Same output (glib DLLs to
+    ship), another tool to pin, no `find_package` integration; it earns its
+    keep when the whole GTK stack is needed, which this build does not.
+  - **Conan** — vcpkg's peer, with no advantage when vcpkg is already
+    load-bearing for the Windows CI.
+  - **Static glib** (`x64-windows-static-md`) — the one option that removes
+    files: glib, iconv, intl and pcre2 fold into `pyzy-1.0.dll`, which is fine
+    for licence purposes (LGPL code inside an LGPL DLL that remains a separate
+    replaceable file). Costs: the triplet has never been configured (Phase 1
+    notes no packages exist for it), glib's static Windows build is its
+    historically fragile corner, and Windows would diverge in shape from every
+    other platform. Worth revisiting only if the DLL count itself becomes a
+    problem; it is not a v1 blocker.
+
+  What vcpkg keeps: MSVC-ABI binaries matching the toolchain, manifest
+  pinning, binary caching, and an applocal step that is what surfaced the
+  exact five-DLL closure in the first place. Shipping the DLLs beside the
+  binaries is ordinary Windows practice — every glib-using application on
+  Windows does exactly this. One consequence to carry forward: the five DLLs
+  become **shipped components**, so they need `THIRD-PARTY.md` rows and
+  licence texts (4.8, 6.4) — glib, libiconv and libintl are LGPL, pcre2 is
+  BSD-3-Clause; confirm the exact versions from vcpkg's per-port copyright
+  files when writing the entries.
+
 ## The two packages
 
-The library package needs almost no work, because the install rules already
-describe it. `tests/`, `tools/` and `demo/` contain no `install()` at all, so
-`cmake --install` today produces exactly the developer package and nothing else:
-headers, libraries, `pathime-data/`. The demo package is the one that needs
-building, and it needs a functional change as well as a packaging one.
+The library package needs little beyond 4.3b and 4.3c, because the install
+rules already describe it. `tests/`, `tools/` and `demo/` contain no
+`install()` at all, so `cmake --install` today produces exactly the developer
+package and nothing else: headers, libraries, `pathime-data/`. The demo package
+is the one that needs building, and it needs a functional change as well as a
+packaging one.
 
 - **4.4 — Give the demo a real user-data directory.** `demo/CMakeLists.txt:159`
   bakes `${CMAKE_CURRENT_BINARY_DIR}/data` in as `PATHIME_DEMO_DATA_DIR`, and
@@ -461,13 +564,31 @@ building, and it needs a functional change as well as a packaging one.
   `~/Library/Application Support`, `%LOCALAPPDATA%`), with the build-tree path
   kept for an uninstalled build and `--data-dir` still overriding both. **This is
   a prerequisite for shipping the demo, not a nicety** — without it the first
-  thing a new user meets is a write failure.
-- **4.5 — Add component-scoped install rules.** Tag the existing rules
-  `COMPONENT library` and add demo rules under `COMPONENT demo`. Then
-  `CPACK_ARCHIVE_COMPONENT_INSTALL ON` with `CPACK_COMPONENTS_GROUPING IGNORE`
-  makes CPack emit one archive per component, which is precisely the split
-  wanted. `pathime-data/` belongs to both, since neither package is usable
-  without it.
+  thing a new user meets is a write failure. The shipped demo must also
+  *create* the directory on first run — `%LOCALAPPDATA%\pathime` does not
+  exist until something makes it.
+- **4.5 — Add component-scoped install rules, and know the CPack wrinkle
+  before writing them.** Under `CPACK_COMPONENTS_GROUPING IGNORE` a component
+  lands in exactly one archive, and a component can belong to only one group —
+  so "`pathime-data/` belongs to both packages" cannot be expressed as one
+  component per archive. Four components, and two `cpack` invocations that
+  select them:
+
+  - `runtime` — `libpathime`, the vendored libraries, and on Windows the
+    4.3c DLL closure. The `.so` namelink stays out via
+    `NAMELINK_COMPONENT devel` on the `install(TARGETS pathime LIBRARY ...)`
+    rule, so a demo archive carries the SONAME chain but no dev symlink.
+  - `devel` — headers, the namelink, `lib/cmake/pathime/`, `pathime.pc`.
+  - `data` — `pathime-data/`.
+  - `demo` — `pathime-demo` and its licence additions (4.8).
+
+  Then the release job runs `cpack` twice with
+  `CPACK_ARCHIVE_COMPONENT_INSTALL ON` and grouping `ALL_COMPONENTS_IN_ONE`:
+  once with `-D CPACK_COMPONENTS_ALL="runtime;devel;data"` for the library
+  package and once with `-D CPACK_COMPONENTS_ALL="runtime;demo;data"` for the
+  demo package. The demo executable also needs what nothing has needed before —
+  an install RPATH of its own, `$ORIGIN/../lib` plus `$ORIGIN/../lib/pathime`,
+  which is one call to the existing `libpathime_set_install_rpath()`.
 - **4.6 — Build cpp-terminal static in the demo package.** It is already forced
   static on Windows for a linkage reason `demo/CMakeLists.txt` documents at
   length. Elsewhere it follows `BUILD_SHARED_LIBS` and would make the demo
@@ -480,6 +601,16 @@ building, and it needs a functional change as well as a packaging one.
   install tree. This is true today and free to keep true; it is the kind of thing
   that silently stops being true the first time someone adds an `install()` to
   get a binary somewhere convenient.
+- **4.8 — Install the licence texts.** MIT and the LGPL/GPLs all require the
+  licence text to accompany a distribution, and today an install contains
+  none — the texts live in submodule `COPYING` files that a binary archive
+  does not include. Install `LICENSE`, `THIRD-PARTY.md` and each shipped
+  component's licence text into `share/doc/pathime/licenses/`, sourced from
+  the submodules at build time and component-scoped so the set stays honest by
+  construction: cpp-terminal's MIT text travels with `COMPONENT demo`, the
+  glib/iconv/intl/pcre2 texts (from vcpkg's per-port `copyright` files) only
+  on Windows with the DLLs they cover, and a `LIBPATHIME_WITH_ANTHY=OFF` build
+  drops the GPL-2 text along with the dictionary.
 
 ---
 
@@ -550,20 +681,132 @@ rule in `CLAUDE.md` that the library is unreleased and carries no dated
 changelog: releasing is precisely what ends that, and a `CHANGELOG.md` becomes
 correct rather than forbidden. Decide that deliberately.
 
-**6.2 — `release.yml` on `v*` tags.** Build both packages for Linux, macOS and
-Windows, attach them, generate notes. Consider
+**6.2 — `release.yml` on `v*` tags.** Build both packages for every supported
+platform–architecture pair, attach them, generate notes. Consider
 `actions/attest-build-provenance`, which is nearly free on GitHub and
 increasingly expected of a project that ships binaries.
 
-**6.3 — What a release contains.** Six binary artifacts, two per platform:
+The supported set for a first release, each one matrix line on a free hosted
+runner: **linux-x86_64**, **linux-aarch64** (`ubuntu-24.04-arm` — free on
+public repositories), **windows-x64**, **macos-arm64**. Windows arm64
+(`windows-11-arm`) and macOS Intel wait for a consumer to ask.
 
-| Artifact | Holds | For |
-|---|---|---|
-| `libpathime-<ver>-<platform>` | headers, libraries, CMake package config, `pathime-data/` | embedding the library |
-| `pathime-demo-<ver>-<platform>` | `pathime-demo`, the libraries it loads, `pathime-data/` | trying it out |
+Two Linux-only decisions to take deliberately rather than inherit:
 
-Neither holds the tests or `pathime-table-compile`. The demo package does not
-hold headers or the CMake config; the library package does not hold the demo.
+- **The glibc baseline.** A binary built on `ubuntu-latest` links the runner's
+  glibc and libstdc++ (≥ 2.39 on 24.04) and will not run on anything older.
+  Build the release artifacts on the oldest supported runner image — or a
+  manylinux-style container if that proves too new — and **state the floor in
+  the release notes**. Silence here is how "doesn't run on Debian stable"
+  becomes the first issue filed.
+- The external libraries (glib, sqlite3, libuuid) are runtime dependencies the
+  release notes must name, since the archives deliberately do not carry them —
+  one apt/dnf line, the same one `BUILD.md` already prints.
+
+**6.3 — What a release contains.** Two binary artifacts per
+platform–architecture pair, named
+`libpathime-<ver>-<os>-<arch>.tar.gz` / `.zip` and
+`pathime-demo-<ver>-<os>-<arch>.tar.gz` / `.zip`, plus the 6.5 source tarball.
+Neither binary artifact holds the tests or `pathime-table-compile`; the demo
+package holds no headers or CMake config; the library package holds no demo.
+Spelled out, so the release job's output can be checked against something —
+these trees follow from the existing install rules plus 4.3c, 4.5 and 4.8:
+
+**The library package, Linux** (macOS is identical in shape, with
+`libpathime.0.dylib`, an `@loader_path` RPATH, and Homebrew supplying glib):
+
+```
+libpathime-0.1.0-linux-x86_64/
+├── include/pathime/
+│   ├── pathime.h
+│   └── config.h                       # generated; records this build's backends
+├── lib/
+│   ├── libpathime.so → libpathime.so.0          # namelink — component devel
+│   ├── libpathime.so.0 → libpathime.so.0.1.0    # SONAME
+│   ├── libpathime.so.0.1.0
+│   ├── pathime/                       # private; reached only via $ORIGIN/pathime
+│   │   ├── libhangul.so.1            (chains to .so.1.1.0)
+│   │   ├── libanthy-unicode.so.0     (+ libanthydic-unicode.so.0,
+│   │   │                                libanthyinput-unicode.so.0)
+│   │   └── libpyzy-1.0.so.1
+│   ├── pathime-data/
+│   │   ├── anthy/anthy.dic            # ~20 MB, GPL-2
+│   │   ├── pyzy/main.db               # LGPL-2.1
+│   │   ├── pyzy/phrases.txt
+│   │   └── table/{cangjie5,quick5,stroke5,wubi-jidian86,zhuyin}.db  # GPL-3
+│   ├── cmake/pathime/
+│   │   ├── pathime-config.cmake
+│   │   ├── pathime-config-version.cmake
+│   │   ├── pathime-targets.cmake
+│   │   └── pathime-targets-release.cmake
+│   └── pkgconfig/pathime.pc           # relocatable per 4.3b
+└── share/doc/pathime/
+    ├── LICENSE                        # libpathime's MIT
+    ├── THIRD-PARTY.md
+    └── licenses/                      # per 4.8: LGPL-2.1, GPL-2, GPL-3, …
+```
+
+**The library package, Windows.** Same headers, data, CMake config and docs;
+the differences are where binaries live (no RPATH, so everything a DLL loads
+sits beside it in `bin/`) and the 4.3c closure:
+
+```
+libpathime-0.1.0-windows-x64/
+├── include/pathime/{pathime.h, config.h}
+├── bin/
+│   ├── pathime.dll
+│   ├── hangul.dll                     # vendored; one anthy DLL on Windows,
+│   ├── anthy-unicode.dll              #   not the three .so of the ELF build
+│   ├── pyzy-1.0.dll
+│   ├── sqlite3.dll                    # ── the vcpkg runtime closure (4.3c);
+│   ├── glib-2.0-0.dll                 #    exact set is whatever the rule
+│   ├── iconv-2.dll                    #    resolves, these five today
+│   ├── intl-8.dll
+│   ├── pcre2-8.dll
+│   └── pathime-data/…                 # same contents as Linux
+├── lib/
+│   ├── pathime.lib                    # the one import library a consumer links
+│   ├── pathime/{hangul.lib, anthy-unicode.lib, pyzy-1.0.lib}   # private
+│   ├── cmake/pathime/…
+│   └── pkgconfig/pathime.pc
+└── share/doc/pathime/…                # + glib/iconv/intl/pcre2 licence texts
+```
+
+**The demo package, Linux** (macOS again identical in shape). The `runtime`
+and `data` components verbatim, `devel` absent — note no `.so` namelink, no
+headers, no CMake config:
+
+```
+pathime-demo-0.1.0-linux-x86_64/
+├── bin/
+│   └── pathime-demo                   # RPATH $ORIGIN/../lib:$ORIGIN/../lib/pathime;
+│                                      #   cpp-terminal statically inside (4.6)
+├── lib/
+│   ├── libpathime.so.0 → libpathime.so.0.1.0
+│   ├── libpathime.so.0.1.0
+│   ├── pathime/…                      # the same five vendored libraries
+│   └── pathime-data/…
+└── share/doc/pathime/…                # + cpp-terminal's MIT text
+```
+
+**The demo package, Windows.** Everything in `bin/`, because the directory of
+the loading module is the Windows search rule; a user unzips and runs
+`bin\pathime-demo.exe`:
+
+```
+pathime-demo-0.1.0-windows-x64/
+├── bin/
+│   ├── pathime-demo.exe
+│   ├── pathime.dll, hangul.dll, anthy-unicode.dll, pyzy-1.0.dll
+│   ├── sqlite3.dll, glib-2.0-0.dll, iconv-2.dll, intl-8.dll, pcre2-8.dll
+│   └── pathime-data/…
+└── share/doc/pathime/…
+```
+
+**The source tarball** (6.5): the repository tree at the tag with every
+submodule populated at its pinned commit — `engines/{libhangul, anthy-unicode,
+pyzy, ibus-table-chinese}` and `demo/cpp-terminal` present in full — and no
+`.git`, no `refs/`, no build directories.
 
 **6.4 — Licensing, which the artifacts change.** The decision is that everything
 ships all data, and that has two consequences to state on the release page
@@ -585,15 +828,26 @@ per-component terms and the `LIBPATHIME_WITH_ANTHY=OFF` /
 `LIBPATHIME_WITH_TABLE=OFF` escape hatch for a consumer who wants different
 terms.
 
-**`THIRD-PARTY.md` needs two edits before the first release**, and the second is
-easy to miss:
+**`THIRD-PARTY.md` needs a restructure before the first release**, not just
+additions. Per "Decisions already taken", one file serves every artifact, which
+means it stops making tense- and context-dependent claims and instead says
+where each component lands — in practice, promote the table above into the
+document, with columns for the library package, the demo package, and
+source-only. Three concrete deltas the restructure must carry:
 
 1. A "What a binary release contains" section, describing the two artifacts.
 2. **Its cpp-terminal entry becomes wrong.** That file currently lists
    cpp-terminal under "Development-time only" and states it is "not shipped in
    an install" — true today, and false the moment a demo package exists.
    cpp-terminal moves to a shipped component, MIT, statically linked into
-   `pathime-demo` only.
+   `pathime-demo` only. Written artifact-relative ("shipped in: demo package"),
+   the statement cannot go stale this way again.
+3. **The Windows runtime DLLs become shipped components** (4.3c): rows for
+   glib (LGPL), libiconv (LGPL), libintl/gettext (LGPL) and pcre2
+   (BSD-3-Clause), marked Windows-artifacts-only, with the exact licence
+   versions confirmed from vcpkg's per-port copyright files. The existing
+   "External dependencies" table's "shared; required by pyzy" is true on Linux
+   and an understatement on Windows.
 
 The LGPL relinking obligation attaches to a `BUILD_SHARED_LIBS=OFF` artifact in a
 way it does not to the default shared one, and that is half of why **static
@@ -603,12 +857,23 @@ a tidier single file. Nothing here forbids a static build; it forbids shipping
 one, so the table above needs no static row and 6.6's vcpkg port should offer no
 static feature until someone asks and the licence question is answered.
 
-**6.5 — The source tarball needs a helper.** GitHub's auto-generated "Source
-code (tar.gz)" on a release **does not include submodules**, so for this project
-it is not a buildable source release. Either generate a real one in the release
-workflow (`git archive` plus each submodule's archive, or a
-`--recurse-submodules` clone with `.git` stripped) or say plainly in the release
-notes that building from source means cloning with `--recurse-submodules`.
+**6.5 — Generate the real source tarball.** Settled under "Decisions already
+taken": this is a required artifact, both because GitHub's auto-generated
+"Source code (tar.gz)" **does not include submodules** — so for this project it
+is not a buildable source release — and because it is the corresponding-source
+offer that sits on the same page as the GPL-3 binaries. Mechanics:
+
+- **Generation**: from a fresh `--recurse-submodules` clone of the tag,
+  `git ls-files --recurse-submodules | tar -T -` is the simplest correct form —
+  it honours the pinned commits, handles nesting, and includes no `.git`.
+  `refs/` and build directories are gitignored and excluded for free.
+- **Reproducibly**: sorted names, `--mtime` pinned to the commit date,
+  `--owner=0 --group=0`, `gzip -n` — cheap, and it lets Phase 3's
+  reproducibility job cover the tarball too.
+- **Verified**: a CI job that configures, builds and tests **from the generated
+  tarball**, not from the checkout. That job is the only thing that keeps
+  "buildable source release" true — it is also what catches any configure-time
+  step that quietly assumed `.git` exists.
 
 **6.6 — vcpkg port.** A `vcpkg.json` plus `portfile.cmake`, submitted as a PR to
 `microsoft/vcpkg`. This is the natural first channel: the audience is C and C++
