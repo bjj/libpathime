@@ -12,6 +12,10 @@ Windows.
 - CMake ≥ 3.21 and a C11/C++17 toolchain (GCC, Clang, MSVC, or clang-cl).
 - Ninja (recommended) or any CMake generator.
 - Submodules checked out: `git submodule update --init --recursive`.
+- **Check the tree out with LF line endings.** `git config --global
+  core.autocrlf input` (or `false`) before cloning. The codegen tools run with
+  the CRT in binary mode, so a dictionary source converted to CRLF would leave
+  stray CRs in parsed tokens.
 
 Per-backend dependencies:
 
@@ -23,19 +27,10 @@ Per-backend dependencies:
 | Table-driven | `sqlite3` — the compiled table format *is* a SQLite database, so reading one ibus-table wrote needs it. Its tables come from the `engines/ibus-table-chinese` submodule. |
 
 The table-driven backend (`PATHIME_ENGINE_TABLE`: Wubi, Cangjie, Stroke5,
-Zhuyin, …) wraps no library. `ibus-table`, the reference implementation, is
-Python and cannot be linked against, so this engine is written in `libpathime`
-itself against `docs/ibus-table-mapping.md`. What it *does* need is data:
+Zhuyin, …) is internal. It needs data:
 `engines/ibus-table-chinese` is a submodule of table sources, and the build
 compiles a selected set of them with `pathime-table-compile`, a host tool built
-from the engine's own sources. Upstream's `tables/CMakeLists.txt` is not used —
-it calls `ibus-table-createdb` (the Python being replaced) plus `sed`, `iconv`
-and `awk`, none of which run on Windows.
-
-`LIBPATHIME_WITH_TABLE` defaults `ON`, like the other three. Missing SQLite
-turns it off with a warning, as with any other backend. Without the submodule
-the engine builds and opens a table a client names by absolute path; it ships
-none.
+from the engine's own sources. The upstream's build is not used.
 
 Linux (Debian/Ubuntu):
 
@@ -59,18 +54,6 @@ come from an in-tree compat layer, so there is nothing else to install. Python 3
 is optional — it is only used for pyzy's `android.db` — and the build finds it
 through the `py` launcher if `FindPython3` cannot.
 
-Two things reliably trip people up on Windows:
-
-- **A developer command prompt overwrites `VCPKG_ROOT`.** `vcvars64.bat` points
-  it at the vcpkg bundled with Visual Studio, which has no packages installed.
-  Set your own `VCPKG_ROOT` *after* running vcvars. (The `windows-msvc` preset
-  uses the Visual Studio generator and needs no vcvars at all; only the Ninja
-  preset does.)
-- **Check the tree out with LF line endings.** `git config --global
-  core.autocrlf input` (or `false`) before cloning. The codegen tools run with
-  the CRT in binary mode, so a dictionary source converted to CRLF would leave
-  stray CRs in parsed tokens.
-
 ## Configure & build
 
 Using presets (see `CMakePresets.json`):
@@ -87,9 +70,7 @@ cmake -S . -B build -G Ninja
 cmake --build build
 ```
 
-> Build in a normal filesystem that supports symlinks and is case-sensitive.
-> Versioned `.so` symlinks cannot be created on some network- or VM-mounted
-> paths.
+Note: Build in a normal filesystem that supports symlinks and is case-sensitive. Versioned `.so` symlinks cannot be created on some network- or VM-mounted paths.
 
 ## Windows
 
@@ -97,11 +78,6 @@ cmake --build build
 cmake --preset windows-msvc
 cmake --build --preset windows-msvc
 ```
-
-It builds serially, because the Visual Studio generator's per-project CMake
-regeneration check races with itself under `/m` (`docs/windows-port.md`, "Known
-build limitation"); `/MP` still spreads compilation across cores within each
-project.
 
 There is also a `windows-ninja` preset (clang-cl + Ninja); it must be run from a
 developer command prompt, and remember to re-set `VCPKG_ROOT` afterwards.
@@ -112,7 +88,7 @@ developer command prompt, and remember to re-set `VCPKG_ROOT` afterwards.
 |--------|---------|---------|
 | `LIBPATHIME_WITH_HANGUL` / `_ANTHY` / `_PYZY` | `ON` | Enable each backend, both the vendored library and its adapter. A backend whose dependencies are missing is warned about and skipped. |
 | `LIBPATHIME_WITH_TABLE` | `ON` | The table-driven backend. Needs `sqlite3`; skipped with a warning (or a hard error under `LIBPATHIME_REQUIRE_BACKENDS`) without it. |
-| `LIBPATHIME_TABLES` | five tables | Which tables to compile into `pathime-data/table/`, as `<name>\|<source>\|<freq source>` entries. Default: `cangjie5`, `quick5`, `wubi-jidian86`, `stroke5`, `zhuyin` — about 9 MB compiled. All thirteen families in the submodule are available; adding one is a line. |
+| `LIBPATHIME_TABLES` | five tables | Which tables to compile into `pathime-data/table/`. Default: `cangjie5`, `quick5`, `wubi-jidian86`, `stroke5`, `zhuyin` — about 9 MB compiled. All thirteen families in the submodule are available; adding one is a line. |
 | `LIBPATHIME_TABLE_COVERAGE` | `windows` on Windows, `noto` elsewhere | Which glyph-coverage map trims the compiled tables, or `none` to trim nothing. See "Glyph coverage" below; on Windows `none` is a reasonable choice. |
 | `LIBPATHIME_TABLE_REGENERATE_COVERAGE` | `OFF` | Offer a `pathime-table-coverage` target that rewrites the map named by `LIBPATHIME_TABLE_COVERAGE` from a font. Needs Python 3 and nothing else. See "Glyph coverage" below — the ordinary build never reads a font. |
 | `LIBPATHIME_TABLE_COVERAGE_FONT` | per platform | The fonts that target reads, as a list — the Windows map is the union of several. Only consulted when the option above is `ON`. |
@@ -124,7 +100,7 @@ developer command prompt, and remember to re-set `VCPKG_ROOT` afterwards.
 | `LIBPATHIME_INSTALL_VENDORED` | `OFF` | Install the vendored backend libraries and their headers as ordinary system libraries, rather than into the private directory beside `libpathime` that the default uses. For a distribution package that intends to replace the system's `libhangul`, `libanthy-unicode` and `libpyzy` with ours; see "What gets produced". |
 | `BUILD_SHARED_LIBS` | `ON` | Shared vs. static libraries. One exception ignores it: on Windows cpp-terminal — which only the demo links — is always static, because its published globals carry no `dllimport` and a DLL build of it therefore cannot be linked against on Windows at all. |
 
-Which backends survived the gating is recorded in the generated
+Which backends are included is recorded in the generated
 `include/pathime/config.h` as `PATHIME_WITH_*`, so a client can compile out
 unavailable paths. `pathime_has_engine()` is the matching runtime query, and
 answers false for a backend whose runtime data is missing as well.
