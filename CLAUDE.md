@@ -69,9 +69,10 @@ the reasoning in the history.
 
 - `TODO.md` — upcoming work, open questions, deliberate deferrals. Nothing
   settled lives there.
-- `docs/design-history.md` — the settled design rounds, question by question,
-  with evidence and costs. **Read it before reopening anything that looks
-  undecided.** §6 is the table engine.
+- `docs/design-history.md` — the settled decisions: ruling, reason, cost, and
+  what would legitimately reopen each. **Read it before reopening anything
+  that looks undecided.** §6 is the table engine; the full narrative behind
+  every entry is in that file's git history.
 - `docs/CONCEPTS.md` and `include/pathime/pathime.h` — the model and the
   contract, kept in lockstep; neither carries deviations from the other.
 - `docs/source-layout.md` — which file owns what. Read before adding or

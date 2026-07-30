@@ -8,10 +8,11 @@ deliberate:
 - `docs/CONCEPTS.md` and `include/pathime/pathime.h` — the model and the
   contract, kept in lockstep. The header carries no list of deviations from
   the concepts because there are none.
-- `docs/design-history.md` — the settled design rounds, question by question,
-  with the evidence each was answered against and what the answer cost.
-  **Read it before reopening anything that looks undecided** — most things
-  that look open were closed there, on purpose, with reasons.
+- `docs/design-history.md` — the settled decisions: ruling, reason, cost, and
+  what would legitimately reopen each. **Read it before reopening anything
+  that looks undecided** — most things that look open were closed there, on
+  purpose. The full narrative behind every entry is in that file's git
+  history.
 
 Everything else in `docs/`, plus every code comment and the public header, is
 written to stand on its own: the three development-only documents (this file,
@@ -40,67 +41,12 @@ that engine does not do.
 ### Not implemented, in rough priority order
 
 - **User-derived phrases. OUT OF SCOPE for the first phase**, decided
-  2026-07-28. Kept here in full because the investigation behind the decision is
-  worth not repeating, not because it is queued.
-
-  The deciding argument is reach, not difficulty. Only **wubi-jidian86** can use
-  the feature at all: cangjie5 and quick5 declare
-  `USER_CAN_DEFINE_PHRASE = FALSE`, stroke5 declares nothing, and zhuyin
-  declares the flag but carries no `RULES`, so it derives nothing. wubi is also
-  the table this library has least reason to lead with — it was included to
-  broaden the shipped set, not because anything depends on it. A feature that
-  reaches one table, and that table the least central one, does not earn its way
-  into a first implementation.
-
-  **The same test applies to anything else wubi-only.** If a spec section turns
-  out to be reachable only through wubi-jidian86, it is out of scope for this
-  phase by default rather than by a fresh argument each time.
-
-  **What it is.** With `USER_CAN_DEFINE_PHRASE = TRUE`, committing a
-  multi-character string the system table does not already contain makes the
-  engine invent a *new dictionary entry* for it. The key it files the entry under
-  is not the keys the user typed: each character has a `goucima`
-  ("word-formation code", §3.3/§4.3), and `RULES` (§3.5) says which positions of
-  which characters' goucima to concatenate. wubi-jidian86's
-  `ce2:p11+p12+p21+p22` reads "for a 2-character phrase, take characters 1 and 2
-  of the first character's goucima, then characters 1 and 2 of the second". The
-  compound goes into the user database with `freq = -1`, `user_freq = 1`
-  (`refs/ibus-table/engine/tabsqlitedb.py:1527-1587`).
-
-  So it is not learning in the sense `PATHIME_OPT_LEARNING` currently means
-  (reordering by use, which is implemented). It *creates vocabulary*, under
-  codes the user did not choose.
-
-  **How it interacts with typing — and the problem that makes this a discussion
-  rather than a task.** In ibus-table the feature is not silent. While a
-  multi-character run is in the preedit, the engine shows the code it *would*
-  derive in the **auxiliary text**, as `#: <code>`
-  (`refs/ibus-table/engine/table.py:1788-1790`). That is the whole
-  discoverability story: you build 天下大事 out of four separate selections, you
-  watch `#: ggdg` appear beside it, you commit, and now `ggdg` types the phrase.
-  Without that display the user gets vocabulary filed under codes they were never
-  told, which they can only rediscover by accident.
-
-  **libpathime has no auxiliary text**, by design: the model says what a user
-  typed is the composition, not something supplemental to it
-  (`docs/CONCEPTS.md`). So the channel this feature depends on for its
-  usability is one the API does not have. Adding it for one feature of one
-  shipped table is a large decision; shipping the feature without it is
-  shipping the silent half.
-
-  Two smaller things worth having in the conversation:
-
-  - The derived entry gets `user_freq = 1`, and `user_freq` is the second sort
-    key after exact match (`ranking.cc`). So a silently derived phrase does not
-    land quietly at the bottom of a candidate list — it outranks every system
-    entry that has never been chosen.
-  - The derived code can collide with a real one. Nothing checks; the phrase
-    simply becomes another candidate under that code.
-
-  **State of the code:** `RULES` is parsed, goucima are compiled into the
-  database and `TableDatabase::goucima()` reads them back, so the data is all
-  present. Only the derive-and-insert step is missing — which is why the
-  decision above is about reach and desirability, not effort.
+  2026-07-28 — reach, not difficulty: only wubi-jidian86 can use it, and the
+  feature depends on the auxiliary text §4c removed. The investigation is in
+  `docs/design-history.md` §6c — read it before reopening, along with the
+  standing rule it set: anything reachable only through wubi-jidian86 is out of
+  scope by default. The data layer is complete; only derive-and-insert is
+  missing.
 - **Write batching (§5.3).** Not implemented, and possibly not worth it: the
   spec's checkpoint-after-16-updates is a durability detail, and the user
   database is in WAL mode where SQLite checkpoints on its own. Measure before
@@ -528,29 +474,12 @@ Not a bug, and recorded here so it is tracked rather than only described:
 
 ## Deferred, deliberately
 
-- **Allocation-failure injection, and the tests it would enable.** Decided
-  against 2026-07-29. `context.cc` keeps three `std::bad_alloc` recovery paths
-  no test reaches — the unwind during context registration (`:198-201`), the
-  unregister-and-delete when `create_context()` fails (`:218-222`), and the
-  surrounding-text setter clearing its snapshot (`:444-448`) — and
-  `table_db.cc` keeps a matching set of SQLite failure branches. Reaching
-  either needs injection: a test-local `operator new` for the first (the
-  `tests/core` suites compile the sources in, so no library change is needed),
-  `sqlite3_config(SQLITE_CONFIG_MALLOC, …)` for the second.
-
-  Not worth it. An application that has run out of memory is generally not
-  going to survive whatever comes next regardless of how gracefully one library
-  unwinds, so the tests would buy confidence in a scenario nobody recovers
-  from. The recovery paths stay — they are cheap and correct — but they stay
-  **deliberately unreached**, which is what this entry records so the next
-  reader of the coverage report does not file them as an oversight.
-- **Fuzzing the table source parser.** Decided against 2026-07-29.
-  `parse_table_source()` is at 100% line coverage and reads third-party data,
-  which is normally the argument *for* fuzzing. The argument against is the
-  corpus: the tables are a fixed, checked-in set describing input methods for a
-  script that is not going to gain new ones, and essentially nobody writes or
-  edits a table. A fuzzer would be defending an input surface that in practice
-  has exactly thirteen inputs, all of them in the repository.
+- **Allocation-failure injection** — decided against 2026-07-29; the
+  `std::bad_alloc` and SQLite recovery paths stay **deliberately unreached**.
+  `docs/design-history.md` §11. Recorded so the next reader of the coverage
+  report does not file them as an oversight.
+- **Fuzzing the table source parser** — decided against 2026-07-29; the real
+  corpus is thirteen fixed, checked-in tables. `docs/design-history.md` §11.
 - **Input purpose and hints** (text/name/email/URL/password, single- vs.
   multiline, assistance toggles) — deferred past v1, 2026-07-27. No backend
   consumes them, and the extension is additive when a consumer appears (most
