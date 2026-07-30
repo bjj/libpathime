@@ -45,9 +45,9 @@ path. pyzy's own sources dodge it by sitting *in* `src/` and including each
 other with quotes, which resolve relative to the including file.
 
 Anything else reaches them two ways, both configure-time copies out of
-`PYZY_SRC_DIR`: the **public** headers are staged into the layout
-`cmake --install` produces and included as `<PyZy/InputContext.h>`, which is
-what `src/CMakeLists.txt` does for the adapter; the **private** ones are
+`PYZY_SRC_DIR`: the **public** headers are staged into the layout upstream
+installs and included as `<PyZy/InputContext.h>`, which is what
+`src/CMakeLists.txt` does for the adapter; the **private** ones are
 reached through generated forwarding headers that include them by absolute
 path, which is what `tests/pyzy/` does. `DataDir.h` is among the public ones —
 it is how a program tells pyzy where its data is, and pyzy's only header that
@@ -83,9 +83,6 @@ produces.
   that `textdict`'s newline padding is written twice as long as intended; the
   private-dictionary write/read/delete cycle round-trips correctly, and
   `ctest -R '^anthy\.dicutil$'` covers it.
-- `cmake --install` leaves a second copy of `hangul.dll` in `lib/` — upstream's
-  install rule uses one bare `DESTINATION`. The usable copy in `bin/` is added
-  by this build.
 - The installed tree does not carry pyzy's vcpkg runtime dependencies
   (`glib-2.0-0.dll` and friends). They are staged into the build tree's `bin/`
   by vcpkg's applocal step; deploying an install needs them copied alongside.

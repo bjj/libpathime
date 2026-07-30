@@ -68,8 +68,14 @@ find_package(PkgConfig REQUIRED)
 # surface — String.h calls g_strdup_vprintf inline — so tests/pyzy needs the
 # same imported target. Without GLOBAL, pkg_check_modules scopes it to this
 # directory and the test tree would have to probe glib a second time.
-pkg_check_modules(GLIB REQUIRED IMPORTED_TARGET GLOBAL glib-2.0>=2.24.0)
-target_link_libraries(pyzy PRIVATE PkgConfig::GLIB)
+#
+# The prefix is the project's own rather than a bare GLIB, because in a static
+# build the imported target's *name* is recorded in the installed
+# pathime-targets.cmake and the consumer's find_package(pathime) has to recreate
+# it in their own scope — where GLIB and UUID are names they may be using for
+# their own queries. See cmake/pathime-config.cmake.in.
+pkg_check_modules(LIBPATHIME_GLIB REQUIRED IMPORTED_TARGET GLOBAL "glib-2.0 >= 2.24.0")
+target_link_libraries(pyzy PRIVATE PkgConfig::LIBPATHIME_GLIB)
 
 if(WIN32)
   # Supplies <uuid/uuid.h> + <sys/utsname.h> shims and links Rpcrt4.
@@ -77,8 +83,10 @@ if(WIN32)
 else()
   # GLOBAL for the same reason as glib above: Util.h includes <uuid/uuid.h>
   # unconditionally, so tests/pyzy needs whatever include path found it here.
-  pkg_check_modules(UUID REQUIRED IMPORTED_TARGET GLOBAL uuid)
-  target_link_libraries(pyzy PRIVATE PkgConfig::UUID)
+  # macOS included — libuuid is where Util.h's uuid_generate comes from on every
+  # platform but Windows, which takes the Rpcrt4 shim above instead.
+  pkg_check_modules(LIBPATHIME_UUID REQUIRED IMPORTED_TARGET GLOBAL uuid)
+  target_link_libraries(pyzy PRIVATE PkgConfig::LIBPATHIME_UUID)
 endif()
 
 # --- optional runtime database (android.db) ---------------------------------

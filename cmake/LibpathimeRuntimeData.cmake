@@ -108,6 +108,14 @@ function(libpathime_compile_tables)
   # which is not a target at all and so cannot pull them into the build. Without
   # a target of their own an ordinary build would compile no table and then fail
   # in `cmake --install` looking for one.
+  #
+  # This target is then the tables' *only* builder, which
+  # libpathime_stage_runtime_data() arranges by depending on it. Two targets in
+  # one directory that both consume the same custom-command output make the
+  # Makefile and Visual Studio generators emit the rule into each of them, and a
+  # parallel build then runs two table compilers on one .db file — which fails
+  # outright, because compile_table() unlinks the output first and the pair share
+  # one SQLite journal. Ninja deduplicates and hides it.
   if(_outputs)
     add_custom_target(pathime-tables ALL DEPENDS ${_outputs})
   endif()
@@ -155,11 +163,13 @@ endfunction()
 
 # libpathime_install_runtime_data()
 #
-# Installs the data beside the installed libpathime, which is what makes the
+# Installs the data beside the module that resolves it, which is what makes the
 # default resource_dir correct for an installed tree. Which directory that is —
-# CMAKE_INSTALL_LIBDIR, or BINDIR for a Windows DLL — is settled once by
-# LIBPATHIME_INSTALL_DATADIR in cmake/LibpathimeInstall.cmake, because the CMake
-# package and the .pc file both have to name the same place.
+# CMAKE_INSTALL_LIBDIR beside a shared libpathime, BINDIR for a DLL or a static
+# build — is settled once by LIBPATHIME_INSTALL_DATADIR in
+# cmake/LibpathimeInstall.cmake, which states the rule and why; the CMake package
+# and the .pc file both have to name the same place. libpathime_stage_runtime_data()
+# below applies that rule to the build tree, and the two conditions match.
 function(libpathime_install_runtime_data)
   libpathime_runtime_data_files(_sources _destinations)
   list(LENGTH _sources _count)
@@ -236,11 +246,18 @@ function(libpathime_stage_runtime_data)
   add_custom_target(pathime-runtime-data ALL DEPENDS ${_staged})
 
   # The generated files are outputs of other targets' custom commands, so the
-  # dependency has to be on those targets and not just on the paths.
+  # dependency has to be on those targets and not just on the paths. The tables
+  # are the case where it is load-bearing rather than merely correct: their
+  # commands are declared in this same directory, so without the ordering both
+  # targets would build them, concurrently — libpathime_compile_tables() above
+  # has the detail.
   if(LIBPATHIME_WITH_ANTHY)
     add_dependencies(pathime-runtime-data anthy-dic)
   endif()
   if(LIBPATHIME_WITH_PYZY AND PYZY_ANDROID_DB)
     add_dependencies(pathime-runtime-data pyzy-db)
+  endif()
+  if(TARGET pathime-tables)
+    add_dependencies(pathime-runtime-data pathime-tables)
   endif()
 endfunction()

@@ -7,8 +7,9 @@ This document maps the pyzy (libpyzy) C++ library and its IBus wrapper
 ## Library overview
 
 libpyzy is a C++ shared library for Chinese Pinyin and Bopomofo phonetic
-conversion. Its sole public header is `engines/pyzy/src/InputContext.h` (installed as
-`<PyZy/InputContext.h>`, capital-P directory); the constants in
+conversion. Its sole public header is `engines/pyzy/src/InputContext.h` (upstream
+installs it as `<PyZy/InputContext.h>`, capital-P directory, and this build stages
+it into that layout to compile the adapter against); the constants in
 `engines/pyzy/src/Const.h` and the tagged-union type in `engines/pyzy/src/Variant.h` are also
 part of the public surface. Everything else in `engines/pyzy/src/` is an internal
 implementation detail.

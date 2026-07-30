@@ -111,7 +111,7 @@ function(pyzy_add_test name)
 
   # glib: String.h calls g_strdup_vprintf inline, so anything including a pyzy
   # private header compiles against glib whether or not it uses it directly.
-  target_link_libraries(${_target} PRIVATE libpathime::pyzy PkgConfig::GLIB)
+  target_link_libraries(${_target} PRIVATE libpathime::pyzy PkgConfig::LIBPATHIME_GLIB)
   target_compile_definitions(${_target} PRIVATE HAVE_CONFIG_H)
 
   if(MSVC)
@@ -130,7 +130,7 @@ function(pyzy_add_test name)
   if(WIN32)
     libpathime_add_win32_compat(${_target})
   else()
-    target_link_libraries(${_target} PRIVATE PkgConfig::UUID)
+    target_link_libraries(${_target} PRIVATE PkgConfig::LIBPATHIME_UUID)
   endif()
 
   file(MAKE_DIRECTORY "${_home}")

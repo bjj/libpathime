@@ -161,6 +161,16 @@ same names, and an engine that resolved one of those instead would be running a
 library this project has never tested. No vendored header is installed at all,
 because nothing outside this build compiles against one.
 
+What the private directory does **not** change is their SONAMEs — ours are still
+`libanthy-unicode.so.0` and the rest — so a process that has already loaded a
+distribution's copy of one of those names satisfies libpathime's `DT_NEEDED`
+with it, an RPATH being consulted only when nothing by that name is loaded yet.
+That matters to an embedder who puts libpathime inside a larger process. It does
+not arise in the ordinary case: an engine that owns its own process has nothing
+else in the address space to have pulled the system copies in. Closing it would
+mean giving the vendored libraries names of our own, which the private directory
+deliberately does not do — it settles where they sit, not what they are called.
+
 `LIBPATHIME_INSTALL_VENDORED=ON` puts the libraries and their headers in the
 ordinary system places instead — for a packager who intends exactly that and
 has decided to deal with the consequences. `cmake/LibpathimeInstall.cmake` is
@@ -176,6 +186,13 @@ the loaded module's own path at runtime, so it holds wherever the pair is
 installed and whatever the process's working directory is. `cmake --install`
 puts it there, and the build stages the same layout beside the built library so
 that the demo and the tests find it identically.
+
+Concretely, that is `lib/pathime-data/` next to a shared `libpathime.so`, and
+`bin/pathime-data/` for a DLL or a **static** build — in the static case because
+the module holding the code is the consumer's own executable, which this build
+never installs. A static consumer whose program does not land in `bin/` moves the
+directory to sit beside it; `PATHIME_DATA_DIR` from `find_package(pathime)` and
+`pkg-config --variable=datadir pathime` are how they find the installed copy.
 
 Shipping libpathime with an application therefore means copying `pathime-data/`
 along with the library and keeping the two together.
@@ -359,17 +376,29 @@ definition in `--cflags`. Within this build tree the `pathime` target already
 carries all of it, so anything linking `libpathime::pathime` needs no wiring
 either way.
 
-Two things a **static** consumer has to know, both because the vendored
+Three things a **static** consumer has to know, all of them because the vendored
 archives end up on its own link line rather than inside a shared library:
 
-- **A C project must `enable_language(CXX)`** (or `project(app C CXX)`).
-  libpathime is C++ behind a C header; the export records that, but CMake can
-  only act on it if the project has a C++ compiler to name. Without it the link
-  fails on `std::` symbols. The `pkg-config` route names the C++ runtime in
-  `Libs.private` and needs nothing extra.
+- **`pkg-config` needs `--static`.** Everything but `-lpathime` is in
+  `Libs.private`, which `pkg-config` emits only when asked:
+
+  ```sh
+  cc app.c $(pkg-config --cflags --libs --static pathime)
+  ```
+
+  Without the flag the link fails on every hangul, anthy, pyzy and `std::`
+  symbol. `--cflags` needs nothing extra either way, because `-DPATHIME_STATIC`
+  is in `Cflags` rather than `Cflags.private`.
+- **A C project using CMake must `enable_language(CXX)`** (or
+  `project(app C CXX)`). libpathime is C++ behind a C header; the export records
+  that, but CMake can only act on it if the project has a C++ compiler to name.
+  Without it the link fails on `std::` symbols. The `pkg-config` route names the
+  C++ runtime in `Libs.private`, so `--static` is all it needs.
 - **The external libraries come back**: `find_package(pathime)` calls
-  `find_dependency()` for SQLite3, GLib and libuuid, so those must be findable
-  where the consumer builds. A consumer of a shared build needs none of them.
+  `find_dependency()` for SQLite3 and probes GLib and libuuid, so those must be
+  findable where the consumer builds — and if they are not, `find_package`
+  reports the package unavailable rather than aborting, so an optional probe can
+  fall back. A consumer of a shared build needs none of them.
 
 The generated `pathime-targets.cmake` does name the vendored libraries, because
 CMake needs them named to work out RPATHs and static link lines. That does not

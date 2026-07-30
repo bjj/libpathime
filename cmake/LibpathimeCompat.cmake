@@ -23,8 +23,12 @@ if(WIN32)
     "${LIBPATHIME_COMPAT_WIN32_DIR}/posix_win.c"
     "${LIBPATHIME_COMPAT_WIN32_DIR}/uuid_win.c"
     "${LIBPATHIME_COMPAT_WIN32_DIR}/utsname_win.c")
+  # BUILD_INTERFACE: a static build installs this archive and puts it in the
+  # export set (cmake/LibpathimeInstall.cmake), and an installed target may not
+  # carry a source-tree include directory — nor would it want to, since the
+  # shims exist to compile the vendored sources here and no consumer sees them.
   target_include_directories(libpathime_win32compat PUBLIC
-    "${LIBPATHIME_COMPAT_WIN32_DIR}")
+    "$<BUILD_INTERFACE:${LIBPATHIME_COMPAT_WIN32_DIR}>")
   target_compile_options(libpathime_win32compat PRIVATE
     "${LIBPATHIME_COMPAT_WIN32_PRELUDE_FLAG}")
   # UuidCreate lives in Rpcrt4; the mmap shim uses core Win32 (kernel32).

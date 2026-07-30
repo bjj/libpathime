@@ -85,7 +85,18 @@ _anthy_srcs(_src_worddic src-worddic
 _anthy_srcs(_src_main src-main main.c context.c)
 _anthy_srcs(_src_input src-util input.c rkconv.c rkhelper.c)
 
-find_library(ANTHY_LIBM m)   # optional, like meson's cc.find_library('m', required:false)
+# Optional, like meson's cc.find_library('m', required:false). Probed for the
+# answer and then linked as the bare name `m`, never as the cached path: these
+# targets are in the install's export set, and find_library's result is this
+# host's absolute path — the one entry in a generated pathime-targets.cmake that
+# would not be relocatable, so a package built on Debian would name
+# /usr/lib/x86_64-linux-gnu/libm.so to a consumer on Fedora or aarch64.
+find_library(ANTHY_LIBM m)
+if(ANTHY_LIBM)
+  set(_anthy_libm m)
+else()
+  set(_anthy_libm "")
+endif()
 
 if(LIBPATHIME_ANTHY_SINGLE_LIBRARY)
   add_library(anthy-unicode
@@ -98,8 +109,8 @@ if(LIBPATHIME_ANTHY_SINGLE_LIBRARY)
   # CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS, which only applies when libpathime is the
   # top-level project — this library must export whoever is building it.
   set_target_properties(anthy-unicode PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
-  if(ANTHY_LIBM)
-    target_link_libraries(anthy-unicode PUBLIC ${ANTHY_LIBM})
+  if(_anthy_libm)
+    target_link_libraries(anthy-unicode PUBLIC ${_anthy_libm})
   endif()
 
   # Upstream's other five names, so every existing target_link_libraries() call
@@ -111,13 +122,14 @@ if(LIBPATHIME_ANTHY_SINGLE_LIBRARY)
   endforeach()
 
   set(_anthy_install_targets anthy-unicode)
-  # No artifacts of their own, but libpathime links two of them by name, so they
-  # have to be in the export set for the generated targets file to resolve —
-  # whatever the library shape. Passing them to the install helper costs nothing
-  # else: an INTERFACE library installs no file.
-  set(_anthy_internal_targets anthy_diclib anthy_ordering anthy_split
-                              anthydic-unicode anthyinput-unicode)
-  set(_anthy_internal_always TRUE)
+  # The five interface names. No artifacts of their own, but libpathime links two
+  # of them, so they have to be in the export set for the generated targets file
+  # to resolve — in both link modes, because an interface name carries no
+  # objects for a shared library to absorb. Passing them to the install helper
+  # costs nothing else: an INTERFACE library installs no file.
+  set(_anthy_extra_targets anthy_diclib anthy_ordering anthy_split
+                           anthydic-unicode anthyinput-unicode)
+  set(_anthy_extra_always TRUE)
 else()
   # Internal static libraries (meson: static_library), absorbed into the
   # installed shared ones below.
@@ -128,8 +140,8 @@ else()
     _anthy_setup(${_part})
   endforeach()
   target_link_libraries(anthy_split PUBLIC anthy_diclib)
-  if(ANTHY_LIBM)
-    target_link_libraries(anthy_split PUBLIC ${ANTHY_LIBM})
+  if(_anthy_libm)
+    target_link_libraries(anthy_split PUBLIC ${_anthy_libm})
   endif()
 
   # Installed shared libraries.
@@ -153,8 +165,8 @@ else()
   set(_anthy_install_targets anthyinput-unicode anthy-unicode anthydic-unicode)
   # Real archives here, absorbed into the shared libraries above — so they
   # travel only when there are no shared libraries to absorb them.
-  set(_anthy_internal_targets anthy_ordering anthy_split anthy_diclib)
-  set(_anthy_internal_always FALSE)
+  set(_anthy_extra_targets anthy_ordering anthy_split anthy_diclib)
+  set(_anthy_extra_always FALSE)
 endif()
 
 add_library(libpathime::anthy ALIAS anthy-unicode)
@@ -344,8 +356,8 @@ endif()
 # was asked for the system-wide layout — cmake/LibpathimeInstall.cmake explains
 # why our anthy is not the system's.
 libpathime_install_vendored(${_anthy_install_targets})
-if(_anthy_internal_always OR NOT BUILD_SHARED_LIBS)
-  libpathime_install_vendored(${_anthy_internal_targets})
+if(_anthy_extra_always OR NOT BUILD_SHARED_LIBS)
+  libpathime_install_vendored(${_anthy_extra_targets})
 endif()
 libpathime_install_vendored_headers(anthy-unicode-1.0/anthy
   "${ANTHY_SRC}/anthy/anthy.h" "${ANTHY_SRC}/anthy/dicutil.h" "${ANTHY_SRC}/anthy/input.h")

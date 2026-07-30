@@ -20,38 +20,61 @@
 #   <prefix>/lib/pathime/libhangul.so.1           private: on no search path
 #   <prefix>/lib/pathime/libanthy-unicode.so.0
 #   <prefix>/lib/pathime/libpyzy-1.0.so.1
-#   <prefix>/lib/pathime-data/...
+#   <prefix>/lib/pathime-data/...                 (bin/ for a DLL or a static
+#                                                  build; the rule is below)
 #   <prefix>/lib/cmake/pathime/*.cmake
 #   <prefix>/lib/pkgconfig/pathime.pc
 #
-# The vendored libraries keep their own names and SONAMEs but live in a
-# directory nothing else searches; libpathime reaches them through an RPATH of
-# `$ORIGIN/pathime` (`@loader_path/pathime` on macOS). No vendored header is
-# installed at all, because nothing outside this build compiles against one —
-# BUILD.md, "Consuming the library", is the promise this keeps. Windows has no
-# RPATH, so there the vendored DLLs sit beside `pathime.dll` in `bin/`: the same
+# The vendored libraries keep their own names but live in a directory nothing
+# else searches; libpathime reaches them through an RPATH of `$ORIGIN/pathime`
+# (`@loader_path/pathime` on macOS). No vendored header is installed at all,
+# because nothing outside this build compiles against one — BUILD.md,
+# "Consuming the library", is the promise this keeps. Windows has no RPATH, so
+# there the vendored DLLs sit beside `pathime.dll` in `bin/`: the same
 # arrangement reached by the other platform's means, since the directory of the
 # loading module is what both mechanisms name.
 #
-# They stay separate shared libraries rather than being absorbed into
-# libpathime, and that is a licensing decision as much as a layout one. All
-# three are LGPL-2.1 (THIRD-PARTY.md): linked as they are here, an application
-# shipping libpathime satisfies the relinking clause by the fact of their being
-# replaceable files. Folding them into libpathime.so would move that obligation
-# onto every embedder.
+# What the private directory does not change is their SONAMEs: ours are still
+# `libanthy-unicode.so.0` and the rest, so a process that has already loaded a
+# distribution's copy of one of those names satisfies libpathime's `DT_NEEDED`
+# with it — an RPATH is consulted only when nothing by that name is loaded yet.
+# That is an exposure for an embedder who puts libpathime inside a larger process
+# rather than running it as an engine of its own; an engine that owns its own
+# process, which is what this library is for, has nothing else in the address
+# space to have pulled the system copies in. Closing it would mean giving the
+# vendored libraries names of our own, which the private directory deliberately
+# does not do — the directory settles where they sit, not what they are called.
+#
+# They stay separate libraries rather than being absorbed into libpathime, and
+# that is a licensing decision as much as a layout one. All three are LGPL-2.1
+# (THIRD-PARTY.md): kept as separate replaceable files, an application shipping
+# a shared libpathime satisfies the relinking clause by that fact alone. A
+# static build ships them as separate archives in the same private directory and
+# names them in the .pc's `Libs.private`, so they reach the embedder's own link
+# line; the code then lands inside the embedder's binary and the obligation is
+# theirs to read about. Either way this build never folds them into libpathime.
 #
 # LIBPATHIME_INSTALL_VENDORED=ON puts the libraries and their headers in the
 # ordinary system places instead, for a packager who intends exactly the
 # system-wide install this default avoids and has decided to deal with the
-# consequences. Nothing in the build depends on which way it is set.
+# consequences. It changes three things, and they are the three that name the
+# private directory: where the libraries are installed, the RPATH that reaches
+# them (there is none — the loader already searches where they are), and the .pc's
+# -L. Nothing that gets compiled depends on which way it is set.
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
+# The private directory's name, in one place, because three rules have to mean
+# the same directory by it: the install destination, the RPATH that reaches it,
+# and the .pc's -L. Empty means there is no private directory — the vendored
+# libraries go straight into the system library directory.
 if(LIBPATHIME_INSTALL_VENDORED)
+  set(LIBPATHIME_VENDORED_SUBDIR "")
   set(LIBPATHIME_VENDORED_LIBDIR "${CMAKE_INSTALL_LIBDIR}")
 else()
-  set(LIBPATHIME_VENDORED_LIBDIR "${CMAKE_INSTALL_LIBDIR}/pathime")
+  set(LIBPATHIME_VENDORED_SUBDIR "pathime")
+  set(LIBPATHIME_VENDORED_LIBDIR "${CMAKE_INSTALL_LIBDIR}/${LIBPATHIME_VENDORED_SUBDIR}")
 endif()
 
 # The runtime directory is the same either way: a DLL is found beside the module
@@ -59,16 +82,38 @@ endif()
 set(LIBPATHIME_VENDORED_BINDIR "${CMAKE_INSTALL_BINDIR}")
 
 # Where pathime-data lands, and the single place that decides it: beside the
-# installed libpathime, because that is what makes the default resource_dir
-# correct for an installed tree. cmake/LibpathimeRuntimeData.cmake fills the
-# directory; this is the arithmetic about where it is, kept here with the rest
-# of the layout so that the CMake package and the .pc file can name it too.
-if(WIN32 AND BUILD_SHARED_LIBS)
-  set(LIBPATHIME_INSTALL_DATADIR "${CMAKE_INSTALL_BINDIR}/${LIBPATHIME_RUNTIME_DATA_DIRNAME}")
-else()
+# module that resolves it, because that is what makes the default resource_dir
+# correct for an installed tree. src/module_path.cc asks the loader which file a
+# known address inside libpathime came from, so the answer follows from how
+# libpathime was linked and not from the platform:
+#
+#   * a shared libpathime on ELF/Mach-O is its own module in CMAKE_INSTALL_LIBDIR
+#     — the data goes beside it there;
+#   * a DLL and a static libpathime both resolve to something in
+#     CMAKE_INSTALL_BINDIR, the DLL because that is where a DLL has to live and a
+#     static build because the address is inside the consumer's own executable.
+#
+# The static case is the one worth stating: the executable is the consumer's and
+# this build never installs it, so `bin/` here is where the default *would* find
+# the data, and a consumer whose program lands somewhere else copies the
+# directory to sit beside it — PATHIME_DATA_DIR and the .pc's `datadir` are how
+# they locate the copy. cmake/LibpathimeRuntimeData.cmake fills the directory and
+# applies the same rule to the build tree; this is the arithmetic about where it
+# is, kept here with the rest of the layout so that the CMake package and the .pc
+# file can name it too.
+#
+# CMAKE_INSTALL_FULL_* rather than the prefix and the relative form glued
+# together, because GNUInstallDirs allows an absolute CMAKE_INSTALL_LIBDIR and
+# gluing then doubles the prefix.
+if(BUILD_SHARED_LIBS AND NOT WIN32)
   set(LIBPATHIME_INSTALL_DATADIR "${CMAKE_INSTALL_LIBDIR}/${LIBPATHIME_RUNTIME_DATA_DIRNAME}")
+  set(LIBPATHIME_INSTALL_FULL_DATADIR
+      "${CMAKE_INSTALL_FULL_LIBDIR}/${LIBPATHIME_RUNTIME_DATA_DIRNAME}")
+else()
+  set(LIBPATHIME_INSTALL_DATADIR "${CMAKE_INSTALL_BINDIR}/${LIBPATHIME_RUNTIME_DATA_DIRNAME}")
+  set(LIBPATHIME_INSTALL_FULL_DATADIR
+      "${CMAKE_INSTALL_FULL_BINDIR}/${LIBPATHIME_RUNTIME_DATA_DIRNAME}")
 endif()
-set(LIBPATHIME_INSTALL_FULL_DATADIR "${CMAKE_INSTALL_PREFIX}/${LIBPATHIME_INSTALL_DATADIR}")
 
 # The one export set. It holds libpathime and the vendored libraries, in both
 # link modes but for different reasons: a static build puts the vendored
@@ -81,23 +126,62 @@ set(LIBPATHIME_INSTALL_FULL_DATADIR "${CMAKE_INSTALL_PREFIX}/${LIBPATHIME_INSTAL
 # BUILD.md says so where a consumer will read it.
 set(LIBPATHIME_EXPORT_SET pathimeTargets)
 
-# libpathime_set_install_rpath(<target>)
+# libpathime_set_install_rpath(<target> [<subdirectory>...])
 #
-# Point an installed binary at its siblings and at the private vendored
-# directory. Set per target rather than through CMAKE_INSTALL_RPATH so that a
+# Point an installed binary at its siblings, and at each named subdirectory
+# beside it. Set per target rather than through CMAKE_INSTALL_RPATH so that a
 # tree which pulls libpathime in with add_subdirectory keeps its own RPATH
 # policy for its own targets.
+#
+# Only libpathime passes a subdirectory: it is the one binary that reaches into
+# the private vendored directory. The vendored libraries are already in it, and
+# what they need from an RPATH is each other — anthy is three shared libraries
+# over three static ones and resolves its own siblings.
 function(libpathime_set_install_rpath tgt)
   if(WIN32)
     return()   # no RPATH; see the header comment
+  endif()
+  if(LIBPATHIME_INSTALL_VENDORED)
+    # Nothing to reach. Everything is in the system library directory, which the
+    # loader searches already, and an RPATH naming it is the one thing a
+    # distribution's packaging checks reject outright (Debian's
+    # binary-or-shlib-defines-rpath, Fedora's check-rpaths) — on the single
+    # option that exists in order to produce a distribution package.
+    return()
   endif()
   if(APPLE)
     set(_origin "@loader_path")
   else()
     set(_origin "$ORIGIN")
   endif()
-  set_property(TARGET ${tgt} APPEND PROPERTY INSTALL_RPATH
-    "${_origin}" "${_origin}/pathime")
+  set(_rpath "${_origin}")
+  foreach(_sub ${ARGN})
+    list(APPEND _rpath "${_origin}/${_sub}")
+  endforeach()
+
+  # BUILD_RPATH as well as INSTALL_RPATH, and that is not belt-and-braces.
+  # CMake rewrites a binary's RUNPATH in place at install time, so it pads the
+  # build-tree string out to the length the install string will need — with ':'
+  # characters, and an empty RUNPATH component is the current working directory
+  # to glibc's loader. A vendored library that needs no build RPATH of its own
+  # would otherwise ship a RUNPATH of nothing *but* separators, so a build-tree
+  # binary run from a directory containing a file called libsqlite3.so.0 (or
+  # libglib-2.0.so.0, or libuuid.so.1) would search cwd for every one of its
+  # dependencies before the loader cache. Naming the same entries for the build
+  # tree leaves nothing to pad, and they are right there too: everything this
+  # build produces lands in one output directory, which is what `$ORIGIN` names.
+  #
+  # CMake still appends one trailing separator of its own — unconditionally, so
+  # that the linker cannot share the RPATH's .dynstr entry with a symbol name —
+  # and that last empty component cannot be removed while the RPATH is rewritten
+  # at install time rather than relinked. Only BUILD_WITH_INSTALL_RPATH would,
+  # by discarding the build tree's computed link paths, which is how a
+  # build-tree pyzy finds a glib that is not in a default directory. One
+  # last-searched cwd entry in a binary that is never installed is the better
+  # end of that trade, and it is what every CMake target with an INSTALL_RPATH
+  # carries.
+  set_property(TARGET ${tgt} APPEND PROPERTY INSTALL_RPATH ${_rpath})
+  set_property(TARGET ${tgt} APPEND PROPERTY BUILD_RPATH ${_rpath})
 endfunction()
 
 # libpathime_install_vendored(<targets>...)
@@ -142,6 +226,20 @@ endfunction()
 function(libpathime_install_package)
   set(_cmakedir "${CMAKE_INSTALL_LIBDIR}/cmake/pathime")
 
+  # The Windows POSIX shim joins the export set, but only in a static build.
+  # cmake/LibpathimeCompat.cmake links it PRIVATE into every vendored target,
+  # and a static library records even a PRIVATE dependency in its
+  # INTERFACE_LINK_LIBRARIES as `$<LINK_ONLY:...>` — so CMake requires it in the
+  # set, and a consumer genuinely needs the archive on their link line. A shared
+  # build absorbs it into the DLLs and needs nothing.
+  #
+  # Registered here rather than beside the target, because the vendored list is
+  # ordered dependents-before-dependencies for the static link line and this is
+  # the one thing all of them depend on: it has to come last.
+  if(TARGET libpathime_win32compat AND NOT BUILD_SHARED_LIBS)
+    libpathime_install_vendored(libpathime_win32compat)
+  endif()
+
   install(EXPORT ${LIBPATHIME_EXPORT_SET}
     FILE pathime-targets.cmake
     NAMESPACE libpathime::
@@ -175,6 +273,14 @@ endfunction()
 # The pkg-config file. Separate from the CMake package because it has one thing
 # to work out that the export set derives for itself: the static link line.
 function(_libpathime_install_pkgconfig)
+  # Every library is named through $<TARGET_LINKER_FILE_BASE_NAME> rather than by
+  # its target or OUTPUT_NAME, because CMAKE_DEBUG_POSTFIX and a per-config
+  # OUTPUT_NAME both rename the file a consumer has to link and only the
+  # generator knows the answer — `-lpathime` in a `-DCMAKE_DEBUG_POSTFIX=d`
+  # install names an archive that is not there. That is also why the file is
+  # finished by file(GENERATE) below instead of configure_file alone.
+  set(PATHIME_PC_LIB "-l$<TARGET_LINKER_FILE_BASE_NAME:pathime>")
+
   if(BUILD_SHARED_LIBS)
     # Everything the vendored libraries need is resolved through libpathime's
     # own DT_NEEDED and RPATH, so a consumer's link line is one -l.
@@ -188,20 +294,39 @@ function(_libpathime_install_pkgconfig)
     # chooses to be dependents-before-dependencies — what a static link line
     # needs and what the CMake export set works out on its own.
     get_property(_vendored GLOBAL PROPERTY LIBPATHIME_VENDORED_TARGETS)
-    set(_libs "-L\${libdir}/pathime")
+    if(LIBPATHIME_VENDORED_SUBDIR)
+      set(_libs "-L\${libdir}/${LIBPATHIME_VENDORED_SUBDIR}")
+    else()
+      set(_libs "")   # already covered by the -L${libdir} in Libs:
+    endif()
     foreach(_tgt ${_vendored})
       get_target_property(_type ${_tgt} TYPE)
       if(_type STREQUAL "INTERFACE_LIBRARY")
         continue()   # carries no archive of its own
       endif()
-      get_target_property(_name ${_tgt} OUTPUT_NAME)
-      if(NOT _name)
-        set(_name "${_tgt}")
-      endif()
-      list(APPEND _libs "-l${_name}")
+      list(APPEND _libs "-l$<TARGET_LINKER_FILE_BASE_NAME:${_tgt}>")
     endforeach()
-    if(NOT WIN32)
-      list(APPEND _libs "-ldl")   # src/module_path.cc; see src/CMakeLists.txt
+
+    # The system libraries this build links, taken from the variables the build
+    # itself uses so that the two cannot drift:
+    #
+    #  * CMAKE_DL_LIBS for src/module_path.cc's dladdr — `dl` on glibc, and
+    #    *empty* on Darwin and the BSDs, where naming -ldl outright is a link
+    #    error for a library the build never linked;
+    #  * libm for anthy's splitter, which calls pow/exp (lattice.c) and sqrt
+    #    (metaword.c). Easy to miss because sqlite3.pc drags -lm in for any build
+    #    with a SQLite backend, and because glibc 2.34 merged libm into libc —
+    #    so leaving it out only breaks the older distributions, musl, and cross
+    #    toolchains;
+    #  * Rpcrt4 for the UuidCreate in cmake/compat/win32/uuid_win.c.
+    foreach(_syslib ${CMAKE_DL_LIBS})
+      list(APPEND _libs "-l${_syslib}")
+    endforeach()
+    if(LIBPATHIME_WITH_ANTHY AND ANTHY_LIBM)
+      list(APPEND _libs "-lm")
+    endif()
+    if(TARGET libpathime_win32compat)
+      list(APPEND _libs "-lRpcrt4")
     endif()
 
     # libpathime is C++ behind a C header, so a C program linking the static
@@ -210,22 +335,35 @@ function(_libpathime_install_pkgconfig)
     # thing through IMPORTED_LINK_INTERFACE_LANGUAGES, which is why a consumer
     # there only has to enable_language(CXX); pkg-config has no equivalent and
     # wants the library named. Ask the toolchain rather than assuming libstdc++.
+    #
+    # An entry may be an absolute path rather than a name — that is what
+    # -static-libstdc++ reports, and NDK, Apple SDK and the vendor compilers
+    # list paths as a matter of course — and a path links as itself. Every match
+    # is kept rather than the first, because a toolchain that splits its runtime
+    # across libc++ and libc++abi lists both and needs both.
     foreach(_implicit ${CMAKE_CXX_IMPLICIT_LINK_LIBRARIES})
       if(_implicit MATCHES "(^|/)(lib)?(std)?c\\+\\+")
-        list(APPEND _libs "-l${_implicit}")
+        if(IS_ABSOLUTE "${_implicit}")
+          list(APPEND _libs "${_implicit}")
+        else()
+          list(APPEND _libs "-l${_implicit}")
+        endif()
       endif()
     endforeach()
     list(JOIN _libs " " PATHIME_PC_LIBS_PRIVATE)
     string(PREPEND PATHIME_PC_LIBS_PRIVATE " ")
 
+    # The same modules, and the same version floors, that
+    # cmake/LibpathimeDependencies.cmake probes and the ports link. A floor
+    # dropped here would accept a consumer the CMake half rejects.
     set(_requires "")
     if(LIBPATHIME_WITH_PYZY OR LIBPATHIME_WITH_TABLE)
       list(APPEND _requires sqlite3)
     endif()
     if(LIBPATHIME_WITH_PYZY)
-      list(APPEND _requires glib-2.0)
-      if(NOT WIN32 AND NOT APPLE)
-        list(APPEND _requires uuid)
+      list(APPEND _requires "glib-2.0 >= 2.24.0")
+      if(NOT WIN32)
+        list(APPEND _requires uuid)   # cmake/ports/pyzy links it everywhere but Windows
       endif()
     endif()
     list(JOIN _requires ", " PATHIME_PC_REQUIRES_PRIVATE)
@@ -234,10 +372,18 @@ function(_libpathime_install_pkgconfig)
     endif()
   endif()
 
+  # Two stages: configure_file for the @VARIABLES@, then file(GENERATE) for the
+  # generator expressions above. The output is per-configuration because the
+  # library names are — a multi-config generator installs the one matching the
+  # configuration being installed, and a single-config generator has only the
+  # one directory.
   configure_file(
     "${PROJECT_SOURCE_DIR}/cmake/pathime.pc.in"
-    "${PROJECT_BINARY_DIR}/pathime.pc"
+    "${PROJECT_BINARY_DIR}/pathime.pc.configured"
     @ONLY)
-  install(FILES "${PROJECT_BINARY_DIR}/pathime.pc"
+  file(GENERATE
+    OUTPUT "${PROJECT_BINARY_DIR}/pkgconfig/$<CONFIG>/pathime.pc"
+    INPUT "${PROJECT_BINARY_DIR}/pathime.pc.configured")
+  install(FILES "${PROJECT_BINARY_DIR}/pkgconfig/$<CONFIG>/pathime.pc"
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig")
 endfunction()

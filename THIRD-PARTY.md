@@ -63,6 +63,14 @@ beside `libpathime` (`BUILD.md`, "What gets produced"). Being separate
 replaceable files is what makes them straightforward to satisfy the LGPL for:
 the private directory changes where they sit, not what they are.
 
-`BUILD_SHARED_LIBS=OFF` builds them into `libpathime` instead. That changes
-what is being distributed and the terms that apply to it; anyone shipping such
-a build should read the licences above with their own advice.
+`BUILD_SHARED_LIBS=OFF` does not fold them into `libpathime`. It builds each one
+as its own static archive, installs the archives into the same private
+`pathime/` directory, and names them in `pathime.pc`'s `Libs.private` — so they
+reach the **embedder's** link line and their code ends up inside whatever
+program links libpathime. `libpathime.a` itself holds only this project's own
+objects.
+
+That changes what is being distributed and the terms that apply to it: the
+relinking clause is now something the embedder's own binary has to satisfy,
+rather than something the arrangement of files satisfies for them. Anyone
+shipping a static build should read the licences above with their own advice.

@@ -146,21 +146,21 @@ set_target_properties(pathime PROPERTIES
   SOVERSION "${PROJECT_VERSION_MAJOR}")
 
 # The installed library, and the export set that cmake/LibpathimeInstall.cmake
-# turns into pathime-targets.cmake. INCLUDES DESTINATION is what makes the
-# INSTALL_INTERFACE above resolve for a consumer.
+# turns into pathime-targets.cmake. What a consumer's include path ends up being
+# is the `$<INSTALL_INTERFACE:>` on the target above; there is no INCLUDES
+# DESTINATION here, because it appends the same directory a second time.
 #
 # The private link libraries above reach the export set through
 # libpathime_install_vendored(), which puts every vendored target in it. What
 # the generated targets file then says about them differs by link mode and is
 # right both times: archives on a static consumer's link line, and nothing but
 # an RPATH hint for a shared one. cmake/LibpathimeInstall.cmake has the detail.
-libpathime_set_install_rpath(pathime)
+libpathime_set_install_rpath(pathime ${LIBPATHIME_VENDORED_SUBDIR})
 install(TARGETS pathime
   EXPORT ${LIBPATHIME_EXPORT_SET}
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
 
 # The table databases, compiled from engines/ibus-table-chinese by the tool in
 # tools/. Declared here rather than there because an add_custom_command output
