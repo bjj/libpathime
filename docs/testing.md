@@ -21,7 +21,8 @@ backend's suite and `ctest -R '^api\.'` runs the public-API tests.
 and exits 77 — `SKIP_RETURN_CODE`, which ctest reports as *skipped* rather than
 passed or failed. Deciding it in the source rather than in CMake is what keeps
 the loss visible: a configuration that drops a backend produces skips in the
-ctest output, not a quietly shorter list.
+ctest output, not a quietly shorter list. The registrations that *are*
+CMake-conditional are listed under "Conditional registrations" at the end.
 
 ## Running under AddressSanitizer and UBSan
 
@@ -193,8 +194,8 @@ matched pair of bugs on both sides of our own writer and reader would be
 invisible to a test that went only one way.
 
 `core.table_compile` also carries the paths a client can name through
-`PATHIME_OPT_TABLE_FILE` but is unlikely to think about — a directory whose name
-holds `#`, `%` or an apostrophe, each of which is syntax to one of the two
+`PATHIME_OPT_TABLE_FILE` but is unlikely to think about — a path that holds
+`#`, `%` or an apostrophe, each of which is syntax to one of the two
 layers of quoting `TableDatabase::open()` builds its `ATTACH` out of.
 
 `core.table` is also a structural assertion, not only a functional one. Its
@@ -231,17 +232,26 @@ pass on both.
 
 ## Runtime data
 
-Every test finds its data the way a client does, and nothing in `tests/` sets an
-environment variable or a working directory to arrange it.
+Every test written for libpathime finds its data the way a client does, and
+none of their registrations sets an environment variable or a working directory
+to arrange it.
 
 - **Under `tests/api/`**, the engines read the `pathime-data/` that
   `src/CMakeLists.txt` stages beside the built library, which is where
   `pathime_init_params_t::resource_dir` looks by default. Those tests link
   libpathime and nothing else, so there is nothing else they could do.
 - **Under `tests/anthy/` and `tests/pyzy/`**, which drive a backend directly,
-  each program names its data itself: `anthy_conf_override("DIC_FILE", …)` and
-  `pyzy_set_data_dir(…)`, both with absolute paths the build supplied as
-  compile definitions.
+  each program written here names its data itself:
+  `anthy_conf_override("DIC_FILE", …)` and `pyzy_set_data_dir(…)`, both with
+  absolute paths the build supplied as compile definitions.
+
+The `anthy.vendor.*` programs are the exception, because upstream hard-codes
+build-tree-relative paths into its conf overrides. Their registrations are the
+one place in `tests/` that set a working directory — and, for the three that
+open a dictionary, blank `XDG_CONFIG_HOME`, which anthy would otherwise prefer
+to the per-test `HOME` compiled in, so a desktop run cannot write into the real
+`~/.config/anthy`. The header comment in `tests/anthy/CMakeLists.txt` walks
+through it.
 
 The four end-to-end engine tests are where the data actually has to exist, and
 they are registered all the same: each compiles to a skip when its
@@ -279,6 +289,16 @@ Before reading anything into a test's absence:
 - **`hangul.vendored.hangul`** needs iconv, which it uses only to print UCS-4 as
   UTF-8. glibc has it; on Windows it comes from vcpkg, which glib pulls in
   anyway.
+- **`pyzy.full_pinyin`, `pyzy.double_pinyin` and `pyzy.bopomofo`** need
+  `android.db`, which the pyzy port builds only when configure finds a Python 3
+  interpreter. Without it they are not registered — three tests failing for a
+  reason unrelated to anything they check would be worse — and the configure
+  output warns about the loss. `api.engine_pyzy` stays registered either way
+  and compiles to a skip instead.
+- **`core.romaji`, `core.table` and `core.table_compile`** compile backend
+  sources directly, so each is registered only when the option that builds
+  those sources is on — `LIBPATHIME_WITH_ANTHY` for the first,
+  `LIBPATHIME_WITH_TABLE` for the other two.
 - **`api.multicontext`** is registered unconditionally and decides at runtime.
   It asks `pathime_has_engine()` about each engine, drops the ones that answer
   no — and the table engine if no table opens — and skips if fewer than two

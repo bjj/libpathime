@@ -16,8 +16,11 @@
 # build time and buys tests that can reach the seams where the encoding and
 # option rules actually live, without any of it becoming public surface.
 #
-# Not gated on any LIBPATHIME_WITH_* option: everything here is core code that
-# compiles identically whatever backends the build contains.
+# The directory itself is not gated on any LIBPATHIME_WITH_* option, but a
+# test that compiles backend sources is registered only when the option that
+# builds them is on — core.romaji with anthy, core.table and core.table_compile
+# with the table engine — and core.options and core.backend_defaults take each
+# backend's arm exactly as src/CMakeLists.txt gates it.
 
 # One test executable per internal subject. `sources` lists the src/ files the
 # test compiles in — name only what the subject needs, so a broken dependency
@@ -142,15 +145,15 @@ libpathime_add_core_test(composition SOURCES
 
 # core.table reaches the table engine's data layer directly: the source parser,
 # the declaration, the LIKE pattern and the candidate ordering. Its source list
-# is deliberately short — four files and utf8 — and that shortness is the
-# assertion. Everything below backend.h in engines/table/ is meant to be usable
-# without the engine, and a link error here would be the first sign that
-# something had reached back across the seam.
+# is deliberately confined — the engines/table/ data layer plus paths and utf8,
+# no core, no adapter — and that confinement is the assertion. Everything below
+# backend.h in engines/table/ is meant to be usable without the engine, and a
+# link error here would be the first sign that something had reached back
+# across the seam.
 #
-# Registered unconditionally so the registration cannot be lost, and gated
-# inside the .cc on PATHIME_WITH_TABLE like the api engine tests. It needs
-# SQLite because table_db.cc carries build_like_pattern(), even though nothing
-# here opens a database.
+# Gated on LIBPATHIME_WITH_TABLE, the option that builds the sources it
+# compiles. It needs SQLite because table_db.cc carries build_like_pattern(),
+# even though nothing here opens a database.
 if(LIBPATHIME_WITH_TABLE)
   libpathime_add_core_test(table SOURCES
     "${PROJECT_SOURCE_DIR}/src/engines/table/table_source.cc"
