@@ -234,34 +234,6 @@ that engine does not do.
 
 ## Queued work
 
-- **The Visual Studio generator races with itself on the first parallel build.**
-  A clean configure with both `LIBPATHIME_BUILD_DEMO=ON` and
-  `LIBPATHIME_BUILD_TESTS=ON`, followed by `cmake --build --parallel`, fails
-  about three times in five. Several MSBuild projects re-run CMake at once and
-  collide, reporting `Cannot restore timestamp
-  ".../CMakeFiles/generate.stamp": Access is denied` alongside a
-  `configure_file` failure from `CMakeLists.txt:42` — the libhangul `config.h`
-  written to `${CMAKE_BINARY_DIR}`, which every one of those regenerations
-  writes to the same path. A second `cmake --build` always succeeds, because by
-  then there is nothing left to regenerate.
-
-  Measured 2026-07-29: 5 failures in 8 clean builds with both options on.
-  Neither option alone reproduces it, so what provokes it is the number of
-  projects rather than anything either option contributes. Serial MSBuild is
-  clean, and so is Ninja under `--parallel`, which regenerates through a single
-  rule that cannot overlap.
-
-  **Why CMake regenerates at all is the unanswered part**, and it is the part
-  worth answering first: a configure that has just finished should leave nothing
-  stale, and two concurrent `cmake` regenerations run by hand do not collide, so
-  MSBuild's fan-out is needed to see it. `CMakeLists.txt:42` predates the
-  install work that surfaced this, and the failure has not been bisected, so
-  treat it as long-standing rather than new until someone checks.
-
-  The consequence is a flaky job rather than a broken build, which is what makes
-  it queued work instead of a build limitation: the one CI configuration that
-  turns on tests and the demo together is the configuration that flakes.
-
 - **Guarded names for the vendored libraries, as a build option.** The install
   layout keeps our libhangul, anthy-unicode and pyzy in a private
   `lib/pathime/` (`cmake/LibpathimeInstall.cmake`), which stops them colliding
@@ -534,6 +506,10 @@ Not a bug, and recorded here so it is tracked rather than only described:
 
 - **Cross-compiling is not supported.** anthy's dictionary is built by host
   tools at build time.
+- **The `windows-msvc` build is serial**, because the Visual Studio generator's
+  per-project regeneration check races with itself under `/m`. Settled
+  2026-07-29: it is CMake's behaviour, unchanged between 3.28 and 3.31.
+  `docs/windows-port.md`, "Known build limitation", has the mechanism.
 
 ## Not verified
 

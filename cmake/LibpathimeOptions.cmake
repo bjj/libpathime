@@ -28,10 +28,16 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # --- Parallel compilation with MSBuild ---------------------------------------
 # MSBuild has two independent levels of parallelism and neither is on by
-# default. `cmake --build -j` gives it the first (/m: several .vcxproj at once)
-# — the build presets pass it. The second is per-project: without /MP, the
-# ClCompile task hands cl.exe one source file at a time, so a 13-file library
-# like anthy's src-worddic compiles on one core no matter what /m is set to.
+# default. The first is /m, several .vcxproj at once, and the windows-msvc build
+# preset deliberately does not ask for it: the Visual Studio generator gives
+# every target in a directory the same CMake regeneration check, and on the
+# first build after a configure they run at once and collide
+# (docs/windows-port.md, "Known build limitation"). Ninja is unaffected.
+#
+# That leaves /MP as the only parallelism a Visual Studio build has, so it
+# matters more here than it otherwise would: without it the ClCompile task hands
+# cl.exe one source file at a time, and a 13-file library like anthy's
+# src-worddic compiles on one core.
 #
 # Restricted to real cl.exe on a multi-config (Visual Studio) generator. Ninja
 # already schedules one cl.exe per source itself, so adding /MP there would

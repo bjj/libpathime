@@ -98,6 +98,11 @@ cmake --preset windows-msvc
 cmake --build --preset windows-msvc
 ```
 
+It builds serially, because the Visual Studio generator's per-project CMake
+regeneration check races with itself under `/m` (`docs/windows-port.md`, "Known
+build limitation"); `/MP` still spreads compilation across cores within each
+project.
+
 There is also a `windows-ninja` preset (clang-cl + Ninja); it must be run from a
 developer command prompt, and remember to re-set `VCPKG_ROOT` afterwards.
 

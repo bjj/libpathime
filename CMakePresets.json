@@ -78,7 +78,8 @@
     { "name": "linux-debug",   "configurePreset": "linux-debug" },
     { "name": "linux-release", "configurePreset": "linux-release" },
     { "name": "linux-coverage", "configurePreset": "linux-coverage" },
-    { "name": "windows-msvc",  "configurePreset": "windows-msvc",  "configuration": "Release", "jobs": 0 },
+    { "name": "windows-msvc",  "configurePreset": "windows-msvc",  "configuration": "Release", "jobs": 1,
+      "description": "Serial on purpose: the Visual Studio generator's regeneration check races with itself under /m. See docs/windows-port.md." },
     { "name": "windows-ninja", "configurePreset": "windows-ninja" }
   ]
 }

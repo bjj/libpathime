@@ -71,6 +71,26 @@ family is one library on Windows", has the reasoning; the target names
 `anthydic-unicode` and `anthyinput-unicode` survive as interfaces onto that
 one DLL, so nothing else in the tree links differently.
 
+## Known build limitation: the Visual Studio generator builds serially
+
+The `windows-msvc` build preset does not pass `/m`, and the reason is a CMake
+behaviour rather than anything this port does.
+
+The Visual Studio generator gives **every target in a directory** the same
+custom build step, `cmake --check-stamp-file <dir>/CMakeFiles/generate.stamp`,
+and that step *rewrites* the stamp — temporary file, then rename over it — even
+when it finds nothing out of date. On the first build after a configure there
+are no MSBuild tracking logs to skip those steps with, so they all run at once;
+up to nine sibling projects share one stamp, the renames collide, and CMake
+reads a failed rename as "out of date" and reconfigures the whole project. It is
+the concurrent reconfigures, not the stamp, that then fail the build in
+`configure_file`. Ninja regenerates through a single rule that cannot overlap,
+which is why `windows-ninja` is unaffected.
+
+`/MP` still parallelises compilation within each project (see
+`cmake/LibpathimeOptions.cmake`), so a serial MSBuild is slower than Ninja, not
+single-threaded.
+
 ## Known runtime limitations
 
 Runtime gaps, not build failures; none of them affect the artifacts the build

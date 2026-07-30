@@ -236,10 +236,10 @@ Matrix:
 | `linux-static` | `BUILD_SHARED_LIBS=OFF` | exercises `PATHIME_STATIC` and the `module_path.cc` fallback that coverage cannot reach |
 | `linux-asan-ubsan` | per `docs/testing.md` | documented clean today |
 | `linux-uninit` | `-ftrivial-auto-var-init=pattern` | guards the `pathime_init_params_t` class of bug |
-| `windows-msvc` | `windows-msvc` preset | needs vcpkg binary caching |
-| `windows-ninja` | `windows-ninja` preset | clang-cl; shares the cache |
+| `windows-ninja` | `windows-ninja` preset | clang-cl; the Windows job to lean on |
+| `windows-msvc` | `windows-msvc` preset | keeps the Visual Studio generator honest; serial, and needs vcpkg binary caching |
 
-Two details that are easy to get wrong:
+Three details that are easy to get wrong:
 
 - **The sanitizer job needs `ASAN_OPTIONS=detect_leaks=0` at *build* time and
   not at test time.** anthy's dictionary codegen tools exit without freeing, as
@@ -247,17 +247,12 @@ Two details that are easy to get wrong:
   `docs/testing.md` has the reason.
 - **`anthy.vendor.main` is not leak-clean** and is vendored code testing vendored
   code. Either exclude it in the sanitizer job or accept the suppression.
-- **The `windows-msvc` job must not build the demo and the tests together in
-  parallel.** With both enabled, the first `cmake --build --parallel` after a
-  clean configure fails roughly three times in five, because several MSBuild
-  projects re-run CMake concurrently and collide on `generate.stamp` and on the
-  libhangul `config.h`. `TODO.md`, "Queued work", has the measurement and the
-  unanswered part. Until it is fixed the job has three ways out, in preference
-  order: keep tests and demo in separate jobs (which the matrix above already
-  does — the hazard is 4.7's combined job, not this one), drop `--parallel` on
-  the combined configuration, or build twice and accept the retry. The Ninja job
-  is unaffected, so `windows-ninja` is the one to trust for the combined
-  configuration.
+- **`windows-ninja` is the Windows job to lean on, and the one to reach for when
+  a Windows job needs to be added or made faster.** `windows-msvc` builds
+  serially — `docs/windows-port.md`, "Known build limitation", has the reason —
+  so it is there to keep the Visual Studio generator honest, not to be the
+  Windows workhorse. Anything wanting wall-clock time, or wanting tests and the
+  demo in one job, belongs on Ninja.
 
 Verified by hand on Windows 2026-07-29, so the matrix above is describing
 something known to pass rather than something hoped for: both presets, both link
