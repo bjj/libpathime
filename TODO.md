@@ -23,9 +23,9 @@ public entry points), **all four** adapters — hangul, anthy, pyzy and the
 table engine — options and negotiation including tier 3, the terminal demo
 client, the preedit rule, and the eager candidate strip are built and tested:
 40 suites, all passing on Linux with every backend enabled
-(`docs/testing.md`), and 33 on Windows under both presets — the five newest,
-`core.keys`, `core.table_compile`, `core.backend_defaults`, `core.romaji` and
-`core.punctuation`, have not been run there yet. The table engine
+(`docs/testing.md`), and 39 on Windows under both presets and in both link
+modes — every suite but `hangul.vendored.unittest`, which needs the Check
+library and is not registered where Check is absent. The table engine
 types real Chinese against tables compiled out of `ibus-table-chinese`, trimmed
 at build time to one of two checked-in glyph-coverage maps or to none.
 
@@ -233,6 +233,34 @@ that engine does not do.
     it means patching submodules, which is the rule this project does not break.
 
 ## Queued work
+
+- **The Visual Studio generator races with itself on the first parallel build.**
+  A clean configure with both `LIBPATHIME_BUILD_DEMO=ON` and
+  `LIBPATHIME_BUILD_TESTS=ON`, followed by `cmake --build --parallel`, fails
+  about three times in five. Several MSBuild projects re-run CMake at once and
+  collide, reporting `Cannot restore timestamp
+  ".../CMakeFiles/generate.stamp": Access is denied` alongside a
+  `configure_file` failure from `CMakeLists.txt:42` — the libhangul `config.h`
+  written to `${CMAKE_BINARY_DIR}`, which every one of those regenerations
+  writes to the same path. A second `cmake --build` always succeeds, because by
+  then there is nothing left to regenerate.
+
+  Measured 2026-07-29: 5 failures in 8 clean builds with both options on.
+  Neither option alone reproduces it, so what provokes it is the number of
+  projects rather than anything either option contributes. Serial MSBuild is
+  clean, and so is Ninja under `--parallel`, which regenerates through a single
+  rule that cannot overlap.
+
+  **Why CMake regenerates at all is the unanswered part**, and it is the part
+  worth answering first: a configure that has just finished should leave nothing
+  stale, and two concurrent `cmake` regenerations run by hand do not collide, so
+  MSBuild's fan-out is needed to see it. `CMakeLists.txt:42` predates the
+  install work that surfaced this, and the failure has not been bisected, so
+  treat it as long-standing rather than new until someone checks.
+
+  The consequence is a flaky job rather than a broken build, which is what makes
+  it queued work instead of a build limitation: the one CI configuration that
+  turns on tests and the demo together is the configuration that flakes.
 
 - **Guarded names for the vendored libraries, as a build option.** The install
   layout keeps our libhangul, anthy-unicode and pyzy in a private

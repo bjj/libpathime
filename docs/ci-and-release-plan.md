@@ -1,0 +1,639 @@
+# CI, publishing, and the macOS port — the plan
+
+What has to happen to put libpathime on GitHub with continuous integration,
+published packages, and a third platform, and in what order. Steps marked
+**[manual]** need a human at a browser or a terminal with credentials; the rest
+is work in this repository.
+
+This is a plan, so unlike the rest of `docs/` it is written to be consumed and
+deleted. Delete each phase as it lands; what survives belongs in `BUILD.md`,
+`docs/testing.md` or `THIRD-PARTY.md` instead.
+
+## Decisions already taken
+
+These are settled and the rest of the document assumes them:
+
+- **The GitHub repository is public.** That decision pays for everything else —
+  GitHub-hosted runners are free and unmetered on public repositories, on every
+  platform including macOS.
+- **The release artifacts ship all data.** Consumers who want different licence
+  terms build their own with `LIBPATHIME_WITH_ANTHY=OFF` /
+  `LIBPATHIME_WITH_TABLE=OFF`. See "What a release contains" below — this makes
+  every artifact GPL-3, and that has to be stated on the release rather than
+  implied by `LICENSE`.
+- **Two binary packages per platform, and they do not overlap.**
+  - a **library package**, for developers embedding libpathime: headers,
+    libraries, CMake package config, `pathime-data/`. **No demo.**
+  - a **demo package**, for someone who just wants to try the thing: the
+    `pathime-demo` executable, the libraries it needs, `pathime-data/`. Stands
+    alone, downloadable, runnable.
+- **Nothing ships the tests.** Not the library package, not the demo package.
+  This is already true — `tests/` installs nothing — so it is an invariant to
+  assert in CI, not work to do. Same for `pathime-table-compile`, which is a
+  build-time tool.
+- **Publishing targets developers, not distributions.** GitHub Releases, then a
+  vcpkg port, then possibly Conan. No deb, rpm, or AUR.
+- **Static builds are out of scope for packaging.** Every release artifact is a
+  shared build. `BUILD_SHARED_LIBS=OFF` stays a supported *build* — it is tested
+  and its install layout is correct — but nothing ships it. Two independent
+  reasons, and either alone is sufficient: the LGPL relinking obligation attaches
+  to a static artifact in a way it does not to a shared one (see 6.4), and a
+  static artifact pushes the vendored archives, the external libraries and the
+  C++ runtime onto the consumer's own link line, which is a support surface with
+  no audience yet. A consumer who wants it builds it. This is what keeps 4.3's
+  static consumer a *CI* obligation rather than a packaging one.
+- **`orion.local` stops mattering.** GitHub becomes the source of truth.
+- **A formatter is wanted, but negotiated** — the configuration is chosen by
+  looking at its output on this tree, not adopted off the shelf. Phase 5.
+
+## Baseline: what the build costs
+
+Measured on a 32-core Linux box, clean out-of-tree builds, all four backends
+enabled:
+
+| Job | Wall | CPU | Result |
+|---|---|---|---|
+| Configure + build + all runtime data | 4.6 s | 66 s | 20 MB `anthy.dic`, 3.3 MB pyzy, 5.5 MB tables |
+| `ctest -j8` | 0.25 s | 0.7 s | 37/37 pass |
+| Coverage build + `pathime-test-coverage` | 7.7 s | 50 s | 88.3 % lines (3118/3532) |
+| Demo build | 3.5 s | 42 s | — |
+
+A GitHub-hosted Linux runner has 4 vCPU, so a full build-and-test job lands
+around 20–40 seconds. **No build caching, ccache, or artifact reuse is worth
+configuring on Linux or macOS.** Be generous with the matrix instead.
+
+The one expensive job is Windows, where vcpkg has to supply glib and sqlite3 for
+pyzy. Built from source that is 15–30 minutes; with binary caching it is under a
+minute. Configure the cache before adding the job, or it becomes a tax on every
+push.
+
+## macOS: yes, and it is cheaper than it looks
+
+The question was whether macOS support is reachable without owning a Mac. It is,
+on both counts — CI can carry it, and there is a way to get an interactive shell
+today.
+
+### Getting a macOS shell right now, for free
+
+A public repository plus a workflow using an SSH-session action
+(`mxschmitt/action-tmate` or `owenthereal/action-upterm`) gives a real macOS
+runner with an SSH address printed in the job log, held open until the job
+timeout of six hours. That is the fastest path to iterating on the port from
+home, and on a public repository it costs nothing. Push a throwaway branch with
+a workflow that installs the dependencies and then opens the session, and work
+in it exactly as on a local machine.
+
+Rented Macs are the alternative and are worth knowing about but not worth
+starting with: Scaleway's Mac minis run about €0.11–0.22/hour and MacStadium's
+start around $119/month, but **Apple's licensing imposes a 24-hour minimum
+lease**, so the real floor is a few euros per session rather than cents.
+
+### What actually has to change in the tree
+
+The port is small and the reason is visible in the source: the tree is a clean
+`WIN32` / not-`WIN32` split, with every platform conditional in
+`cmake/ports/`, `cmake/LibpathimeOptions.cmake` and `cmake/LibpathimeRuntimeData.cmake`
+testing `WIN32` and nothing else. There is no `APPLE` branch anywhere, and the
+not-`WIN32` side is generic POSIX rather than Linux-specific. Four things need
+attention:
+
+1. **`src/module_path.cc:119` — the `/proc/self/exe` fallback.** `dladdr()`
+   works on macOS and answers for a dylib, so a **shared build needs no change
+   at all**. The fallback exists for static builds, where there is no separate
+   object for `dladdr` to name, and `/proc` does not exist on macOS. The
+   replacement is `_NSGetExecutablePath()` from `<mach-o/dyld.h>`, which takes a
+   buffer and an in/out length and wants `realpath()` afterwards because it can
+   return a non-canonical path. This is the only C++ source change the port
+   needs. It is also, per `docs/testing.md`, the least-covered code in the
+   tree — so it wants the static-build CI job of Phase 1 pointed at it.
+
+2. **The uuid probe, in two places** — `cmake/LibpathimeDependencies.cmake:82-91`
+   and `cmake/ports/pyzy/CMakeLists.txt:80`. Both ask pkg-config for `uuid`, and
+   the second does so `REQUIRED`, making it a hard configure error rather than a
+   gate. macOS has no `uuid.pc`, but it does have `<uuid/uuid.h>` and
+   `uuid_generate`/`uuid_unparse_lower` in libSystem — which is exactly what
+   pyzy's `engines/pyzy/src/Util.h:32` includes and calls. **The code compiles as
+   written; only the detection fails.** The fix is an `APPLE` arm that does a
+   `check_include_file(uuid/uuid.h ...)` and links nothing, structurally the same
+   as the existing Windows arm that maps to the Rpcrt4 shim.
+
+3. **`LIBPATHIME_TABLE_COVERAGE` has no macOS default.**
+   `cmake/LibpathimeOptions.cmake:106` picks `windows` on Windows and `noto`
+   everywhere else, so macOS silently inherits the Noto map. macOS ships PingFang
+   and Hiragino rather than Noto, so the honest options are to generate a third
+   map with `tools/generate-coverage.py` against the system faces, or to decide
+   `noto` is close enough and say so where the default is set. Not a blocker for
+   a first green build, but it is a real decision and should not be reached by
+   accident — the whole point of `BUILD.md`'s "Glyph coverage" section is that
+   the map is a recorded choice rather than a property of the machine.
+
+4. ~~**Install-tree RPATH.**~~ Done with Phase 4:
+   `libpathime_set_install_rpath()` in `cmake/LibpathimeInstall.cmake` picks
+   `@loader_path` on `APPLE` and `$ORIGIN` elsewhere. The `APPLE` arm is written
+   but has never run — it is one of the things the first macOS install job
+   verifies.
+
+Everything else is expected to carry over: sqlite3 comes from the macOS SDK,
+glib and pkg-config from Homebrew, and libhangul's `glob.h` check succeeds.
+anthy's build-time dictionary codegen and pyzy's generated tables have no
+obvious platform dependency, but neither has ever been run there — **the CI job
+is the verification, not this paragraph.**
+
+### Runner labels
+
+`macos-latest` moves to `macos-26` between June and July 2026, so pin the label
+explicitly rather than inheriting a silent platform change. `macos-15` and
+`macos-26` are Apple Silicon; `macos-15-intel` and `macos-26-intel` are x86-64.
+Start with one arm64 label and add Intel only if a consumer asks — the
+`arm64`/`x86_64` split is the more interesting axis than the OS version, and
+neither has been exercised.
+
+---
+
+# Phase 0 — Get onto GitHub
+
+Nothing else can start until this is done, and it is the phase with the most
+**[manual]** in it.
+
+**[manual] 0.1 — Push the submodule forks first.** This is the step whose
+omission produces a confusing CI failure later. Three of the five submodules are
+your own forks, and two of them are pinned to a `libpathime` branch:
+
+| Submodule | Remote | Pinned at |
+|---|---|---|
+| `engines/libhangul` | `libhangul/libhangul` (upstream) | `a34aef7` |
+| `engines/anthy-unicode` | `bjj/anthy-unicode` (fork, branch `libpathime`) | `b3f0bd6` |
+| `engines/pyzy` | `bjj/pyzy` (fork, branch `libpathime`) | `82afe13` |
+| `engines/ibus-table-chinese` | `bjj/ibus-table-chinese` (fork) | `cc4a17f` |
+| `demo/cpp-terminal` | `jupyter-xeus/cpp-terminal` (upstream) | `c64ca6f` |
+
+All five remotes are already public and reachable. What is not guaranteed is
+that the *exact pinned commits* are pushed — a commit made locally on a
+`libpathime` branch and never pushed will fail `git submodule update` on a
+runner with a message about a missing object. For each fork:
+
+```bash
+cd engines/anthy-unicode && git push origin libpathime && cd -
+cd engines/pyzy         && git push origin libpathime && cd -
+cd engines/ibus-table-chinese && git push origin HEAD && cd -
+```
+
+**[manual] 0.2 — Create the repository and push.**
+
+```bash
+gh repo create bjj/libpathime --public --source=. --remote=github --push
+```
+
+Keep `orion.local` as `origin` for now; nothing forces a rename, and having two
+remotes costs nothing.
+
+**[manual] 0.3 — Verify a cold clone, before writing any workflow.** This is
+five minutes that saves an hour of debugging a runner:
+
+```bash
+cd $(mktemp -d)
+git clone --recurse-submodules https://github.com/bjj/libpathime
+cd libpathime && cmake -S . -B b -G Ninja -DLIBPATHIME_BUILD_TESTS=ON \
+                       -DLIBPATHIME_REQUIRE_BACKENDS=ON
+cmake --build b && ctest --test-dir b --output-on-failure
+```
+
+If this passes, Phase 1 is mechanical. If it fails, it fails here where you can
+see it, rather than in a runner log.
+
+**[manual] 0.4 — Repository settings.** In the web UI:
+
+- **Settings → Actions → General → Workflow permissions**: set to *Read
+  repository contents and packages permissions*. Grant more per-job with an
+  explicit `permissions:` block. This is the default-deny posture and it is much
+  easier to adopt now than to retrofit.
+- **Settings → Code security**: enable Dependabot alerts and Dependabot security
+  updates.
+- **Do not add branch protection yet.** Requiring status checks that do not exist
+  is the classic first-timer trap: it blocks every merge, including the one that
+  would add the checks. Branch protection is step 1.5, after CI is green.
+
+---
+
+# Phase 1 — Core CI
+
+One workflow, `.github/workflows/ci.yml`, on `push` and `pull_request`, with a
+`concurrency` group keyed on the ref so superseded runs cancel themselves.
+
+Every job calls a **preset** rather than a hand-written `cmake` line — the
+presets are the contract, and a workflow that drifts from them stops testing
+what developers run. Every job also sets `-DLIBPATHIME_REQUIRE_BACKENDS=ON`, the
+option `BUILD.md` documents as existing for exactly this: without it a runner
+that quietly lost `libglib2.0-dev` reports green while testing three backends.
+
+Matrix:
+
+| Job | Configuration | What it is for |
+|---|---|---|
+| `linux-gcc-release` | Release, shared | the baseline |
+| `linux-gcc-debug` | Debug | assertions |
+| `linux-clang-release` | Clang | a second front end sees different things |
+| `linux-static` | `BUILD_SHARED_LIBS=OFF` | exercises `PATHIME_STATIC` and the `module_path.cc` fallback that coverage cannot reach |
+| `linux-asan-ubsan` | per `docs/testing.md` | documented clean today |
+| `linux-uninit` | `-ftrivial-auto-var-init=pattern` | guards the `pathime_init_params_t` class of bug |
+| `windows-msvc` | `windows-msvc` preset | needs vcpkg binary caching |
+| `windows-ninja` | `windows-ninja` preset | clang-cl; shares the cache |
+
+Two details that are easy to get wrong:
+
+- **The sanitizer job needs `ASAN_OPTIONS=detect_leaks=0` at *build* time and
+  not at test time.** anthy's dictionary codegen tools exit without freeing, as
+  build-time programs reasonably do, and LeakSanitizer fails the build over it.
+  `docs/testing.md` has the reason.
+- **`anthy.vendor.main` is not leak-clean** and is vendored code testing vendored
+  code. Either exclude it in the sanitizer job or accept the suppression.
+- **The `windows-msvc` job must not build the demo and the tests together in
+  parallel.** With both enabled, the first `cmake --build --parallel` after a
+  clean configure fails roughly three times in five, because several MSBuild
+  projects re-run CMake concurrently and collide on `generate.stamp` and on the
+  libhangul `config.h`. `TODO.md`, "Queued work", has the measurement and the
+  unanswered part. Until it is fixed the job has three ways out, in preference
+  order: keep tests and demo in separate jobs (which the matrix above already
+  does — the hazard is 4.7's combined job, not this one), drop `--parallel` on
+  the combined configuration, or build twice and accept the retry. The Ninja job
+  is unaffected, so `windows-ninja` is the one to trust for the combined
+  configuration.
+
+Verified by hand on Windows 2026-07-29, so the matrix above is describing
+something known to pass rather than something hoped for: both presets, both link
+modes, 39/39 suites each. Two Windows facts the matrix should not have to
+rediscover — `LIBPATHIME_REQUIRE_BACKENDS=ON` is satisfiable on a vcpkg host
+with `glib` and `sqlite3` only, and the fully static vcpkg triplet
+(`x64-windows-static-md`) has **never been configured**, because no packages are
+built for it. A `BUILD_SHARED_LIBS=OFF` Windows job therefore means the dynamic
+triplet, and should say so.
+
+**1.1 — Pin CMake.** Configuring with CMake 4.2.3 already emits a deprecation
+warning from `engines/libhangul/hangul/CMakeLists.txt:18`, which asks for
+compatibility with CMake < 3.10. That is a warning now and an error in a future
+release, and GitHub runner images track CMake closely — so this breaks on a
+runner-image refresh, not on a commit. Pin the CMake version in CI
+(`jwlawson/actions-setup-cmake`) so an image bump cannot break the build
+overnight. libhangul is unmodified upstream and should stay that way, so if the
+real fix is needed it is `CMAKE_POLICY_VERSION_MINIMUM` in our own build.
+
+**1.2 — Pin every third-party action to a commit SHA**, not a tag. Tags are
+mutable.
+
+**[manual] 1.3 — Turn on branch protection, once the checks are green.**
+Settings → Rules → Rulesets → New branch ruleset, targeting the default branch:
+require a pull request, and require the status checks that now exist and pass.
+
+---
+
+# Phase 2 — macOS
+
+**The goal of this phase is a green macOS build and `ctest` run, landed as one
+reviewed change on the public repository.** Deliberately after Phase 1, so that
+when the macOS job goes red you are looking at one variable rather than two.
+
+## 2.0 — Pick the iteration route first
+
+The port is small but it is guaranteed to take several rounds, because none of
+it has ever been compiled on the platform. Where those rounds happen is the
+decision, and it is worth taking before starting rather than during.
+
+**Route A — public repository, iterate in the open.** Push the CI, watch it go
+red, push again. It works, it needs no setup, and the whole world can watch you
+fail to spell `_NSGetExecutablePath`. Slow feedback (every round is a push, a
+queue and a runner boot) and a commit history full of "fix macOS take 7" unless
+the branch is squashed at the end.
+
+**Route B — interactive session on a runner.** A tmate step gives a real macOS
+shell over SSH, held to the six-hour job limit, and turns the loop from
+push-and-wait into an ordinary terminal. Two caveats. On a *public* repository
+that SSH address is in a public log, so the session is world-reachable while it
+is open — which is the exposure this route was meant to avoid. And handing the
+session to an agent depends on outbound SSH from the sandbox, which the sandbox
+firewall does not obviously permit — it proxies HTTP and HTTPS and default-denies
+the rest. Verify before planning around it.
+
+**Route C — private scratch repository, driven over HTTPS.** Push a
+`libpathime-macos-spike` private repo, iterate there with ordinary CI pushes, and
+land the finished diff as one clean PR on the public repo. This is the
+recommended route, and it is the one neither of the obvious two suggests:
+
+- **It is private**, so nothing is hanging out.
+- **It needs no SSH.** Everything happens over HTTPS to `github.com`, which is
+  reachable from the sandbox (verified: `git ls-remote` against all five
+  submodule remotes succeeds), so an agent can drive the whole loop — push, poll
+  `gh run watch`, read the log, fix, push again — without a human relaying
+  output.
+- **It is affordable.** Private repositories bill against the Free plan's 2,000
+  Linux-equivalent minutes per month, and macOS runs at a 10× multiplier, so the
+  allowance is 200 macOS-minutes. A libpathime macOS job is a couple of minutes
+  including `brew install`, so that is dozens of rounds a month — ample for a
+  spike, and it ends when the spike does.
+- Public submodules work fine from a private parent repository.
+
+Route B remains the right tool for one specific thing: a problem that needs
+poking at the machine rather than re-running a build — a linker error whose
+cause is in the SDK layout, say. Reach for it then, from the private repo, where
+the log is not public.
+
+**2.1 — Do the port.** In whichever route, work through the four items in "What
+actually has to change" above until a configure, build and `ctest` pass.
+
+**2.2 — Land the source changes**: the `_NSGetExecutablePath` fallback in
+`module_path.cc`, and the `APPLE` arm in both uuid probes.
+
+**2.3 — Decide the glyph-coverage map** for macOS and record the reasoning where
+the default is set, alongside the existing Windows/Noto note.
+
+**2.4 — Add `macos-26` (arm64) to the CI matrix**, with the same
+`REQUIRE_BACKENDS=ON` posture. Add a static-build macOS job too — that is the
+configuration the `module_path.cc` change exists for, and without it the change
+is untested.
+
+**2.5 — Update the documentation.** `README.md` and `BUILD.md` both say Linux
+and Windows; `BUILD.md` gains a Homebrew dependency line beside the apt and
+vcpkg ones. `docs/windows-port.md` stays as it is — the macOS port is not a
+compat layer and does not belong in it.
+
+---
+
+# Phase 3 — Quality signals
+
+Cheap, and each one is a thing you would otherwise have to remember to do.
+
+- **`coverage.yml`** — the `linux-coverage` preset. `gcovr` already writes
+  Cobertura `coverage.xml` for this purpose. Upload to Codecov for a PR comment
+  with the delta. Report **branch** coverage as well as lines: at 88.3 % lines
+  against roughly 57 % branches, the line figure is the less honest of the two,
+  and `docs/testing.md` says so.
+- **`codeql.yml`** — CodeQL for `c-cpp` with a manual build step. Free on public
+  repositories and genuinely good at C memory bugs.
+- **`.github/dependabot.yml`** — for `github-actions` *and* `gitsubmodule`. The
+  latter opens a PR when libhangul or cpp-terminal move upstream, which is
+  exactly the "a bump is a rebase" workflow the project already intends.
+- **A reproducibility job.** `BUILD.md` claims two builds of the same commit with
+  the same map produce byte-identical tables, checked across MSVC and clang-cl.
+  Build the tables twice and `cmp` them. That claim is load-bearing for the
+  checked-in coverage maps and nothing currently enforces it. Re-verified by hand
+  2026-07-29 — all five default tables *and* `anthy.dic` hash identically between
+  the `windows-msvc` and `windows-ninja` installs, so the job is codifying a
+  measurement rather than testing a hope. `anthy.dic` matching is not a documented
+  claim and should not become one on this evidence alone; it is one data point,
+  not a promise about anthy's codegen.
+
+---
+
+# Phase 4 — Make the library consumable
+
+This is the real work, and every publishing channel depends on it.
+
+**4.1 and 4.2 have landed.** `cmake/LibpathimeInstall.cmake` owns the installed
+layout: the export set and the generated `pathime-config.cmake`, a `pathime.pc`,
+`SOVERSION` on the `pathime` target, and per-target `INSTALL_RPATH` (`$ORIGIN` /
+`@loader_path`) rather than the global `CMAKE_INSTALL_RPATH` this plan assumed,
+so a tree pulling libpathime in with `add_subdirectory` keeps its own policy.
+The vendored libraries install into a private `lib/pathime/` and their headers
+are not installed at all; `BUILD.md`, "What gets produced", has the reasoning.
+Item 4 of the macOS list is done with them.
+
+- **4.3** — Add a CI job that installs to a prefix and builds a small standalone
+  consumer, in all four combinations: `find_package(pathime)` and `pkg-config`,
+  each against a shared and a static install. All four were verified by hand on
+  Linux when the install landed, and again on **Windows/MSVC 2026-07-29**, where
+  all four also *ran* — but nothing enforces them. The suites under
+  `tests/` link the build tree and structurally cannot catch a broken install
+  layout. Two specific things for the job to pin: a static **C** consumer needs
+  `enable_language(CXX)` or the link fails on `std::` symbols, and a static
+  consumer's `find_package` re-finds SQLite3, GLib and libuuid, so a runner
+  missing one of those `-dev` packages must fail loudly rather than skip.
+
+  **The consumer must be run, not only linked**, and it must call
+  `pathime_init()` with `resource_dir` NULL and then assert
+  `pathime_has_engine()` for all five ids. That one assertion is what tests the
+  data half of the layout: `pathime_has_engine()` is false for a backend whose
+  data is missing, so a consumer that links and exits proves nothing about
+  whether `pathime-data/` landed where the module resolves it. It is also how the
+  static rule gets tested at all — a static consumer resolves the directory from
+  its *own* executable, so the job has to place the binary beside the installed
+  `bin/pathime-data` and would silently pass a wrong `LIBPATHIME_INSTALL_DATADIR`
+  otherwise.
+
+  Two MSVC-specific notes for whoever writes the job. `pkg-config` output needs
+  `-l`/`-L` translated to `.lib` and `/LIBPATHIME:` for a `cl`-family driver, and
+  the translation must be case-sensitive or `-lpathime` matches `-L`. And
+  `BUILD.md`'s "without `--static` the link fails on every hangul, anthy, pyzy
+  **and `std::`** symbol" is Unix-only: MSVC auto-links the C++ runtime through
+  `#pragma comment(lib)`, so only the backend symbols fail there, and
+  `Libs.private` correctly names no C++ runtime on that toolchain.
+
+- **4.3a — The shared Windows install is not loadable, and this blocks 6.3.**
+  Found 2026-07-29. A consumer against a shared Windows install dies at load with
+  `0xC0000135 STATUS_DLL_NOT_FOUND`. `pathime.dll` imports `sqlite3.dll`
+  directly and `pyzy-1.0.dll` imports `sqlite3.dll` and `glib-2.0-0.dll`, but
+  none of the five vcpkg runtime DLLs the build depends on
+  (`sqlite3`, `glib-2.0-0`, `iconv-2`, `intl-8`, `pcre2-8`) is installed. The
+  build tree has them only because vcpkg's applocal step stages them beside the
+  built binaries; that step never touches the install tree, and there is no
+  `install(… RUNTIME_DEPENDENCIES)` or equivalent anywhere in the build.
+
+  This is long-standing rather than new — no such rule has ever existed — and it
+  is invisible on Linux, where the same libraries come from the system and are on
+  the loader's path. It surfaces now because it is exactly what a Windows library
+  artifact would ship. Copying those five files in by hand makes the install pass
+  every consumer check, so the gap is the packaging rule and nothing more.
+
+  It does not arise for a static install in the same way: there the external
+  libraries are the consumer's own declared `Requires.private` dependencies and
+  theirs to deploy — and per "Decisions already taken", no static artifact ships
+  regardless.
+
+## The two packages
+
+The library package needs almost no work, because the install rules already
+describe it. `tests/`, `tools/` and `demo/` contain no `install()` at all, so
+`cmake --install` today produces exactly the developer package and nothing else:
+headers, libraries, `pathime-data/`. The demo package is the one that needs
+building, and it needs a functional change as well as a packaging one.
+
+- **4.4 — Give the demo a real user-data directory.** `demo/CMakeLists.txt:159`
+  bakes `${CMAKE_CURRENT_BINARY_DIR}/data` in as `PATHIME_DEMO_DATA_DIR`, and
+  `demo/src/main.cc:142` uses it as the default place to keep what the engines
+  learn. That is exactly right for a build-tree demo — it is the same isolation
+  the api tests get, and it keeps a demo run out of the developer's real
+  `~/.config/anthy`. It is wrong for a *shipped* demo, which would default to an
+  absolute path on the machine that built it. A downloaded demo needs the
+  platform's per-user location instead (`$XDG_DATA_HOME` or `~/.local/share`,
+  `~/Library/Application Support`, `%LOCALAPPDATA%`), with the build-tree path
+  kept for an uninstalled build and `--data-dir` still overriding both. **This is
+  a prerequisite for shipping the demo, not a nicety** — without it the first
+  thing a new user meets is a write failure.
+- **4.5 — Add component-scoped install rules.** Tag the existing rules
+  `COMPONENT library` and add demo rules under `COMPONENT demo`. Then
+  `CPACK_ARCHIVE_COMPONENT_INSTALL ON` with `CPACK_COMPONENTS_GROUPING IGNORE`
+  makes CPack emit one archive per component, which is precisely the split
+  wanted. `pathime-data/` belongs to both, since neither package is usable
+  without it.
+- **4.6 — Build cpp-terminal static in the demo package.** It is already forced
+  static on Windows for a linkage reason `demo/CMakeLists.txt` documents at
+  length. Elsewhere it follows `BUILD_SHARED_LIBS` and would make the demo
+  package carry an extra shared object for no benefit. cpp-terminal is MIT, so
+  static linking costs nothing legally — unlike the three LGPL backends, which
+  stay shared.
+- **4.7 — Assert that nothing ships the tests.** Add a CI step that configures
+  with `LIBPATHIME_BUILD_TESTS=ON` *and* `LIBPATHIME_BUILD_DEMO=ON`, installs,
+  and fails if any test executable or `pathime-table-compile` appears in the
+  install tree. This is true today and free to keep true; it is the kind of thing
+  that silently stops being true the first time someone adds an `install()` to
+  get a binary somewhere convenient.
+
+---
+
+# Phase 5 — The formatter
+
+Last, and separately, because a reformat touches every file and would collide
+with anything in flight. **It must land as its own commit, after the test
+coverage branch merges.**
+
+### What the current style measures as
+
+Sampled across `src/`, `include/`, `tests/`, `tools/` and `demo/`, excluding
+vendored trees:
+
+- **Spaces only**, no leading tabs anywhere.
+- **Roughly 80 columns**: the 95th percentile line is 79–81 characters in every
+  directory, with a maximum of 98–103. So the intent is 80 with deliberate
+  exceptions, not a hard limit.
+- **Braces**: on their own line for function definitions, on the same line for
+  control statements. That is clang-format's `BreakBeforeBraces: Stroustrup`.
+- **Pointers and references bind right**: `const std::string &path`.
+
+That is a coherent style, which is why it reads well, and it maps onto a small
+clang-format configuration rather than a large one.
+
+### How to negotiate it
+
+The point is to see what a configuration does before adopting it, so:
+
+1. Write two or three candidate `.clang-format` files — a Stroustrup-based one
+   matching the measurements above, and one or two variants differing in the
+   arguments actually in question (`ColumnLimit` 80 vs 100,
+   `AlignAfterOpenBracket`, `AllowShortFunctionsOnASingleLine`).
+2. Apply each to a **scratch copy** of the tree, never the tree itself, and
+   diff. Review the diff by directory: the interesting files are the ones with
+   hand-aligned tables and long comment blocks, which is most of `cmake/` and
+   the option-handling code.
+3. Iterate on the configuration until the diff is small and every remaining
+   change is an improvement. A config whose diff is enormous is the wrong config,
+   not a mandate to reformat.
+4. Consider `// clang-format off` around the few genuinely hand-aligned blocks
+   rather than contorting the configuration to preserve them.
+
+### Two things not to miss
+
+- **Exclude the vendored trees.** `engines/` and `demo/cpp-terminal` are
+  submodules and must never be reformatted — a fix to a vendored library is a
+  commit on that submodule's branch, and a reformat is not a fix. A
+  `.clang-format` at the repository root applies to subdirectories unless they
+  contain one of their own, so the CI check must be scoped by path (run over
+  `src include tests tools demo` minus `demo/cpp-terminal`) rather than run over
+  everything.
+- **Add `.git-blame-ignore-revs`.** A whole-tree reformat destroys `git blame`
+  unless the commit is listed in that file. GitHub honours it automatically in
+  the blame view, and `git config blame.ignoreRevsFile .git-blame-ignore-revs`
+  makes the local one match. Create the file in the same commit that reformats.
+
+Only after the configuration is settled does a `format.yml` job checking
+`clang-format --dry-run --Werror` make sense.
+
+---
+
+# Phase 6 — Releasing
+
+**6.1 — Decide the version and tag policy.** The project is at `0.1.0` in
+`CMakeLists.txt:18` and has never released. Note the tension with the house
+rule in `CLAUDE.md` that the library is unreleased and carries no dated
+changelog: releasing is precisely what ends that, and a `CHANGELOG.md` becomes
+correct rather than forbidden. Decide that deliberately.
+
+**6.2 — `release.yml` on `v*` tags.** Build both packages for Linux, macOS and
+Windows, attach them, generate notes. Consider
+`actions/attest-build-provenance`, which is nearly free on GitHub and
+increasingly expected of a project that ships binaries.
+
+**6.3 — What a release contains.** Six binary artifacts, two per platform:
+
+| Artifact | Holds | For |
+|---|---|---|
+| `libpathime-<ver>-<platform>` | headers, libraries, CMake package config, `pathime-data/` | embedding the library |
+| `pathime-demo-<ver>-<platform>` | `pathime-demo`, the libraries it loads, `pathime-data/` | trying it out |
+
+Neither holds the tests or `pathime-table-compile`. The demo package does not
+hold headers or the CMake config; the library package does not hold the demo.
+
+**6.4 — Licensing, which the artifacts change.** The decision is that everything
+ships all data, and that has two consequences to state on the release page
+rather than leave for a consumer to discover:
+
+| Component | Licence | In library pkg | In demo pkg |
+|---|---|---|---|
+| libpathime | MIT | ✓ | ✓ |
+| libhangul, anthy-unicode, pyzy (shared) | LGPL-2.1 | ✓ | ✓ |
+| `pathime-data/pyzy/*` | LGPL-2.1 | ✓ | ✓ |
+| `pathime-data/anthy/anthy.dic` | **GPL-2** | ✓ | ✓ |
+| `pathime-data/table/*.db` | **GPL-3** | ✓ | ✓ |
+| cpp-terminal (static) | MIT | — | ✓ |
+
+So **both artifacts are GPL-3 as a whole** — roughly 25 MB of their 29 MB of
+data is copyleft — even though the library's own `LICENSE` is MIT. Link
+`THIRD-PARTY.md` from the release description; it already lays out the
+per-component terms and the `LIBPATHIME_WITH_ANTHY=OFF` /
+`LIBPATHIME_WITH_TABLE=OFF` escape hatch for a consumer who wants different
+terms.
+
+**`THIRD-PARTY.md` needs two edits before the first release**, and the second is
+easy to miss:
+
+1. A "What a binary release contains" section, describing the two artifacts.
+2. **Its cpp-terminal entry becomes wrong.** That file currently lists
+   cpp-terminal under "Development-time only" and states it is "not shipped in
+   an install" — true today, and false the moment a demo package exists.
+   cpp-terminal moves to a shipped component, MIT, statically linked into
+   `pathime-demo` only.
+
+The LGPL relinking obligation attaches to a `BUILD_SHARED_LIBS=OFF` artifact in a
+way it does not to the default shared one, and that is half of why **static
+builds are out of scope for packaging** — settled under "Decisions already
+taken". Both packages stay on the shared path even though a static demo would be
+a tidier single file. Nothing here forbids a static build; it forbids shipping
+one, so the table above needs no static row and 6.6's vcpkg port should offer no
+static feature until someone asks and the licence question is answered.
+
+**6.5 — The source tarball needs a helper.** GitHub's auto-generated "Source
+code (tar.gz)" on a release **does not include submodules**, so for this project
+it is not a buildable source release. Either generate a real one in the release
+workflow (`git archive` plus each submodule's archive, or a
+`--recurse-submodules` clone with `.git` stripped) or say plainly in the release
+notes that building from source means cloning with `--recurse-submodules`.
+
+**6.6 — vcpkg port.** A `vcpkg.json` plus `portfile.cmake`, submitted as a PR to
+`microsoft/vcpkg`. This is the natural first channel: the audience is C and C++
+embedders, and the Windows build already depends on vcpkg. It packages the
+library only — the demo is not a thing a vcpkg consumer wants. Requires Phase 4.
+
+**6.7 — Conan.** Same shape, second audience, only if asked for.
+
+---
+
+# Suggested order
+
+Phases 0 and 1 are worth having even if nothing else happens. Phase 2 is
+independent of 3 and 4 and can be slotted wherever the interest is. Phase 4
+gates all of Phase 6.
+
+```
+0 ──▶ 1 ──┬──▶ 2  (macOS)
+          ├──▶ 3  (coverage, CodeQL, dependabot)
+          └──▶ 4  (install/export) ──▶ 6 (releases, vcpkg)
+
+5 (formatter) — after the test-coverage branch merges, any time.
+```
