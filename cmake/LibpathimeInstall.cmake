@@ -273,6 +273,35 @@ endfunction()
 # The pkg-config file. Separate from the CMake package because it has one thing
 # to work out that the export set derives for itself: the static link line.
 function(_libpathime_install_pkgconfig)
+  # The paths, relocatable when the layout allows it. A release archive is
+  # extracted at whatever prefix the downloader chooses, so a .pc that recorded
+  # the build machine's prefix would hand every consumer paths onto a machine
+  # they do not have; deriving prefix from ${pcfiledir} keeps the file true
+  # wherever the tree lands, and matches how the CMake package config and the
+  # library's own data lookup already locate themselves. The test is the three
+  # directories the file's variables are built from: GNUInstallDirs allows any
+  # of them to be absolute, and one absolute directory makes the whole file
+  # configure-time-pinned — pinned wholesale rather than mixed, because a file
+  # half anchored to ${pcfiledir} would come apart the first time the tree
+  # moved. BINDIR is in the test only because a static or Windows layout puts
+  # pathime-data under it.
+  if(NOT IS_ABSOLUTE "${CMAKE_INSTALL_LIBDIR}"
+     AND NOT IS_ABSOLUTE "${CMAKE_INSTALL_INCLUDEDIR}"
+     AND NOT IS_ABSOLUTE "${CMAKE_INSTALL_BINDIR}")
+    file(RELATIVE_PATH _pc_to_prefix
+         "${CMAKE_INSTALL_FULL_LIBDIR}/pkgconfig" "${CMAKE_INSTALL_PREFIX}")
+    string(REGEX REPLACE "/+$" "" _pc_to_prefix "${_pc_to_prefix}")
+    set(PATHIME_PC_PREFIX "\${pcfiledir}/${_pc_to_prefix}")
+    set(PATHIME_PC_LIBDIR "\${prefix}/${CMAKE_INSTALL_LIBDIR}")
+    set(PATHIME_PC_INCLUDEDIR "\${prefix}/${CMAKE_INSTALL_INCLUDEDIR}")
+    set(PATHIME_PC_DATADIR "\${prefix}/${LIBPATHIME_INSTALL_DATADIR}")
+  else()
+    set(PATHIME_PC_PREFIX "${CMAKE_INSTALL_PREFIX}")
+    set(PATHIME_PC_LIBDIR "${CMAKE_INSTALL_FULL_LIBDIR}")
+    set(PATHIME_PC_INCLUDEDIR "${CMAKE_INSTALL_FULL_INCLUDEDIR}")
+    set(PATHIME_PC_DATADIR "${LIBPATHIME_INSTALL_FULL_DATADIR}")
+  endif()
+
   # Every library is named through $<TARGET_LINKER_FILE_BASE_NAME> rather than by
   # its target or OUTPUT_NAME, because CMAKE_DEBUG_POSTFIX and a per-config
   # OUTPUT_NAME both rename the file a consumer has to link and only the

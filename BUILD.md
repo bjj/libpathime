@@ -147,9 +147,14 @@ answers false for a backend whose runtime data is missing as well.
 - **With `LIBPATHIME_BUILD_DEMO=ON`**: `bin/pathime-demo`, plus the
   `cpp-terminal` library it draws with. Neither is installed.
 
-Pass `-DCMAKE_INSTALL_PREFIX=...` at **configure** time if you plan to install.
-The generated `pathime.pc` records absolute paths, so `cmake --install --prefix`
-cannot relocate the result afterwards.
+The installed tree locates itself, so it can be installed with
+`cmake --install --prefix`, moved afterwards, or unpacked from an archive at
+any prefix: `pathime.pc` derives its paths from its own location
+(`${pcfiledir}`), the CMake package config does the same, the RPATHs are
+`$ORIGIN`-relative, and the library finds `pathime-data/` beside itself (see
+"Shipping the data"). The one layout that pins itself to configure-time paths
+is an absolute `CMAKE_INSTALL_LIBDIR`, `INCLUDEDIR` or `BINDIR`, which leaves
+`pathime.pc` nothing to be relative to.
 
 `cmake --install` lays out headers under `include/pathime/`, `libpathime` under
 `lib/` (the DLL under `bin/`), and the vendored backend libraries under

@@ -484,21 +484,19 @@ Item 4 of the macOS list is done with them.
   theirs to deploy — and per "Decisions already taken", no static artifact ships
   regardless.
 
-- **4.3b — Make `pathime.pc` relocatable, and prove it with a moved prefix.**
-  `cmake/pathime.pc.in` hardcodes `prefix=@CMAKE_INSTALL_PREFIX@`, deliberately
-  and with a comment citing `BUILD.md`. That stance is right for a built tree
-  and wrong for a release archive, which by definition is extracted to a prefix
-  that is not the CI runner's — as shipped, `pkg-config --cflags pathime` from
-  a downloaded SDK would emit paths onto a destroyed VM. The CMake half already
-  has this right: `configure_package_config_file` computes the prefix from the
-  config file's own location, `PATHIME_DATA_DIR` included. Either derive the
-  `.pc`'s `prefix` from `${pcfiledir}` (the standard relocatable form) or strip
-  the `.pc` from release archives and declare them `find_package`-only; the
-  former is the recommendation, and `BUILD.md`'s "cannot relocate the result"
-  paragraph changes with it. Then extend 4.3's consumer job to **consume from
-  a prefix that was moved after install** — installing and consuming at the
-  same prefix, which is all 4.3 does otherwise, structurally cannot catch this
-  class of bug, for either half.
+- **4.3b — `pathime.pc` is relocatable; what remains is the CI assertion.**
+  The `.pc` now derives its prefix from `${pcfiledir}` whenever the
+  GNUInstallDirs layout is prefix-relative (any absolute directory pins the
+  file to configure-time paths, wholesale); `BUILD.md` states the resulting
+  rule — the installed tree self-locates and can be moved, `--prefix`-ed or
+  unpacked anywhere. Verified by hand on Linux: all four 4.3 combinations
+  (`find_package`/`pkg-config` × shared/static) built *and ran* the
+  five-engine consumer against a prefix moved after install, and a shared
+  install relocated with `cmake --install --prefix` to a never-configured
+  prefix did the same. What remains is 4.3's job asserting it: the consumer
+  must **consume from a prefix that was moved after install** — installing and
+  consuming at the same prefix structurally cannot catch this class of bug,
+  for either the `.pc` or the CMake config.
 
 - **4.3c — The Windows runtime-DLL install rule, resolving 4.3a.** On `WIN32`
   only: `install(TARGETS pathime RUNTIME_DEPENDENCY_SET ...)` plus an
