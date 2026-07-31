@@ -463,14 +463,15 @@ Item 4 of the macOS list is done with them.
   `Libs.private` correctly names no C++ runtime on that toolchain.
 
 - **4.3a — The shared Windows install is not loadable, and this blocks 6.3.**
-  Found 2026-07-29. A consumer against a shared Windows install dies at load with
+  Found 2026-07-29; resolved 2026-07-31 by 4.3c's rule, now implemented in
+  `cmake/LibpathimeInstall.cmake`. A consumer against a shared Windows install
+  died at load with
   `0xC0000135 STATUS_DLL_NOT_FOUND`. `pathime.dll` imports `sqlite3.dll`
   directly and `pyzy-1.0.dll` imports `sqlite3.dll` and `glib-2.0-0.dll`, but
   none of the five vcpkg runtime DLLs the build depends on
-  (`sqlite3`, `glib-2.0-0`, `iconv-2`, `intl-8`, `pcre2-8`) is installed. The
-  build tree has them only because vcpkg's applocal step stages them beside the
-  built binaries; that step never touches the install tree, and there is no
-  `install(… RUNTIME_DEPENDENCIES)` or equivalent anywhere in the build.
+  (`sqlite3`, `glib-2.0-0`, `iconv-2`, `intl-8`, `pcre2-8`) was installed. The
+  build tree had them only because vcpkg's applocal step stages them beside the
+  built binaries; that step never touches the install tree.
 
   This is long-standing rather than new — no such rule has ever existed — and it
   is invisible on Linux, where the same libraries come from the system and are on
@@ -498,15 +499,17 @@ Item 4 of the macOS list is done with them.
   consuming at the same prefix structurally cannot catch this class of bug,
   for either the `.pc` or the CMake config.
 
-- **4.3c — The Windows runtime-DLL install rule, resolving 4.3a.** On `WIN32`
-  only: `install(TARGETS pathime RUNTIME_DEPENDENCY_SET ...)` plus an
-  `install(RUNTIME_DEPENDENCY_SET ...)` whose filters state the actual policy —
-  include what resolves from the vcpkg installed tree, exclude the OS
+- **4.3c — The Windows runtime-DLL install rule, resolving 4.3a.** Implemented
+  2026-07-31 in `cmake/LibpathimeInstall.cmake`, on `WIN32` shared builds
+  only: every installed runtime target joins a `RUNTIME_DEPENDENCY_SET`, and
+  an `install(RUNTIME_DEPENDENCY_SET ...)` whose filters state the actual
+  policy — include what resolves from the vcpkg installed tree, exclude the OS
   (`PRE_EXCLUDE_REGEXES` for `api-ms-`/`ext-ms-`, `POST_EXCLUDE_REGEXES` for
-  system32). Not a hand-copied list of the five current names: that list goes
-  stale silently on a vcpkg baseline bump — pcre2 is exactly the kind of
-  transitive dependency that changes — where the dependency-set form encodes
-  the rule and fails loudly.
+  system32) — installs the closure. Not a hand-copied list of the five current
+  names: that list goes stale silently on a vcpkg baseline bump — pcre2 is
+  exactly the kind of transitive dependency that changes — where the
+  dependency-set form encodes the rule and fails loudly. What remains of 4.3a
+  is 4.3's CI job asserting a Windows consumer loads from an installed tree.
 
   On whether the DLLs are vcpkg's fault, since the question comes up: no. They
   follow from Windows having no system-wide home for third-party libraries and

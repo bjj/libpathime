@@ -71,6 +71,13 @@ family is one library on Windows", has the reasoning; the target names
 `anthydic-unicode` and `anthyinput-unicode` survive as interfaces onto that
 one DLL, so nothing else in the tree links differently.
 
+pyzy's vcpkg runtime dependencies (`glib-2.0-0.dll` and friends) follow the
+DLLs into both trees, by different means: vcpkg's applocal step populates the
+build tree's `bin/`, and the install computes the same closure itself — every
+installed runtime target joins a CMake runtime dependency set whose install
+rule, in `cmake/LibpathimeInstall.cmake`, includes what resolves from the
+vcpkg tree and excludes the operating system's own DLLs.
+
 ## Known build limitation: the Visual Studio generator builds serially
 
 The `windows-msvc` build preset does not pass `/m`, and the reason is a CMake
@@ -103,9 +110,6 @@ produces.
   that `textdict`'s newline padding is written twice as long as intended; the
   private-dictionary write/read/delete cycle round-trips correctly, and
   `ctest -R '^anthy\.dicutil$'` covers it.
-- The installed tree does not carry pyzy's vcpkg runtime dependencies
-  (`glib-2.0-0.dll` and friends). They are staged into the build tree's `bin/`
-  by vcpkg's applocal step; deploying an install needs them copied alongside.
 - `hangul.vendored.unittest` does not run on Windows; `docs/testing.md`
   explains why, and what covers the same ground instead.
 

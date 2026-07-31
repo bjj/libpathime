@@ -81,6 +81,23 @@ endif()
 # that loads it, so a vendored DLL has nowhere else it could go.
 set(LIBPATHIME_VENDORED_BINDIR "${CMAKE_INSTALL_BINDIR}")
 
+# The external runtime-DLL closure, Windows-shared only. The build links DLLs
+# it does not build — pyzy's glib and friends, from vcpkg — and vcpkg's
+# applocal step stages them only beside the *build* tree's binaries, so an
+# install that did not carry them would produce a pathime.dll that cannot
+# load. Every installed runtime target joins this dependency set, and
+# libpathime_install_package() installs the set's closure, computed at install
+# time. Computed rather than hand-listed on purpose: a list of the current
+# five names goes stale silently on a vcpkg baseline bump, where the
+# dependency-set form encodes the rule and fails loudly.
+# docs/ci-and-release-plan.md 4.3c has the reasoning, the alternatives
+# considered, and the licence consequences of shipping the closure.
+if(WIN32 AND BUILD_SHARED_LIBS)
+  set(LIBPATHIME_RUNTIME_DEP_SET_ARGS RUNTIME_DEPENDENCY_SET pathime-runtime)
+else()
+  set(LIBPATHIME_RUNTIME_DEP_SET_ARGS "")
+endif()
+
 # Where pathime-data lands, and the single place that decides it: beside the
 # module that resolves it, because that is what makes the default resource_dir
 # correct for an installed tree. src/module_path.cc asks the loader which file a
@@ -200,6 +217,7 @@ function(libpathime_install_vendored)
     set_property(GLOBAL APPEND PROPERTY LIBPATHIME_VENDORED_TARGETS ${_tgt})
     libpathime_set_install_rpath(${_tgt})
     install(TARGETS ${_tgt} EXPORT ${LIBPATHIME_EXPORT_SET}
+      ${LIBPATHIME_RUNTIME_DEP_SET_ARGS}
       RUNTIME DESTINATION "${LIBPATHIME_VENDORED_BINDIR}"
       LIBRARY DESTINATION "${LIBPATHIME_VENDORED_LIBDIR}"
       ARCHIVE DESTINATION "${LIBPATHIME_VENDORED_LIBDIR}")
@@ -238,6 +256,29 @@ function(libpathime_install_package)
   # the one thing all of them depend on: it has to come last.
   if(TARGET libpathime_win32compat AND NOT BUILD_SHARED_LIBS)
     libpathime_install_vendored(libpathime_win32compat)
+  endif()
+
+  # The closure of the runtime dependency set the install(TARGETS) rules
+  # filled — LIBPATHIME_RUNTIME_DEP_SET_ARGS above is what it is for. The
+  # filters are the policy: api-ms-/ext-ms- are the CRT's virtual DLL names,
+  # satisfied by the loader rather than by a file; anything resolving to
+  # system32 is the operating system's to provide; what remains resolves from
+  # the vcpkg installed tree, named through DIRECTORIES so resolution does not
+  # lean on the installing user's PATH. Lowercase regexes suffice — DLL names
+  # are lowercased before the filters see them — and targets this build
+  # produces never enter the closure, so the vendored DLLs cannot be
+  # double-installed.
+  if(LIBPATHIME_RUNTIME_DEP_SET_ARGS)
+    set(_vcpkg_dirs "")
+    if(DEFINED VCPKG_INSTALLED_DIR AND DEFINED VCPKG_TARGET_TRIPLET)
+      set(_vcpkg_dirs DIRECTORIES
+        "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}$<$<CONFIG:Debug>:/debug>/bin")
+    endif()
+    install(RUNTIME_DEPENDENCY_SET pathime-runtime
+      PRE_EXCLUDE_REGEXES "^api-ms-" "^ext-ms-"
+      POST_EXCLUDE_REGEXES "[/\\\\][Ss]ystem32[/\\\\]"
+      ${_vcpkg_dirs}
+      RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
   endif()
 
   install(EXPORT ${LIBPATHIME_EXPORT_SET}
