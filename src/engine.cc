@@ -7,6 +7,7 @@
  *    reads it, pathime_engine_create() consults it (one backend, pyzy,
  *    supplies two engine ids: PINYIN and BOPOMOFO);
  *  - engine handle lifecycle and pathime_engine_id();
+ *  - pathime_engine_name(), the static id→name table;
  *  - pathime_engine_requirements() — today only hangul's PREEDIT_NONE mode
  *    sets a PATHIME_REQUIRES_* bit;
  *  - the engine level of the two-level option store (the machinery itself is
@@ -134,6 +135,24 @@ std::unique_ptr<EngineBackend> create_engine_backend(pathime_engine_id_t id)
 bool pathime_has_engine(pathime_engine_id_t id)
 {
     return pathime::engine_available(id);
+}
+
+const char *pathime_engine_name(pathime_engine_id_t id)
+{
+    /*
+     * Static and total, like pathime_option_name(): names are ABI storage
+     * keys, so the answer depends neither on pathime_init() nor on which
+     * backends this build contains — what a name means is not conditional on
+     * what is installed. "" is the not-an-engine answer, never a valid name.
+     */
+    switch (id) {
+    case PATHIME_ENGINE_HANGUL:   return "hangul";
+    case PATHIME_ENGINE_ANTHY:    return "anthy";
+    case PATHIME_ENGINE_PINYIN:   return "pinyin";
+    case PATHIME_ENGINE_BOPOMOFO: return "bopomofo";
+    case PATHIME_ENGINE_TABLE:    return "table";
+    default:                      return "";
+    }
 }
 
 pathime_status_t pathime_engine_create(pathime_engine_id_t id,

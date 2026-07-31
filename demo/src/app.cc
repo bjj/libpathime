@@ -17,19 +17,18 @@ namespace {
  */
 struct EngineDef {
     pathime_engine_id_t id;
-    const char *key;   /**< What --engine accepts. */
     const char *name;
     const char *hint;
 };
 
 const EngineDef kEngineDefs[] = {
-    {PATHIME_ENGINE_HANGUL,   "hangul",   "Korean · Hangul",
+    {PATHIME_ENGINE_HANGUL,   "Korean · Hangul",
      "type  gksrnr  for \xED\x95\x9C\xEA\xB5\xAD"},
-    {PATHIME_ENGINE_ANTHY,    "anthy",    "Japanese · Anthy",
+    {PATHIME_ENGINE_ANTHY,    "Japanese · Anthy",
      "type  nihon  then Space to convert"},
-    {PATHIME_ENGINE_PINYIN,   "pinyin",   "Chinese · Pinyin",
+    {PATHIME_ENGINE_PINYIN,   "Chinese · Pinyin",
      "type  nihao  then Space, or 1-9 to pick"},
-    {PATHIME_ENGINE_BOPOMOFO, "bopomofo", "Chinese · Bopomofo",
+    {PATHIME_ENGINE_BOPOMOFO, "Chinese · Bopomofo",
      "type  su3cl3  then Space; digits are tones here, so Alt+1-9 picks"},
     /*
      * Two tables rather than one, because the engine's whole point is that it
@@ -37,7 +36,7 @@ const EngineDef kEngineDefs[] = {
      * nothing alike, which is the part a hint can show and prose cannot.
      * Both spell 我; cangjie5 keys by radical shape, wubi by stroke groups.
      */
-    {PATHIME_ENGINE_TABLE,    "table",    "Table-driven",
+    {PATHIME_ENGINE_TABLE,    "Table-driven",
      "set table-file: cangjie5, type  hqi  \xE2\x80\x94 or wubi-jidian86, type  trn"},
 };
 
@@ -111,7 +110,8 @@ bool App::open(const std::string &initial_engine, std::string *error)
     if (!initial_engine.empty()) {
         for (std::size_t i = 0; i < engines_.size(); i++) {
             for (const EngineDef &def : kEngineDefs) {
-                if (def.id == engines_[i].id && initial_engine == def.key)
+                if (def.id == engines_[i].id &&
+                    initial_engine == pathime_engine_name(def.id))
                     active_ = i;
             }
         }

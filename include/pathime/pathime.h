@@ -79,7 +79,8 @@
  *   The callback-safe set is exactly the non-mutating queries:
  *
  *     pathime_version, pathime_version_string, pathime_status_string,
- *     pathime_has_engine, pathime_engine_id, pathime_engine_requirements,
+ *     pathime_has_engine, pathime_engine_name, pathime_engine_id,
+ *     pathime_engine_requirements,
  *     pathime_context_engine, pathime_context_user_data,
  *     pathime_context_requirements,
  *     pathime_context_composition, pathime_context_candidate,
@@ -373,7 +374,8 @@ typedef struct pathime_init_params {
  * Every function in this header requires it to have succeeded, with these
  * exceptions, which read no global state and are usable at any time:
  * pathime_version, pathime_version_string, pathime_status_string,
- * pathime_option_count and pathime_option_name. pathime_has_engine is usable
+ * pathime_engine_name, pathime_option_count and pathime_option_name.
+ * pathime_has_engine is usable
  * too but answers false for everything before initialization, since no engine
  * can be supplied yet; call it again afterward for a meaningful answer.
  */
@@ -417,6 +419,22 @@ typedef enum pathime_engine_id {
     PATHIME_ENGINE_BOPOMOFO = 3,  /**< Chinese, Bopomofo/Zhuyin phonetic input. */
     PATHIME_ENGINE_TABLE    = 4   /**< Table-driven input from a loaded table. */
 } pathime_engine_id_t;
+
+/**
+ * A stable, machine-readable name for an engine id: "hangul", "anthy",
+ * "pinyin", "bopomofo", "table". The engine counterpart of
+ * pathime_option_name(), with the same contract — a key for a client's own
+ * configuration storage, never NULL, never changed once an engine ships, and
+ * not text to put in front of a user. A value that is not an engine id yields
+ * "", which is never a valid engine name.
+ *
+ * Answered for every engine this header names whether or not this build
+ * contains it: what a name means is not conditional on what is installed.
+ * Availability is pathime_has_engine()'s question.
+ *
+ * A static table lookup: safe to call before pathime_init(). Callback-safe.
+ */
+PATHIME_API const char *pathime_engine_name(pathime_engine_id_t id);
 
 /**
  * True iff pathime_engine_create() can currently supply @a id. False both for

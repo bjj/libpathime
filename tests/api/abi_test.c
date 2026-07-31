@@ -48,5 +48,16 @@ int main(void)
     PT_CHECK(!pathime_has_engine(PATHIME_ENGINE_TABLE));
     PT_CHECK(!pathime_has_engine((pathime_engine_id_t)9999));
 
+    /* pathime_engine_name() is a static table usable before pathime_init():
+     * the names the header states, and "" for a value that is not an engine
+     * id — never a valid name, so a binding verifies its transcription of the
+     * engine enum the way it verifies the option enum. */
+    PT_CHECK(strcmp(pathime_engine_name(PATHIME_ENGINE_HANGUL), "hangul") == 0);
+    PT_CHECK(strcmp(pathime_engine_name(PATHIME_ENGINE_ANTHY), "anthy") == 0);
+    PT_CHECK(strcmp(pathime_engine_name(PATHIME_ENGINE_PINYIN), "pinyin") == 0);
+    PT_CHECK(strcmp(pathime_engine_name(PATHIME_ENGINE_BOPOMOFO), "bopomofo") == 0);
+    PT_CHECK(strcmp(pathime_engine_name(PATHIME_ENGINE_TABLE), "table") == 0);
+    PT_CHECK(strcmp(pathime_engine_name((pathime_engine_id_t)9999), "") == 0);
+
     return pt_report("api.abi");
 }

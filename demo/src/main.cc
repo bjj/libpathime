@@ -48,25 +48,13 @@ void usage(const char *argv0)
         argv0);
 }
 
-const char *engine_name(pathime_engine_id_t id)
-{
-    switch (id) {
-    case PATHIME_ENGINE_HANGUL:   return "hangul";
-    case PATHIME_ENGINE_ANTHY:    return "anthy";
-    case PATHIME_ENGINE_PINYIN:   return "pinyin";
-    case PATHIME_ENGINE_BOPOMOFO: return "bopomofo";
-    case PATHIME_ENGINE_TABLE:    return "table";
-    default:                      return "?";
-    }
-}
-
 int list_engines()
 {
     static const pathime_engine_id_t kIds[] = {
         PATHIME_ENGINE_HANGUL, PATHIME_ENGINE_ANTHY, PATHIME_ENGINE_PINYIN,
         PATHIME_ENGINE_BOPOMOFO, PATHIME_ENGINE_TABLE};
     for (pathime_engine_id_t id : kIds) {
-        std::printf("  %-9s %s\n", engine_name(id),
+        std::printf("  %-9s %s\n", pathime_engine_name(id),
                     pathime_has_engine(id) ? "available" : "not available");
     }
     return 0;
