@@ -32,20 +32,6 @@ at build time to one of two checked-in glyph-coverage maps or to none.
 
 ---
 
-## Next Windows session
-
-- **Verify the self-contained install (4.3c) actually loads.** The
-  runtime-DLL closure in `cmake/LibpathimeInstall.cmake` — a
-  `RUNTIME_DEPENDENCY_SET` whose filters follow `docs/ci-and-release-plan.md`
-  4.3a/4.3c — is `WIN32`-gated and was written from a Linux sandbox, so it has
-  never run. Check that `cmake --install` of a pyzy-enabled build places the
-  vcpkg runtime (`glib-2.0-0.dll`, `sqlite3.dll`, `iconv-2.dll`, `intl-8.dll`,
-  `pcre2-8.dll`) beside `pathime.dll`, and that `LoadLibrary("pathime.dll")`
-  from the installed tree succeeds in a process with no other path setup. The
-  failure this closes is the misleading one: "Could not find module
-  'pathime.dll' (or one of its dependencies)" naming a file that exists,
-  found while pointing a language binding at the installed tree.
-
 ## The table engine: what is missing
 
 The engine itself is built — `src/engines/table/README.md` is the map, and
@@ -422,6 +408,14 @@ with.
 
 ## Decisions wanted
 
+- **Does the Windows release artifact ship the MSVC redistributable runtime?**
+  The 4.3c closure deliberately excludes what resolves from system32, and that
+  sweeps in `msvcp140.dll`/`vcruntime140*.dll` — present on any machine with
+  the VC++ redist, in-box nowhere. Found verifying the install by hand
+  2026-07-31; `docs/ci-and-release-plan.md` 4.3c states the limit and the two
+  honest options (ship the three app-local, or document the redist as a
+  requirement). A hosted CI runner cannot catch it: Visual Studio brings the
+  redist with it.
 - **Does `docs/CONCEPTS.md` keep "Input purpose and hints"?** It is the one
   section of the model the library does not implement, and it is now labelled
   as such in place. Either it stays as a description of the concept space the
