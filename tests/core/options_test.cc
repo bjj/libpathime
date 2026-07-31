@@ -520,6 +520,15 @@ void test_before_init()
     PT_CHECK_STATUS(pathime_engine_reset_option(&engine, PATHIME_OPT_LEARNING),
                     PATHIME_ERROR_NOT_INITIALIZED);
 
+    /* Isolation gates like the setters it stands in for — and arguments still
+     * come before state, so the NULL context reports itself even here. */
+    pathime_context ctx;
+    ctx.engine = &engine;
+    PT_CHECK_STATUS(pathime_context_isolate_options(&ctx),
+                    PATHIME_ERROR_NOT_INITIALIZED);
+    PT_CHECK_STATUS(pathime_context_isolate_options(nullptr),
+                    PATHIME_ERROR_INVALID_ARGUMENT);
+
     /* A rejected set stored nothing, which the store can be asked directly —
      * is_set has no error channel and answers false before init anyway, so both
      * halves of that sentence are exercised at once. */
@@ -1878,6 +1887,184 @@ void test_engine_broadcast()
     PT_CHECK_I64(value, 12);
 }
 
+/* ---------------------------------------------------------------------------
+ * Isolation
+ * ------------------------------------------------------------------------- */
+
+/*
+ * pathime_context_isolate_options(): every inherited value becomes an explicit
+ * override, silently, and the context stops hearing from its engine. The
+ * silence claims are observed the same two ways as in test_engine_broadcast —
+ * the callback counter, and the indeterminate flag that pathime_context_reset()
+ * always consumes, so a reset that ran cannot hide.
+ */
+void test_isolate()
+{
+    pathime_engine engine;
+    engine.id = PATHIME_ENGINE_ANTHY;
+
+    ClientState s_isolated;
+    ClientState s_follows;
+    pathime_context isolated;
+    pathime_context follows;
+    wire_context(isolated, engine, s_isolated, false);
+    wire_context(follows, engine, s_follows, false);
+
+    /* The engine as a client configured it: one value moved from its default,
+     * plus an override the context made itself, which isolation must leave
+     * alone rather than overwrite. */
+    PT_CHECK_STATUS(
+        pathime_engine_set_option_int(&engine, PATHIME_OPT_MAX_CANDIDATES, 10),
+        PATHIME_OK);
+    PT_CHECK_STATUS(
+        pathime_context_set_option_bool(&isolated, PATHIME_OPT_LEARNING, false),
+        PATHIME_OK);
+    s_isolated.changes = 0;
+    s_follows.changes = 0;
+
+    /* The call is silent: every value it writes was already in effect, so
+     * there is nothing to dispatch and nothing to reset — the four
+     * resets_composition options are copied like the rest. */
+    isolated.indeterminate = true;
+    PT_CHECK_STATUS(pathime_context_isolate_options(&isolated), PATHIME_OK);
+    PT_CHECK(isolated.indeterminate);
+    isolated.indeterminate = false;
+    PT_CHECK(s_isolated.changes == 0);
+    PT_CHECK(s_follows.changes == 0);
+
+    /* Every option the engine implements is an override now; every option it
+     * does not implement was left untouched. The neighbour was not enrolled. */
+    for (size_t i = 0; i < pathime_option_count(); i++) {
+        const pathime_option_t option = static_cast<pathime_option_t>(i);
+        pathime_option_info_t info;
+        std::memset(&info, 0, sizeof info);
+        info.struct_size = sizeof info;
+        PT_CHECK_STATUS(pathime_engine_option_info(&engine, option, &info), PATHIME_OK);
+        PT_CHECK_MSG(pathime_context_option_is_set(&isolated, option) == info.supported,
+                     "%s: is_set=%d after isolation, supported=%d",
+                     pathime_option_name(option),
+                     static_cast<int>(pathime_context_option_is_set(&isolated, option)),
+                     static_cast<int>(info.supported));
+    }
+    PT_CHECK(!pathime_context_option_is_set(&follows, PATHIME_OPT_MAX_CANDIDATES));
+
+    /* Nothing resolves differently: the configured value, the context's own
+     * override, and an untouched default all answer as before. */
+    int64_t value = 0;
+    PT_CHECK_STATUS(
+        pathime_context_get_option_int(&isolated, PATHIME_OPT_MAX_CANDIDATES, &value),
+        PATHIME_OK);
+    PT_CHECK_I64(value, 10);
+    bool flag = true;
+    PT_CHECK_STATUS(
+        pathime_context_get_option_bool(&isolated, PATHIME_OPT_LEARNING, &flag),
+        PATHIME_OK);
+    PT_CHECK(!flag);
+    PT_CHECK_STATUS(
+        pathime_context_get_option_int(&isolated, PATHIME_OPT_ANTHY_TYPING_METHOD, &value),
+        PATHIME_OK);
+    PT_CHECK_I64(value, PATHIME_ANTHY_TYPING_ROMAJI);
+
+    /* The isolation itself: an engine-level change reaches the context that
+     * follows and passes the isolated one by. */
+    PT_CHECK_STATUS(
+        pathime_engine_set_option_int(&engine, PATHIME_OPT_MAX_CANDIDATES, 99),
+        PATHIME_OK);
+    PT_CHECK(s_isolated.changes == 0);
+    PT_CHECK(s_follows.changes == 1);
+    PT_CHECK_STATUS(
+        pathime_context_get_option_int(&isolated, PATHIME_OPT_MAX_CANDIDATES, &value),
+        PATHIME_OK);
+    PT_CHECK_I64(value, 10);
+    PT_CHECK_STATUS(
+        pathime_context_get_option_int(&follows, PATHIME_OPT_MAX_CANDIDATES, &value),
+        PATHIME_OK);
+    PT_CHECK_I64(value, 99);
+
+    /* Including a resets_composition option: the copied value overrides it, so
+     * the isolated context is neither reset nor notified. */
+    isolated.indeterminate = true;
+    PT_CHECK_STATUS(
+        pathime_engine_set_option_int(&engine, PATHIME_OPT_ANTHY_TYPING_METHOD,
+                                      PATHIME_ANTHY_TYPING_KANA),
+        PATHIME_OK);
+    PT_CHECK(isolated.indeterminate);
+    isolated.indeterminate = false;
+    PT_CHECK(s_isolated.changes == 0);
+    PT_CHECK_STATUS(
+        pathime_context_get_option_int(&isolated, PATHIME_OPT_ANTHY_TYPING_METHOD, &value),
+        PATHIME_OK);
+    PT_CHECK_I64(value, PATHIME_ANTHY_TYPING_ROMAJI);
+
+    /* Isolation is a set of overrides, not a mode: resetting one option
+     * re-attaches exactly that option, dispatching as any change does. */
+    s_isolated.changes = 0;
+    PT_CHECK_STATUS(
+        pathime_context_reset_option(&isolated, PATHIME_OPT_MAX_CANDIDATES),
+        PATHIME_OK);
+    PT_CHECK(s_isolated.changes == 1);
+    PT_CHECK_STATUS(
+        pathime_context_get_option_int(&isolated, PATHIME_OPT_MAX_CANDIDATES, &value),
+        PATHIME_OK);
+    PT_CHECK_I64(value, 99);
+
+    /* Calling again re-pins the re-attached option at the value now in effect,
+     * still silently, and leaves the rest alone — which is also what makes the
+     * documented resume-after-OUT_OF_MEMORY story true. */
+    s_isolated.changes = 0;
+    PT_CHECK_STATUS(pathime_context_isolate_options(&isolated), PATHIME_OK);
+    PT_CHECK(s_isolated.changes == 0);
+    PT_CHECK_STATUS(
+        pathime_context_get_option_int(&isolated, PATHIME_OPT_MAX_CANDIDATES, &value),
+        PATHIME_OK);
+    PT_CHECK_I64(value, 99);
+
+    /* The copy is of the *effective* value, capping rule included: a context
+     * whose client cannot delete pins the capped SYLLABLE, not the engine's
+     * NONE, and keeps it when the engine moves on. */
+    pathime_engine hangul;
+    hangul.id = PATHIME_ENGINE_HANGUL;
+    ClientState s_capped;
+    pathime_context capped;
+    wire_context(capped, hangul, s_capped, /*with_delete=*/false);
+    PT_CHECK_STATUS(
+        pathime_engine_set_option_int(&hangul, PATHIME_OPT_HANGUL_PREEDIT,
+                                      PATHIME_HANGUL_PREEDIT_NONE),
+        PATHIME_OK);
+    PT_CHECK_STATUS(pathime_context_isolate_options(&capped), PATHIME_OK);
+    PT_CHECK_STATUS(
+        pathime_context_get_option_int(&capped, PATHIME_OPT_HANGUL_PREEDIT, &value),
+        PATHIME_OK);
+    PT_CHECK_I64(value, PATHIME_HANGUL_PREEDIT_SYLLABLE);
+    PT_CHECK_STATUS(
+        pathime_engine_set_option_int(&hangul, PATHIME_OPT_HANGUL_PREEDIT,
+                                      PATHIME_HANGUL_PREEDIT_WORD),
+        PATHIME_OK);
+    PT_CHECK_STATUS(
+        pathime_context_get_option_int(&capped, PATHIME_OPT_HANGUL_PREEDIT, &value),
+        PATHIME_OK);
+    PT_CHECK_I64(value, PATHIME_HANGUL_PREEDIT_SYLLABLE);
+
+    /* The isolation covers the table choice itself: with no table named
+     * anywhere, the explicit empty string is pinned — "no table" is a value —
+     * so an engine-level table choice later does not reach the context. */
+    pathime_engine table;
+    table.id = PATHIME_ENGINE_TABLE;
+    ClientState s_table;
+    pathime_context tctx;
+    wire_context(tctx, table, s_table, false);
+    PT_CHECK_STATUS(pathime_context_isolate_options(&tctx), PATHIME_OK);
+    PT_CHECK(pathime_context_option_is_set(&tctx, PATHIME_OPT_TABLE_FILE));
+    PT_CHECK_STATUS(
+        pathime_engine_set_option_string(&table, PATHIME_OPT_TABLE_FILE, "late5"),
+        PATHIME_OK);
+    pathime_str_t text;
+    PT_CHECK_STATUS(
+        pathime_context_get_option_string(&tctx, PATHIME_OPT_TABLE_FILE, &text),
+        PATHIME_OK);
+    PT_CHECK_SIZE(text.len, 0);
+}
+
 /*
  * Value names, checked against the descriptor rather than against a list
  * repeated here.
@@ -2076,6 +2263,7 @@ int main()
     test_string_options();
     test_hangul_capping();
     test_engine_broadcast();
+    test_isolate();
 
     pathime_shutdown();
     return pt_report("core.options");

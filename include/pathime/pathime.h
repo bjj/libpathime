@@ -1282,6 +1282,13 @@ PATHIME_API pathime_status_t pathime_context_reset(pathime_context_t *ctx);
  * setter can invoke callbacks belonging to contexts it was not passed, so
  * engine setters are not callback-safe. Getters and info queries are.
  *
+ * A context that has overridden the option is untouched by all of that: tier 1
+ * already wins for it, so nothing about it changed. A context can claim that
+ * immunity for its whole inventory at once — see
+ * pathime_context_isolate_options(), which turns the engine level into a
+ * template read once rather than a live influence, for the client that wants
+ * exactly that.
+ *
  * ---------------------------------------------------------------------------
  * When a change takes effect
  * ---------------------------------------------------------------------------
@@ -2254,6 +2261,47 @@ PATHIME_API pathime_status_t pathime_engine_reset_option(pathime_engine_t *engin
                                                          pathime_option_t option);
 PATHIME_API pathime_status_t pathime_context_reset_option(pathime_context_t *ctx,
                                                           pathime_option_t option);
+
+/**
+ * Isolate @a ctx from engine-level option changes: every option this engine
+ * implements that the context has not itself set is set on the context, at its
+ * current effective value. Afterwards an engine-level set or reset finds every
+ * option overridden here and passes this context by — the same per-option
+ * immunity any explicit override has, applied to the whole inventory at once —
+ * so only calls naming this context change what it resolves.
+ *
+ * This exists for the client that would rather not hold the two-level model in
+ * its head: a language binding wrapping contexts as self-contained objects, or
+ * any caller whose callbacks must not run under an engine-level setter.
+ * Configure the engine, create the context, isolate it; the engine level is
+ * then a template read at isolation time rather than a live influence.
+ *
+ * Nothing resolves differently during the call — every value written is the
+ * value already in effect, the PATHIME_OPT_HANGUL_PREEDIT capping rule
+ * included — so it dispatches no callbacks and resets nothing, whichever
+ * options are copied. The copies are ordinary overrides:
+ * pathime_context_option_is_set() answers true for each, and
+ * pathime_context_reset_option() drops one and re-attaches that option to the
+ * engine like any other override. Isolation is that set of overrides, not a
+ * mode; there is nothing to ask "is this context isolated", only which options
+ * are set.
+ *
+ * On the table engine the isolation covers the table choice itself.
+ * PATHIME_OPT_TABLE_FILE is copied like everything else — as the explicit
+ * empty string when no table is named anywhere, so a context isolated before
+ * any table was chosen does not acquire one when the engine later does; it
+ * names its own or stays tableless. And the values the effective table
+ * declares are copied like every other effective value, so a context-level
+ * table switch after isolation changes which table is read but no longer
+ * re-derives the options the old table declared; reset those options to let
+ * the new table speak.
+ *
+ * The one failure is PATHIME_ERROR_OUT_OF_MEMORY, and it is a failure rather
+ * than a rejection: options already copied stay copied. Each copy is inert on
+ * its own, and calling again resumes where the failed call stopped, because
+ * copied options answer is_set. Not callback-safe.
+ */
+PATHIME_API pathime_status_t pathime_context_isolate_options(pathime_context_t *ctx);
 
 /* ---- Reading ----------------------------------------------------------
  *

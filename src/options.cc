@@ -1,6 +1,6 @@
 /*
  * Implementation of the options machinery declared in options.h, plus the
- * twenty public entry points of the header's Options section.
+ * twenty-one public entry points of the header's Options section.
  *
  * Everything here is core code: no backend is named, nothing crosses
  * backend.h, and the file compiles identically whatever the PATHIME_WITH_*
@@ -914,6 +914,61 @@ pathime_status_t reset_option(pathime_engine_t *engine,
     return commit_change(engine, ctx, desc, option);
 }
 
+/**
+ * The body of pathime_context_isolate_options(). Copies rather than sets:
+ * every value written is the value the context already resolves — the Hangul
+ * cap included, since resolve_number() applies it — so validation has nothing
+ * to check and dispatch has nothing to announce. The setter machinery above is
+ * deliberately not involved: commit_change() exists to make a change felt, and
+ * there is none.
+ */
+pathime_status_t isolate_options(pathime_context_t *ctx)
+{
+    if (ctx == nullptr || ctx->engine == nullptr) {
+        return PATHIME_ERROR_INVALID_ARGUMENT;
+    }
+    if (!initialized()) {
+        return PATHIME_ERROR_NOT_INITIALIZED;
+    }
+
+    const pathime_engine_t *engine = ctx->engine;
+
+    for (size_t i = 0; i < kOptionCount; i++) {
+        const pathime_option_t option = static_cast<pathime_option_t>(i);
+        const OptionDescriptor *desc = &kOptions[i];
+
+        if (!option_supported(option, engine->id) || ctx->options.is_set(option)) {
+            continue;
+        }
+
+        pathime_status_t status;
+        if (desc->type == PATHIME_OPTION_STRING) {
+            /*
+             * PATHIME_OPT_TABLE_FILE included, and included when it resolves
+             * empty: the explicit empty string is a legal value meaning "no
+             * table", so a context isolated before any table was chosen pins
+             * that, and an engine-level table choice later does not reach it.
+             */
+            const pathime_str_t value = resolve_string(engine, ctx, desc, option);
+            status = store_string(ctx->options, option, value.bytes);
+        } else {
+            status = store_number(ctx->options, option,
+                                  resolve_number(engine, ctx, desc, option));
+        }
+        if (status != PATHIME_OK) {
+            /*
+             * OUT_OF_MEMORY, and the header calls it a failure: the options
+             * already copied stay copied. Each copy is inert on its own, and a
+             * later call resumes where this one stopped, because copied options
+             * answer is_set.
+             */
+            return status;
+        }
+    }
+
+    return PATHIME_OK;
+}
+
 pathime_status_t get_number(const pathime_engine_t *engine,
                             const pathime_context_t *ctx,
                             pathime_option_t option,
@@ -1435,6 +1490,11 @@ pathime_status_t pathime_context_reset_option(pathime_context_t *ctx,
                                               pathime_option_t option)
 {
     return pathime::reset_option(nullptr, ctx, option);
+}
+
+pathime_status_t pathime_context_isolate_options(pathime_context_t *ctx)
+{
+    return pathime::isolate_options(ctx);
 }
 
 /* ---- Reading ---------------------------------------------------------- */
