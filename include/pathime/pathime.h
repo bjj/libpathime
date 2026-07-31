@@ -316,6 +316,9 @@ typedef struct pathime_init_params {
      * client owns this path and controls its lifetime; the library creates the
      * directory and whatever structure it needs beneath it.
      *
+     * NULL selects a platform-appropriate default beneath the user's
+     * configuration directory.
+     *
      * A NUL-terminated filesystem path, in UTF-8 on every platform.
      *
      * The empty string is PATHIME_ERROR_INVALID_ARGUMENT rather than a second
