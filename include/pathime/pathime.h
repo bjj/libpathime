@@ -2102,11 +2102,9 @@ typedef struct pathime_option_info {
      * PATHIME_OPT_TABLE_FILE is the only option with one today — the tables the
      * installation ships — and it is why this member exists.
      *
-     * Unlike everything else in this struct it is *not* static. It describes
-     * what was found beneath pathime_init_params_t::resource_dir, so it is 0
-     * before pathime_init() and may differ between two runs against different
-     * installations. A client walking the inventory before initialization gets
-     * a correct description of every option except this one member.
+     * Unlike everything else in this struct it is *not* static: it describes
+     * what was found beneath pathime_init_params_t::resource_dir, so it may
+     * differ between two runs against different installations.
      */
     size_t valid_value_count;
 } pathime_option_info_t;
