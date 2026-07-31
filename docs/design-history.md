@@ -402,3 +402,67 @@ user, not another reading of libhangul.
   `parse_table_source()` is 100% line-covered and its real-world input surface
   is thirteen fixed, checked-in tables that essentially nobody edits. A fuzzer
   would defend a corpus of thirteen known inputs.
+
+## 12. What the first language binding taught (2026-07-31)
+
+A Python ctypes binding — ~600 lines plus ~250 of declarations, all five
+engines, written and tested in a day — needed **zero library changes**, which
+was the point of asking. Its friction list drove one round here. What landed
+lives where it belongs: the header states what `data_dir = NULL` selects,
+`pathime_engine_name()` completes the introspection pattern beside
+`pathime_option_name()`, the Windows install carries its runtime-DLL closure
+(verification queued in `TODO.md`), and `pathime_context_isolate_options()`
+was added. Recorded here is what was ruled, declined, or reverted:
+
+- **Late resolution of engine options stays; isolation is the opt-out.** The
+  trade had never been argued in a recorded round. Ruling: an engine-level set
+  reaches every non-overriding context immediately, synchronously, inside the
+  setter call. Reason: it is the reference behaviour (ibus-hangul and
+  ibus-table both push a settings change into running engines; open fields
+  follow), and the synchrony is inherent to having no event loop — elsewhere
+  the API's most-praised property. Cost, stated in the header: engine setters
+  are not callback-safe and invoke callbacks belonging to contexts they were
+  never passed, so a binding's obvious per-call error slot is the wrong shape
+  (the Python binding carries a weak-set of contexts per engine to surface
+  those errors).
+  - **Rejected: copy-on-create.** An engine set after context creation goes
+    silently inert for open contexts — a trap aimed at exactly the confused
+    one-context client it would help; contexts of one engine diverge by
+    creation time with no getter revealing it; `reset_option` needs a new
+    rule either way it is read, making the frozen copy a hidden fifth tier;
+    and a client wanting the fan-out back must re-implement
+    `commit_change`'s override-respecting loop outside the library.
+  - **Rejected: lazy dispatch, and forbidding engine sets once contexts
+    exist.** The former breaks "takes effect immediately" and cannot defer
+    the four `resets_composition` options — keys would be read under a scheme
+    the store no longer names. The latter forces recreate-to-reconfigure on
+    long-lived engines.
+  - **Tried and reverted: dispatching only where a context's effective value
+    changed.** Implemented, tested green, popped off master the same day. The
+    comparison must be per context and must run full resolution — tier 3 and
+    the Hangul cap can absorb a change for one context and not its neighbour
+    — so `options.cc` grew a capture/compare snapshot with its own string
+    lifetimes and OOM rules; and the leverage was only ever the client that
+    re-sets values already in effect. Reopen only with such a client in hand,
+    and note that isolation serves that client better.
+  - **Added instead: `pathime_context_isolate_options()`** — the header's
+    contract is the authority. One call makes the per-option immunity an
+    override has always had (the broadcast skips contexts where `is_set`
+    answers) total: every supported option's effective value is copied into
+    the context's own store, silently, because nothing resolves differently.
+    Opt-in, visible to `is_set`, reversible per option through
+    `reset_option`, no new tier, no new resolution rule. The verb was chosen
+    over pin/adopt/detach — "adopt" already means candidate adoption in
+    `docs/CONCEPTS.md`.
+- **No static pre-init `pathime_option_type()`.** An option's type is
+  option-static by construction — the descriptor owns type, bounds, defaults
+  and `resets_composition`; an engine narrows only support and valid values —
+  but the sole consumer of a static lookup would be a pre-init settings flow
+  no client has, and that flow would want the whole descriptor, so the right
+  future addition is a static info variant, waiting for its consumer. A
+  binding's actual cost today is one info call per typed access, cacheable
+  after the first.
+- **No "writing a binding" document, deliberately.** Binding guidance lives
+  in actual binding implementations, not in this repository. The one sentence
+  such a document would have opened with is folded into the late-resolution
+  ruling above.

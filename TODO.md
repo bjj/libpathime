@@ -19,7 +19,7 @@ written to stand on its own: the three development-only documents (this file,
 `CLAUDE.md`, `docs/design-history.md`) could be deleted with nothing dangling.
 Keep it that way — nothing outside those three should cite them.
 
-Status in one paragraph: the build (Linux and Windows), the core (all 44
+Status in one paragraph: the build (Linux and Windows), the core (all 45
 public entry points), **all four** adapters — hangul, anthy, pyzy and the
 table engine — options and negotiation including tier 3, the terminal demo
 client, the preedit rule, and the eager candidate strip are built and tested:
@@ -31,6 +31,20 @@ types real Chinese against tables compiled out of `ibus-table-chinese`, trimmed
 at build time to one of two checked-in glyph-coverage maps or to none.
 
 ---
+
+## Next Windows session
+
+- **Verify the self-contained install (4.3c) actually loads.** The
+  runtime-DLL closure in `cmake/LibpathimeInstall.cmake` — a
+  `RUNTIME_DEPENDENCY_SET` whose filters follow `docs/ci-and-release-plan.md`
+  4.3a/4.3c — is `WIN32`-gated and was written from a Linux sandbox, so it has
+  never run. Check that `cmake --install` of a pyzy-enabled build places the
+  vcpkg runtime (`glib-2.0-0.dll`, `sqlite3.dll`, `iconv-2.dll`, `intl-8.dll`,
+  `pcre2-8.dll`) beside `pathime.dll`, and that `LoadLibrary("pathime.dll")`
+  from the installed tree succeeds in a process with no other path setup. The
+  failure this closes is the misleading one: "Could not find module
+  'pathime.dll' (or one of its dependencies)" naming a file that exists,
+  found while pointing a language binding at the installed tree.
 
 ## The table engine: what is missing
 
