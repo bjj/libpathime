@@ -123,6 +123,10 @@ answers false for a backend whose runtime data is missing as well.
 - **With `LIBPATHIME_BUILD_DEMO=ON`**: `bin/pathime-demo`, plus the
   `cpp-terminal` library it draws with. Neither is installed.
 
+A bare build tree stages no `pathime-data/` — only `LIBPATHIME_BUILD_TESTS` or
+`LIBPATHIME_BUILD_DEMO` do — so consuming from outside the tree means running
+`cmake --install` first.
+
 The installed tree locates itself, so it can be installed with
 `cmake --install --prefix`, moved afterwards, or unpacked from an archive at
 any prefix: `pathime.pc` derives its paths from its own location
