@@ -378,7 +378,7 @@ reversing them reintroduces the decimal-point bug. This is the library's first
 deliberately not `PATHIME_REQUIRES_*`. Two sources of truth accepted; the
 precedence rule is one sentence.
 
-## 10. Hangul does not resume a syllable found in the document (2026-07-29)
+## 10. What Hangul may assume about the document (2026-07-29, extended 2026-07-31)
 
 Under `PREEDIT_NONE`, a half-built syllable at the caret is not picked back up.
 libhangul cannot seed a context (replaying jamo as keystrokes is layout-specific
@@ -389,6 +389,25 @@ could not expire — it would mean any syllable before the caret is resumable
 forever (하 typed last week + ㄴ → 한). Cost, real: after the break, Backspace
 deletes the whole syllable rather than a jamo. Reopening this needs a Korean
 user, not another reading of libhangul.
+
+**The converse, and the same answer: the mode does not run blind either
+(2026-07-31).** ibus-hangul's `PREEDIT_MODE_NONE` keeps a one-syllable buffer
+(`hangul->preedit`, `engine.c:889-891`) and it invites the reading that the mode
+is forward-only and needs no surrounding text; our `in_document_` is that same
+buffer. The reading is wrong. The buffer exists to *size* the
+`delete_surrounding_text` call (`engine.c:879-884`), and ibus-hangul checks it
+against the document on every key (`check_caret_pos_sanity()`,
+`engine.c:738-785`) rather than trusting it. Trusting it is what is rejected
+here: a caret the user moved turns the buffer into a description of somewhere
+else, and issuing the deletion anyway deletes whatever now sits before the caret
+— the only way this mode corrupts rather than degrades. CONCEPTS.md's "an engine
+may only ask to delete text it can actually see" is the invariant that forbids
+it, and it is core, not Hangul's. Cost, real: a client that can delete
+surrounding text but cannot report it is locked out — it passes context creation
+and then strands every jamo. Reopening this needs a client that can prove its
+caret has not moved by some other means, not a tighter buffer. libhangul itself
+offers nothing here: one syllable, no commit history, `hangul_ic_backspace`
+returns false on an empty buffer (`hangulinputcontext.c:191-223`, `:453`).
 
 ## 11. Testing decisions (2026-07-29)
 

@@ -375,8 +375,11 @@ void HangulContextBackend::end_composition(Composition *model, Output *out)
  * The usual reason to answer no is not a client bug. This mode commits on
  * every keystroke, and a commit invalidates the snapshot by definition, so a
  * client must re-supply surrounding text after every single key to keep up.
- * That is what PATHIME_HANGUL_PREEDIT_NONE's documentation means by requiring
- * the surrounding-text surface "keenly".
+ * Note what is being asked of the snapshot: in_document_ already holds the
+ * text, so the only question put to the document is whether a deletion that
+ * size would still land on it. That is the obligation
+ * PATHIME_HANGUL_PREEDIT_NONE's documentation places on the client, and the
+ * reason the mode declares PATHIME_REQUIRES_SURROUNDING_TEXT.
  *
  * @return true if composition may continue; false if it was abandoned, in
  *         which case libhangul has been reset and the caller should treat the

@@ -1140,17 +1140,13 @@ PATHIME_API pathime_status_t pathime_context_set_surrounding_text(pathime_contex
 /* ---- Lifecycle -------------------------------------------------------- */
 
 /*
- * There is no focus concept, and its absence is deliberate. A context is a
- * client destination, so which destination the user is typing into is
- * expressed by which context the client offers keys to: an input method that
- * is not receiving keys is not doing anything. A focus flag on top of that
- * would have to earn its place by changing behaviour, and there is nothing for
- * it to change — the model already fixes that leaving a field neither commits
- * nor discards, so a transition would carry no work, and no backend has a
- * focus entry point to be told about one. The client owns what happens when
+ * There is no focus concept. A context is a client destination, so which
+ * destination the user is typing into is expressed by which context the
+ * client sends key presses to. The client owns what happens when
  * the user leaves a field: pathime_context_commit() to keep the half-typed
  * text or pathime_context_reset() to throw it away, and then simply stop
- * offering keys.
+ * offering keys. Entering another field, the client may update the engine
+ * status with pathime_context_set_surrounding_text().
  *
  * A client with several fields keeps a context per field and routes to the
  * right one. The library cannot check that routing for it — knowing which
@@ -1163,10 +1159,9 @@ PATHIME_API pathime_status_t pathime_context_set_surrounding_text(pathime_contex
  *
  * What arrives through commit_text is exactly what
  * pathime_composition_t::preedit says would be committed if the composition
- * ended right now — the same text, and the same two documented departures from
- * it, as pressing the engine's own commit key. No conversion the user did not
- * choose is applied: an engine showing a preview commits what is on screen,
- * not the candidate it happens to be hovering.
+ * ended right now by pressing the engine's own commit key. No conversion the
+ * user did not choose is applied: an engine showing a preview commits what
+ * is on screen, not the candidate it happens to be hovering.
  *
  * This is what a client calls when the user leaves a text field and the
  * half-typed text should be kept. It is an ordinary commit that the client
@@ -1202,16 +1197,13 @@ PATHIME_API pathime_status_t pathime_context_commit(pathime_context_t *ctx);
  * the preceding text — quote alternation, the digit look-behind that keeps
  * "1.5" intact — has nothing of its own left to go on.
  *
- * A client that supplies surrounding text gets that back, and gets it right
- * more often than the engine's own memory would have: those rules are claims
- * about the document, and the snapshot is the document. So a reset followed by
+ * A client that supplies surrounding text gets that back. A reset followed by
  * a refreshed snapshot leaves the engine correctly informed about a *new*
  * position, which is exactly what leaving one field for another means. See
  * pathime_context_set_surrounding_text().
  *
  * Produces a composition_changed callback unless the composition was already
- * empty. The callback is not a courtesy: it is how a client learns its view is
- * obsolete, so that redrawing after a reset needs no special case.
+ * empty.
  *
  * This is also the recovery path after a failure status: it restores a context
  * whose composition state was left indeterminate to a known-empty one. On that
@@ -1230,19 +1222,16 @@ PATHIME_API pathime_status_t pathime_context_reset(pathime_context_t *ctx);
  * ---------------------------------------------------------------------------
  *
  * An option is a value the client sets that changes what the engine produces.
- * Three large families of setting found in the reference implementations are
- * deliberately absent, and their absence is not an oversight:
+ * Three large families of setting found in the typical IME implementations are
+ * deliberately absent:
  *
  *   Key bindings, candidate labels, page size, list orientation, and every
  *   other presentation choice belong to the client. docs/CONCEPTS.md excludes
  *   them from the model.
  *
  *   Direct or Latin passthrough is engine activation state, which the model
- *   excludes. A client that wants Latin stops offering keys to the engine.
- *
- *   Encodings, dictionary paths, and backend init parameters are consumed
- *   internally. Where they carry a genuine client decision it has been lifted
- *   out: see pathime_init_params_t::data_dir.
+ *   excludes. A client that wants Latin stops sending key presses to the
+ *   engine, and processes them itself.
  *
  * ---------------------------------------------------------------------------
  * Two levels, four tiers
@@ -1284,7 +1273,7 @@ PATHIME_API pathime_status_t pathime_context_reset(pathime_context_t *ctx);
  *
  * A context that has overridden the option is untouched by all of that: tier 1
  * already wins for it, so nothing about it changed. A context can claim that
- * immunity for its whole inventory at once — see
+ * immunity for its whole inventory at once with
  * pathime_context_isolate_options(), which turns the engine level into a
  * template read once rather than a live influence, for the client that wants
  * exactly that.
@@ -1332,10 +1321,8 @@ typedef enum pathime_option_type {
  * implement it.
  *
  * Values are assigned explicitly, are dense, and are part of the ABI. The
- * headings below group options for a reader; they are not ranges. A new option
- * takes the next free value at the end of the enum whatever section it belongs
- * to, because renumbering the options after an insertion point would silently
- * change what an already-compiled client is asking for. Density is a promise
+ * headings below group options for a reader; they are not ranges. Future options
+ * will take the next free value at the end of the enum. Density is a promise
  * too: it is what makes pathime_option_count() a usable way to walk every
  * option, including options a client's own header never named.
  */
@@ -1379,10 +1366,6 @@ typedef enum pathime_option {
      * appear sooner. Turning it off means nothing is written to the data
      * directory for this engine.
      *
-     * Only the table engine has a native switch for this. Anthy learns on a
-     * separate commit call, so there the library implements the option by
-     * withholding that call.
-     *
      * Hangul does not implement it: libhangul has no learning to disable.
      *
      * Pinyin and Bopomofo do not implement it either, and report themselves
@@ -1406,9 +1389,8 @@ typedef enum pathime_option {
      * worth stating: for these to apply at all, the engine must handle the
      * key rather than leave it to the client. Pinyin and Bopomofo therefore
      * report every printable key handled, including the ones they pass
-     * through unchanged at half width. Space is the exception that proves the
-     * rule — while a composition is in progress it is the conversion key and
-     * emits nothing.
+     * through unchanged at half width. Space is an exception: while a
+     * composition is in progress it is the conversion key and emits nothing.
      */
     PATHIME_OPT_LATIN_WIDTH = 2,
 
@@ -1418,8 +1400,7 @@ typedef enum pathime_option {
      *
      * The same choice for punctuation. It is a separate option rather than one
      * width setting because the useful combination is full-width punctuation
-     * with half-width digits, and every reference engine models these two
-     * independently for that reason. The defaults are that combination.
+     * with half-width digits. The defaults are that combination.
      *
      * Full width means the language's punctuation and not merely a wider
      * glyph, so what a key produces depends on the engine and, for Chinese, on
@@ -1431,7 +1412,9 @@ typedef enum pathime_option {
      * Two substitutions depend on what came before. The quote keys alternate
      * between their opening and closing forms, and a period directly after a
      * digit stays a period so that "1.5" is not mangled. Both are reset by
-     * pathime_context_reset().
+     * pathime_context_reset() and can be primed with
+     * pathime_context_set_surrounding_text(), provided sufficent context to
+     * the left of the cursor is provided.
      */
     PATHIME_OPT_PUNCTUATION_WIDTH = 3,
 
@@ -1470,10 +1453,8 @@ typedef enum pathime_option {
      * anthy re-segments; that churn is the measured cost of eagerness and
      * is ordinary for phrase-at-a-time typing.
      *
-     * Anthy's own history-based completions are deliberately *not* what
-     * this enables — they are empty on a fresh profile and whenever
-     * learning is off — but they may be merged into the same candidate
-     * list later without the option changing meaning.
+     * Anthy's own history-based multi-word completions are *not* what
+     * this enables.
      *
      * The table engine accepts this option but currently produces nothing
      * from it. The intended meaning there is suggestion mode: after a
@@ -1571,13 +1552,22 @@ typedef enum pathime_option {
      * clients that cannot display a preedit, where the document itself is the
      * only place composition can be shown.
      *
-     * That mode is the whole reason this library has a surrounding-text
-     * surface. It requires both PATHIME_REQUIRES_SURROUNDING_TEXT and
-     * PATHIME_REQUIRES_DELETE_SURROUNDING, and it requires them keenly: since
-     * the engine invalidates its own snapshot on every keystroke, the client
-     * must supply a fresh one after each dispatch. A client that does not keep
-     * up gets the behaviour described under delete_surrounding_text — the
-     * partial syllable is left in the document and a new one begins.
+     * That mode is the main reason this library has a surrounding-text
+     * surface, and it is worth being exact about what it uses that surface
+     * for. It requires both PATHIME_REQUIRES_SURROUNDING_TEXT and
+     * PATHIME_REQUIRES_DELETE_SURROUNDING. The engine tracks the provisional
+     * syllable it wrote, so it never reads the snapshot to learn what the
+     * composing text is; it consults it only to confirm that the deletion it
+     * is about to request still lands on that syllable. The snapshot is a
+     * proof of a character to the left of the cursor, not a source of partial
+     * syllables.
+     *
+     * A commit invalidates the snapshot, and this mode commits on every keystroke,
+     * so the client must supply a surrounding text after every single key and not
+     * merely when the caret moves. A client that does not gets the behaviour
+     * described under delete_surrounding_text: the partial syllable is left in
+     * the document and a new one begins. For a client that never supplies
+     * surrounding text at all that happens on every jamo, so 한 arrives as ㅎㅏㄴ.
      *
      * Selecting it therefore interacts with what the client can do:
      *
@@ -1602,6 +1592,9 @@ typedef enum pathime_option {
      */
     PATHIME_OPT_HANGUL_PREEDIT = 12,
 
+
+
+
     /* =====================================================================
      * Anthy
      * ===================================================================== */
@@ -1622,7 +1615,7 @@ typedef enum pathime_option {
      * *position*, because the user is striking a key whose kana legend the
      * client's keymap has no way to report. The arrangement is the standard JIS
      * kana layout mapped onto US-QWERTY positions, so a client never has to
-     * describe the attached keyboard — but a client that leaves layout_key zero
+     * describe the attached keyboard, but a client that leaves layout_key zero
      * gets the keysym instead, and on a non-US layout that will be the wrong
      * kana.
      *
@@ -1666,8 +1659,7 @@ typedef enum pathime_option {
      * would otherwise reach for the convert key at the end of every sentence.
      *
      * The set of characters that counts as sentence-ending is fixed, rather than
-     * being a second option: it is the six characters , . 、 。 ， ． and no
-     * plausible client needs to change it.
+     * being a second option: it is the six characters , . 、 。 ， ．
      */
     PATHIME_OPT_ANTHY_ON_PERIOD = 17,
 
