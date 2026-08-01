@@ -11,10 +11,10 @@ cost, and what would legitimately reopen it. The full narrative of every round
 Nothing here is pending — that is `TODO.md`. Model: `docs/CONCEPTS.md`.
 Contract: `include/pathime/pathime.h`.
 
-## Ledger (as of 2026-07-29)
+## Ledger (as of 2026-07-31)
 
 Built and tested: the build (Linux + Windows, both presets, both link modes),
-all 44 public entry points, all four adapters — hangul, anthy, pyzy, and the
+all 45 public entry points, all four adapters — hangul, anthy, pyzy, and the
 table engine, the last written here rather than wrapped — options and
 negotiation including tier 3, the preedit rule, the eager candidate strip, and
 the terminal demo. 40 suites pass on Linux with every backend enabled, 39 on
@@ -466,3 +466,55 @@ was added. Recorded here is what was ruled, declined, or reverted:
   in actual binding implementations, not in this repository. The one sentence
   such a document would have opened with is folded into the late-resolution
   ruling above.
+
+## 13. Clearing the queue (2026-07-31)
+
+A pass over everything `TODO.md` held as undecided. What became work is queued
+there; what was closed is here.
+
+- **The three inert table options, settled individually** — they had been
+  filed as one item, and they do not share an answer.
+  - `PATHIME_OPT_PREDICTION`: **drop `kTable` from the descriptor row.** It
+    only ever meant suggestion mode, which §6b decided against, so an engine
+    that reports it supported is promising something it will never do. Cost:
+    a client that sets it on a table context now gets `UNSUPPORTED` instead of
+    silence — the honest answer, and the one `PINYIN_FALLBACK` already gives.
+  - `PATHIME_OPT_INCOMPLETE_INPUT`: **give it a tier 3 case.** The engine does
+    the thing; it just reads the table's `AUTO_WILDCARD` rather than the
+    option. Tier 3 is the mechanism that already reconciles exactly this — a
+    table author's choice as the default, a client override on top — and
+    `AUTO_COMMIT`, `AUTO_SELECT`, `LEARNING` and `CHINESE_VARIANT` all use it.
+    Cost: none visible today, since no shipped table declares it false.
+  - The two wildcards: **stay accepted-and-inert, queued.** Not wiring. Making
+    a client value reach the search needs a rule for a character that is in the
+    table's alphabet — the condition our own derivation is careful about — and
+    a decision about what position-0-literal means for a character no table
+    author reserved. Reopen with a consumer that wants to choose its own.
+- **The header self-explanation pass: dropped, not deferred.** Its own two
+  tests — does a client's behaviour depend on this, would removing it let a
+  closed question reopen — are passed by almost every passage it targeted, and
+  the rationale could not have moved into this file anyway without recreating
+  the coupling the self-containment rule exists to remove. What survived was
+  two passages naming a vendored library to no client's benefit, which is not
+  worth a pass. `include/pathime/pathime.h` is right as it stands.
+- **Thread-safety enforcement: declined, and there was no claim to weaken.**
+  The contract has never said thread-safe. It says calls must not overlap, and
+  says explicitly that this is about concurrency rather than thread identity —
+  any thread, never two at once, handoff needs the usual happens-before. A
+  debug-build in-call flag was considered and rejected as conditional on
+  evidence that does not exist: no client has made the mistake. Reopen if one
+  does.
+- **Anthy's commit-history completions: decided against merging.**
+  `anthy_set_prediction_string`/`anthy_get_prediction` answers a different
+  question from the one the conversion path answers — what whole phrases has
+  this user committed before that start like this, versus what does this
+  reading convert to. Feasibility was never the obstacle (that cache is
+  separate from `ac->seg_list`, so driving it cannot disturb conversion, unlike
+  the pyzy obstruction behind `PATHIME_OPT_LEARNING`). Folding them into one
+  strip would make `PATHIME_OPT_PREDICTION` mean two things, and the added half
+  is empty on a fresh profile and whenever learning is off — invisible to the
+  suites by construction. Reopen as a separate option, with a consumer.
+- **`docs/CONCEPTS.md` keeps "Input purpose and hints".** It describes the
+  concept space a CJK engine interface has to account for, and it is labelled
+  in place as the one part of the model the library does not implement. §1
+  holds the deferral itself.

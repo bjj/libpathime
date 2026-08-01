@@ -187,6 +187,8 @@ that engine does not do.
   are still `libanthy-unicode.so.0` and the rest, so a process that has already
   loaded a distribution's copy of that SONAME satisfies libpathime's `DT_NEEDED`
   with it — the RPATH is only consulted when nothing by that name is loaded yet.
+  This is a Unix problem specifically: the Windows install has the vendored DLLs
+  beside `pathime.dll` in `bin/`, and no distribution ships competing copies.
 
   That is not the ordinary case for this library, which is why it is queued and
   not urgent: an IBus-style engine is its own process on the bus, not a library
@@ -203,63 +205,40 @@ that engine does not do.
   the guarded names should be what a release artifact ships, given that turning
   it on renames files in every shipped tree.
 
-- **The header self-explanation pass — needs a decision before it is done.**
-  The original plan was to strip from `include/pathime/pathime.h` every
-  passage that justifies a decision by naming backend behaviour (anthy's
-  write-once personality, pyzy's creation-time `InputType`, libhangul's nine
-  built-in layouts), moving those notes into `docs/*-mapping.md` and
-  `docs/design-history.md` and leaving the header with only the contract.
-
-  **That plan is now partly self-defeating**, which is why it was not carried
-  out. `docs/design-history.md` is a development-only document that must be
-  deletable; moving contract rationale into it would recreate exactly the
-  coupling the self-containment rule removes. And reading the header through
-  the plan's own two tests — does a client's behaviour depend on this, and
-  would removing it let someone reopen a closed question — almost every
-  passage passes. "pyzy fixes the phonetic scheme at context creation" is why
-  a client must make a new context to switch; "libhangul exposes only the
-  syllable being assembled" is why word mode has the backspace granularity it
-  has. Cutting those makes the header shorter and the client's job harder.
-
-  What is genuinely left is narrower, and someone should decide whether it is
-  worth doing at all:
-
-  - A handful of passages name a vendored library and give a client nothing —
-    `pathime_hangul_layout_t`'s "the nine layouts libhangul builds in", and
-    the paragraph at `pathime_init_params_t::data_dir` explaining that the
-    directory is what lets anthy's "personality" disappear.
-  - The `PATHIME_OPT_TABLE_*` comments were written before the table engine
-    existed. They have not been read back against the implementation.
-
-### Three table options are accepted and do nothing
+### Two inert table options, now decided — the code has not caught up
 
 Found by reading `include/pathime/pathime.h`'s `PATHIME_OPT_TABLE_*` comments
-back against `src/engines/table/`, which had never been done. The header has
-been corrected to describe what actually happens; **the code side is a
-decision, not a task**, because each fix is a behaviour change.
+back against `src/engines/table/`. The header already describes what actually
+happens; these are the code changes, ruled 2026-07-31 (`docs/design-history.md`
+§13). Each is a behaviour change, so each wants its own commit and its own test.
 
-- **`PATHIME_OPT_PREDICTION` on the table engine.** Settable, reads back
-  `true` by default, and appears nowhere under `src/engines/table/`. It was
-  meant to be suggestion mode, which is decided against (above), and
-  `TableProperties::declared_number()` has no case for it either, so there is
-  no tier 3. `wubi-jidian86.txt` declares `SUGGESTION_MODE = TRUE` and ships,
-  so a client that walks the inventory sees an option that promises something.
-  Either drop `kTable` from the descriptor row in `src/options.cc` so it
-  reports itself unsupported — matching what `PATHIME_OPT_TABLE_PINYIN_FALLBACK`
-  already does — or implement the mode.
-- **`PATHIME_OPT_INCOMPLETE_INPUT` on the table engine.** The wildcard *is*
+- **`PATHIME_OPT_PREDICTION`: drop `kTable` from the descriptor row** in
+  `src/options.cc`, so the option reports itself unsupported for the table
+  engine the way `PATHIME_OPT_TABLE_PINYIN_FALLBACK` does. It appears nowhere
+  under `src/engines/table/` and `TableProperties::declared_number()` has no
+  case for it, so there is no tier 3 either; it only ever meant suggestion
+  mode, which §6b decided against. `wubi-jidian86.txt` declares
+  `SUGGESTION_MODE = TRUE` and ships, so a client walking the inventory is
+  being promised something today.
+- **`PATHIME_OPT_INCOMPLETE_INPUT`: add the tier 3 case.** The wildcard *is*
   appended before searching (`table_db.cc`, `properties.auto_wildcard`), but on
-  the table's own `AUTO_WILDCARD` declaration, never on the option. Setting it
-  false changes nothing. The clean fix is tier 3: give `declared_number()` a
-  case for it, so the table supplies the default and a client can still
-  override. No shipped table declares `AUTO_WILDCARD = FALSE`, so nothing
-  visibly misbehaves today.
-- **`PATHIME_OPT_TABLE_SINGLE_WILDCARD` and `_MULTI_WILDCARD`.** Stored,
-  readable, and never consulted: `build_like_pattern()` takes a
-  `TableProperties` and never sees an `OptionReader`, and `is_input_char()`
-  likewise, so a client-set wildcard is not even accepted as a keystroke.
-  `src/options.cc` half-admits this already ("the table engine's wildcards are
-  the obvious future exception").
+  the table's own `AUTO_WILDCARD` declaration, never on the option, so setting
+  it false changes nothing. Give `TableProperties::declared_number()` a case,
+  so the table supplies the default and a client can override — the shape
+  `AUTO_COMMIT`, `AUTO_SELECT`, `LEARNING` and `CHINESE_VARIANT` already use.
+  No shipped table declares `AUTO_WILDCARD = FALSE`, so the only visible change
+  is that turning it off starts working.
+
+The third option from that read stays as it is: **`PATHIME_OPT_TABLE_SINGLE_WILDCARD`
+and `_MULTI_WILDCARD`** remain stored, readable and never consulted —
+`build_like_pattern()` takes a `TableProperties` and never sees an
+`OptionReader`, and `is_input_char()` likewise, so a client-set wildcard is not
+even accepted as a keystroke (`src/options.cc` half-admits this: "the table
+engine's wildcards are the obvious future exception"). Making a client value
+reach the search is not wiring — it needs a rule for a character that is in the
+table's alphabet, and a decision about what position-0-literal means for a
+character no table author reserved. Reopen with a consumer that wants to choose
+its own.
 
 One smaller thing from the same read, cheap:
 
@@ -318,9 +297,10 @@ Two smaller things there *are* reachable:
 - `to_text()`'s NULL-column path (`:119`) and `table_has_rows()`'s
   false answer (`:137`).
 
-### 2. A differential test against ibus-table itself
+### 2. A differential test against ibus-table itself — decided, to be built
 
-Nothing checks that a `.db` this library writes is one **ibus-table** can read.
+Decided 2026-07-31: build it. Nothing checks that a `.db` this library writes
+is one **ibus-table** can read.
 `core.table_compile` proves the writer and the reader agree with each other,
 which is a weaker claim than it sounds for a format whose whole purpose is
 interoperability: a matched pair of misreadings would pass. `refs/ibus-table`
@@ -406,22 +386,6 @@ branch on a line with no conditional at all is an artifact rather than a gap —
 if the throw-branch exclusion ever comes off, that is what the report fills
 with.
 
-## Decisions wanted
-
-- **Does the Windows release artifact ship the MSVC redistributable runtime?**
-  The 4.3c closure deliberately excludes what resolves from system32, and that
-  sweeps in `msvcp140.dll`/`vcruntime140*.dll` — present on any machine with
-  the VC++ redist, in-box nowhere. Found verifying the install by hand
-  2026-07-31; `docs/ci-and-release-plan.md` 4.3c states the limit and the two
-  honest options (ship the three app-local, or document the redist as a
-  requirement). A hosted CI runner cannot catch it: Visual Studio brings the
-  redist with it.
-- **Does `docs/CONCEPTS.md` keep "Input purpose and hints"?** It is the one
-  section of the model the library does not implement, and it is now labelled
-  as such in place. Either it stays as a description of the concept space the
-  library sits in, or it comes out and the deferral lives only here. Left in,
-  labelled, pending a call.
-
 ## Open questions
 
 - **The composition model has no cursor inside a span, and now three adapters
@@ -441,18 +405,6 @@ with.
   desktop client wanting to repair the middle of a long run without backspacing
   to it. Revisit with a real consumer — and note that the table engine is now
   the strongest argument for one.
-- **Thread-safety is a documented requirement, not an enforced one.** Nothing
-  detects overlapping calls. If that proves to be a common client bug, a debug
-  build could catch it cheaply with a non-recursive in-call flag per context.
-- **Is anthy's own prediction API worth exposing?** `PATHIME_OPT_PREDICTION`
-  on anthy is the eager-conversion strip, not history completion. The
-  completion API is separately reachable, and its prediction cache is entirely
-  separate from `ac->seg_list`, so driving it cannot disturb conversion — the
-  obstruction that pushed `PATHIME_OPT_LEARNING` to unsupported on pyzy does
-  not exist here. What is in doubt is the value, not the feasibility: the
-  completions are empty on a fresh profile and whenever learning is off. If
-  they are ever merged into the same candidate list, the option does not
-  change meaning; the header already says so.
 
 ## Build limitations, stated in BUILD.md as facts
 

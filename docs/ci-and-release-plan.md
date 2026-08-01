@@ -519,16 +519,13 @@ Item 4 of the macOS list is done with them.
   error, which is what makes the check sensitive. What remains of 4.3a is
   4.3's CI job asserting the same from a clean runner.
 
-  The same verification found the stated limit of the closure: the system32
-  exclusion also sweeps in the MSVC redistributable runtime — `pathime.dll`
-  imports `msvcp140.dll`, `vcruntime140.dll` and `vcruntime140_1.dll`, which
-  resolve from system32 on any machine with the VC++ redist and are not
-  in-box Windows (the ucrt is; these are not). So the installed tree is
-  self-contained only where the redist is already present, and a release
-  artifact must either say so or install those three under a rule of their
-  own — Microsoft licenses them for app-local redistribution. Note that
-  4.3's CI job cannot catch this on a hosted runner, which has Visual Studio
-  and therefore the redist.
+  The system32 exclusion also sweeps in the MSVC redistributable runtime —
+  `pathime.dll` imports `msvcp140.dll`, `vcruntime140.dll` and
+  `vcruntime140_1.dll`, which are not in-box Windows (the ucrt is; these are
+  not). **The redist is a prerequisite, not a shipped component**: a consumer
+  of an MSVC-built library is expected to have it. Note that 4.3's CI job
+  cannot demonstrate otherwise on a hosted runner, which has Visual Studio and
+  therefore the redist.
 
   On whether the DLLs are vcpkg's fault, since the question comes up: no. They
   follow from Windows having no system-wide home for third-party libraries and
