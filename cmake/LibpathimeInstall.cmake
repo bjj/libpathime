@@ -316,6 +316,67 @@ function(libpathime_install_package)
     COMPONENT devel)
 
   _libpathime_install_pkgconfig()
+  _libpathime_install_licenses()
+endfunction()
+
+# The licence texts, into share/doc/pathime. MIT and the LGPL/GPLs all require
+# the text to accompany a distribution, and the texts live in submodule COPYING
+# files a binary archive would not otherwise include. Each text is attached to
+# the component that carries the files it covers, so the set stays honest by
+# construction: an archive or a configuration that drops the component drops
+# its text too — cpp-terminal's MIT travels only with the demo, anthy's GPL-2
+# dictionary text (alt-cannadic/COPYING; the umbrella COPYING states the
+# split) only with the data the dictionary is in, and a
+# LIBPATHIME_WITH_ANTHY=OFF build ships neither.
+function(_libpathime_install_licenses)
+  set(_doc "${CMAKE_INSTALL_DATAROOTDIR}/doc/pathime")
+  set(_lic "${_doc}/licenses")
+  install(FILES
+    "${PROJECT_SOURCE_DIR}/LICENSE"
+    "${PROJECT_SOURCE_DIR}/THIRD-PARTY.md"
+    DESTINATION "${_doc}" COMPONENT runtime)
+
+  if(LIBPATHIME_WITH_HANGUL)
+    install(FILES "${PROJECT_SOURCE_DIR}/engines/libhangul/COPYING"
+      DESTINATION "${_lic}" RENAME libhangul.txt COMPONENT runtime)
+  endif()
+  if(LIBPATHIME_WITH_ANTHY)
+    install(FILES "${PROJECT_SOURCE_DIR}/engines/anthy-unicode/COPYING"
+      DESTINATION "${_lic}" RENAME anthy-unicode.txt COMPONENT runtime)
+    install(FILES "${PROJECT_SOURCE_DIR}/engines/anthy-unicode/alt-cannadic/COPYING"
+      DESTINATION "${_lic}" RENAME anthy-dictionary.txt COMPONENT data)
+  endif()
+  if(LIBPATHIME_WITH_PYZY)
+    install(FILES "${PROJECT_SOURCE_DIR}/engines/pyzy/COPYING"
+      DESTINATION "${_lic}" RENAME pyzy.txt COMPONENT runtime)
+  endif()
+  if(LIBPATHIME_WITH_TABLE)
+    install(FILES "${PROJECT_SOURCE_DIR}/engines/ibus-table-chinese/COPYING"
+      DESTINATION "${_lic}" RENAME ibus-table-chinese.txt COMPONENT data)
+  endif()
+  if(LIBPATHIME_BUILD_DEMO)
+    install(FILES "${PROJECT_SOURCE_DIR}/demo/cpp-terminal/LICENSE"
+      DESTINATION "${_lic}" RENAME cpp-terminal.txt COMPONENT demo)
+  endif()
+
+  # The Windows runtime-DLL closure's texts, from vcpkg's per-port copyright
+  # files — shipped components per 4.3c, so their terms ship too. A missing
+  # file is a warning rather than a skip: silence here is a compliance gap,
+  # not a smaller install.
+  if(WIN32 AND BUILD_SHARED_LIBS AND LIBPATHIME_WITH_PYZY
+     AND DEFINED VCPKG_INSTALLED_DIR AND DEFINED VCPKG_TARGET_TRIPLET)
+    foreach(_port glib libiconv gettext pcre2)
+      set(_copyright "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/share/${_port}/copyright")
+      if(EXISTS "${_copyright}")
+        install(FILES "${_copyright}"
+          DESTINATION "${_lic}" RENAME "${_port}.txt" COMPONENT runtime)
+      else()
+        message(WARNING
+          "libpathime: no vcpkg copyright file for ${_port}; the installed "
+          "licence set will not cover its DLL.")
+      endif()
+    endforeach()
+  endif()
 endfunction()
 
 # The pkg-config file. Separate from the CMake package because it has one thing
