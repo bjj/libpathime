@@ -593,6 +593,10 @@ packaging one.
     4.3c DLL closure. The `.so` namelink stays out via
     `NAMELINK_COMPONENT devel` on the `install(TARGETS pathime LIBRARY ...)`
     rule, so a demo archive carries the SONAME chain but no dev symlink.
+    The namelink is not only for the link editor — BUILD.md's install
+    section names the runtime loaders that probe `libpathime.so` by that
+    exact spelling — which is why the *library* archive keeps `devel` in
+    its component list.
   - `devel` — headers, the namelink, `lib/cmake/pathime/`, `pathime.pc`.
   - `data` — `pathime-data/`.
   - `demo` — `pathime-demo` and its licence additions (4.8).

@@ -166,6 +166,19 @@ ordinary system places instead — for a packager who intends exactly that and
 has decided to deal with the consequences. `cmake/LibpathimeInstall.cmake` is
 the whole of the layout, in one file.
 
+One of the shared library's three names is load-bearing for consumers that do
+not link at build time. `cmake --install` ships `libpathime.so.0.1.0`, the
+SONAME symlink `libpathime.so.0` a linked program resolves, and the unversioned
+`libpathime.so` — and the last is not only for the link editor. A runtime
+loader handed a bare library name probes exactly that spelling: .NET's
+`DllImport("pathime")` tries `libpathime.so`, a JVM's
+`System.loadLibrary("pathime")` the same, and neither falls back to the SONAME.
+So an install that follows the distribution habit of splitting the unversioned
+symlink into a `-dev` package strands every such consumer, leaving them to name
+`libpathime.so.0` explicitly or be pointed at the file some other way. Keep the
+three names together unless every consumer links against the library when it is
+built. (The DLL has one name, so none of this arises on Windows.)
+
 ## Shipping the data
 
 The engines' read-only data lives in a directory named `pathime-data`, **beside
