@@ -80,11 +80,15 @@ target_link_libraries(pyzy PRIVATE PkgConfig::LIBPATHIME_GLIB)
 if(WIN32)
   # Supplies <uuid/uuid.h> + <sys/utsname.h> shims and links Rpcrt4.
   libpathime_add_win32_compat(pyzy)
+elseif(APPLE)
+  # Nothing to find and nothing to link: <uuid/uuid.h> is in the SDK and
+  # uuid_generate is libSystem's, which every binary links already. The gate in
+  # cmake/LibpathimeDependencies.cmake has verified the header exists.
 else()
   # GLOBAL for the same reason as glib above: Util.h includes <uuid/uuid.h>
   # unconditionally, so tests/pyzy needs whatever include path found it here.
-  # macOS included — libuuid is where Util.h's uuid_generate comes from on every
-  # platform but Windows, which takes the Rpcrt4 shim above instead.
+  # libuuid is where uuid_generate comes from on Linux and the BSDs; Windows
+  # takes the Rpcrt4 shim above and macOS the libSystem arm.
   pkg_check_modules(LIBPATHIME_UUID REQUIRED IMPORTED_TARGET GLOBAL uuid)
   target_link_libraries(pyzy PRIVATE PkgConfig::LIBPATHIME_UUID)
 endif()

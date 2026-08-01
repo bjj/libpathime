@@ -62,7 +62,10 @@ libpathime with the Chinese backend puts pyzy on the consumer's link line, and \
 pyzy needs it.")
       return()
     endif()
-    if(NOT WIN32)
+    # Not on Windows (the Rpcrt4 shim is in the archives) and not on macOS
+    # (uuid_generate is libSystem's, linked already) — only where pyzy links
+    # libuuid as its own library.
+    if(NOT WIN32 AND NOT APPLE)
       pkg_check_modules(LIBPATHIME_UUID IMPORTED_TARGET uuid)
       if(NOT LIBPATHIME_UUID_FOUND)
         set(pathime_FOUND FALSE)

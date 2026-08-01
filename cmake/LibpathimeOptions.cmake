@@ -120,6 +120,14 @@ option(LIBPATHIME_WITH_TABLE  "Build the table-driven (Cangjie, Wubi, Zhuyin, â€
 if(WIN32)
   set(_coverage_default "windows")
 else()
+  # noto on every non-Windows platform, macOS included â€” a decision, not an
+  # accident of the else-branch. macOS renders CJK with PingFang and Hiragino
+  # rather than Noto, but no PingFang map has been generated or measured, and
+  # the Noto map is the conservative choice while none exists: it keeps every
+  # JIS X 0213 point and drops supplementary-plane characters that PingFang's
+  # coverage is unlikely to exceed by much. Generating a real macOS map with
+  # tools/generate-coverage.py against the system faces is the follow-up that
+  # would replace this default; BUILD.md, "Glyph coverage", is the guidance.
   set(_coverage_default "noto")
 endif()
 set(LIBPATHIME_TABLE_COVERAGE "${_coverage_default}" CACHE STRING

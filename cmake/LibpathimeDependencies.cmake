@@ -80,8 +80,17 @@ if(LIBPATHIME_WITH_PYZY)
     list(APPEND _pyzy_missing "glib-2.0 >= 2.24.0")
   endif()
 
-  # UUID: libuuid on Unix; on Windows the compat shim maps to Rpcrt4 (always present).
-  if(NOT WIN32)
+  # UUID: libuuid on Linux and the BSDs; on Windows the compat shim maps to
+  # Rpcrt4 (always present); on macOS uuid_generate lives in libSystem and
+  # <uuid/uuid.h> in the SDK — there is no uuid.pc and nothing to link, so the
+  # only thing to verify is the header.
+  if(APPLE)
+    include(CheckIncludeFile)
+    check_include_file(uuid/uuid.h LIBPATHIME_UUID_HEADER)
+    if(NOT LIBPATHIME_UUID_HEADER)
+      list(APPEND _pyzy_missing "uuid/uuid.h (macOS SDK)")
+    endif()
+  elseif(NOT WIN32)
     if(PkgConfig_FOUND)
       pkg_check_modules(LIBPATHIME_UUID QUIET uuid)
     endif()
