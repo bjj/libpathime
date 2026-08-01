@@ -154,12 +154,19 @@ jobs:
       # only when the whole job succeeds, so a failure after `vcpkg install`
       # throws away a from-source glib build (~25 minutes). Saving immediately
       # after the install keeps it regardless.
+      # The exact-rev key rarely hits: the runner fleet rolls image updates
+      # gradually, so consecutive runs can land on different vcpkg checkouts.
+      # The prefix fallback restores the newest previous tree instead, which
+      # makes `vcpkg install` a near-no-op; a fresh exact key is saved for the
+      # new rev. Keyed per image label, because the images build with
+      # different Visual Studio toolsets.
       - name: Restore vcpkg installed tree
         id: vcpkg-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: C:\vcpkg\installed
-          key: vcpkg-x64-windows-${{ steps.vcpkg.outputs.rev }}
+          key: vcpkg-${{ matrix.os }}-${{ steps.vcpkg.outputs.rev }}
+          restore-keys: vcpkg-${{ matrix.os }}-
       - name: Install pyzy's dependencies
         run: vcpkg install glib:x64-windows sqlite3:x64-windows pkgconf:x64-windows
       - name: Save vcpkg installed tree
@@ -167,7 +174,7 @@ jobs:
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: C:\vcpkg\installed
-          key: vcpkg-x64-windows-${{ steps.vcpkg.outputs.rev }}
+          key: vcpkg-${{ matrix.os }}-${{ steps.vcpkg.outputs.rev }}
       - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
         if: matrix.preset == 'windows-ninja'
         with:
