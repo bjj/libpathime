@@ -195,6 +195,60 @@ jobs:
       - name: Test
         run: ctest --test-dir build/${{ matrix.preset }} --output-on-failure ${{ matrix.ctest-args }}
 
+  # macos-26 is arm64, pinned so a -latest migration cannot change the
+  # platform silently. Both link modes; the static job is what runs the
+  # _NSGetExecutablePath fallback in module_path.cc. The install step is not
+  # redundant with install-consumer: it is the only thing that executes the
+  # @loader_path RPATH arm, and macOS is not covered by that Linux job.
+  macos:
+    name: ${{ matrix.name }}
+    runs-on: macos-26
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos-shared
+            configure-args: ""
+          - name: macos-static
+            configure-args: -DBUILD_SHARED_LIBS=OFF
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+      - uses: jwlawson/actions-setup-cmake@0d6a7d60b009d01c9e7523be22153ff8f19460d3 # v2.2.0
+        with:
+          cmake-version: ${{ env.CMAKE_VERSION }}
+      - name: Install dependencies
+        run: brew install ninja glib pkgconf check
+      - name: Configure
+        run: >-
+          cmake -S . -B build/macos -G Ninja -DCMAKE_BUILD_TYPE=Release
+          -DLIBPATHIME_BUILD_TESTS=ON -DLIBPATHIME_REQUIRE_BACKENDS=ON
+          -DLIBPATHIME_BUILD_DEMO=ON
+          ${{ matrix.configure-args }}
+      - name: Build
+        run: cmake --build build/macos
+      - name: Test
+        run: ctest --test-dir build/macos --output-on-failure
+      - name: Install, consume, package
+        run: |
+          cmake --install build/macos --prefix "$PWD/stage"
+          mv stage moved
+          cmake -S examples/install-check -B build/ic -G Ninja \
+            -DCMAKE_PREFIX_PATH="$PWD/moved"
+          cmake --build build/ic
+          if [ "${{ matrix.name }}" = macos-static ]; then
+            cp build/ic/pathime-install-check moved/bin/
+            ./moved/bin/pathime-install-check
+          else
+            ./build/ic/pathime-install-check
+          fi
+          cpack --config build/macos/CPackConfig.cmake -B pkg
+          cpack --config build/macos/CPackConfig.cmake -B pkg \
+            -D CPACK_COMPONENTS_ALL="runtime;demo;data" \
+            -D CPACK_PACKAGE_FILE_NAME=pathime-demo-ci
+
   # BUILD.md, "Glyph coverage": two builds of the same commit with the same
   # map produce byte-identical tables. The claim is load-bearing for the
   # checked-in coverage maps, and this job is what enforces it. Tables only —
