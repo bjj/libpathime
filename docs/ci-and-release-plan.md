@@ -83,7 +83,8 @@ These are settled and the rest of the document assumes them:
   C++ runtime onto the consumer's own link line, which is a support surface with
   no audience yet. A consumer who wants it builds it. This is what keeps 4.3's
   static consumer a *CI* obligation rather than a packaging one.
-- **The private origin remote stops mattering.** GitHub becomes the source of truth.
+- **GitHub is the source of truth.** `origin` is `github.com/bjj/libpathime`;
+  the private orion remote is kept as `local` and stops mattering.
 - **A formatter was wanted, negotiated, and rejected** — the configuration was
   to be chosen by looking at its output on this tree rather than adopted off
   the shelf, and doing that is what settled it. Phase 5 records the
@@ -195,65 +196,13 @@ neither has been exercised.
 
 # Phase 0 — Get onto GitHub
 
-Nothing else can start until this is done, and it is the phase with the most
-**[manual]** in it.
-
-**[manual] 0.1 — Push the submodule forks first.** This is the step whose
-omission produces a confusing CI failure later. Two of the five submodules are
-your own forks, each pinned to a `libpathime` branch:
-
-| Submodule | Remote | Pinned at |
-|---|---|---|
-| `engines/libhangul` | `libhangul/libhangul` (upstream) | `a34aef7` |
-| `engines/anthy-unicode` | `bjj/anthy-unicode` (fork, branch `libpathime`) | `b3f0bd6` |
-| `engines/pyzy` | `bjj/pyzy` (fork, branch `libpathime`) | `82afe13` |
-| `engines/ibus-table-chinese` | `mike-fabian/ibus-table-chinese` (upstream) | `d261412` (1.8.14) |
-| `demo/cpp-terminal` | `jupyter-xeus/cpp-terminal` (upstream) | `c64ca6f` |
-
-All five remotes are already public and reachable. What is not guaranteed is
-that the *exact pinned commits* are pushed — a commit made locally on a
-`libpathime` branch and never pushed will fail `git submodule update` on a
-runner with a message about a missing object. For each fork:
-
-```bash
-cd engines/anthy-unicode && git push origin libpathime && cd -
-cd engines/pyzy         && git push origin libpathime && cd -
-```
-
-**[manual] 0.2 — Create the repository and push.**
-
-```bash
-gh repo create bjj/libpathime --public --source=. --remote=github --push
-```
-
-Keep the private remote as `origin` for now; nothing forces a rename, and having
-two remotes costs nothing.
-
-**[manual] 0.3 — Verify a cold clone, before writing any workflow.** This is
-five minutes that saves an hour of debugging a runner:
-
-```bash
-cd $(mktemp -d)
-git clone --recurse-submodules https://github.com/bjj/libpathime
-cd libpathime && cmake -S . -B b -G Ninja -DLIBPATHIME_BUILD_TESTS=ON \
-                       -DLIBPATHIME_REQUIRE_BACKENDS=ON
-cmake --build b && ctest --test-dir b --output-on-failure
-```
-
-If this passes, Phase 1 is mechanical. If it fails, it fails here where you can
-see it, rather than in a runner log.
-
-**[manual] 0.4 — Repository settings.** In the web UI:
-
-- **Settings → Actions → General → Workflow permissions**: set to *Read
-  repository contents and packages permissions*. Grant more per-job with an
-  explicit `permissions:` block. This is the default-deny posture and it is much
-  easier to adopt now than to retrofit.
-- **Settings → Code security**: enable Dependabot alerts and Dependabot security
-  updates.
-- **Do not add branch protection yet.** Requiring status checks that do not exist
-  is the classic first-timer trap: it blocks every merge, including the one that
-  would add the checks. Branch protection is step 1.5, after CI is green.
+**Done 2026-08-01.** The repository is `github.com/bjj/libpathime`, public,
+remote `origin`. The fork branches were verified pushed at the pinned commits;
+a cold clone from GitHub built and passed 39/39 on Windows under
+`windows-ninja`. Workflow permissions are default-read, Dependabot alerts and
+security updates are on. Branch protection is deliberately deferred to 1.3 —
+requiring status checks that do not exist yet blocks every merge, including
+the one that would add the checks.
 
 ---
 
@@ -281,7 +230,15 @@ Matrix:
 | `windows-ninja` | `windows-ninja` preset | clang-cl; the Windows job to lean on |
 | `windows-msvc` | `windows-msvc` preset | keeps the Visual Studio generator honest; serial, and needs vcpkg binary caching |
 
-Three details that are easy to get wrong:
+Four details that are easy to get wrong:
+
+- **The Windows runner images check out CRLF by default.** Git for Windows on
+  the hosted images has `core.autocrlf=true` in the machine config, and
+  BUILD.md requires an LF checkout — anthy's dictionary codegen parses tokens
+  with stray CRs otherwise. A `.gitattributes` in this repository cannot fix
+  it, because the requirement is about the *submodules'* files and attributes
+  do not cross the submodule boundary. The Windows jobs must run
+  `git config --global core.autocrlf false` **before** `actions/checkout`.
 
 - **The sanitizer job needs `ASAN_OPTIONS=detect_leaks=0` at *build* time and
   not at test time.** anthy's dictionary codegen tools exit without freeing, as
