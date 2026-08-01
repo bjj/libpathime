@@ -234,3 +234,73 @@ jobs:
           test "$(wc -l < a.sum)" -eq 5   # the five default tables, found where expected
           diff -u a.sum b.sum
           cat a.sum
+
+  # The install as a consumer meets it: install both link modes, MOVE the
+  # prefixes (installing and consuming at the same prefix cannot catch a
+  # configure-time-pinned path — the relocation rule BUILD.md states), then
+  # build and RUN examples/install-check four ways: find_package and
+  # pkg-config, each against the shared and the static install. Running is the
+  # point — pathime_has_engine() is what checks that pathime-data/ landed
+  # where the library resolves it, and the static consumer resolves from its
+  # own binary, so it executes from beside the installed bin/pathime-data.
+  # The same job asserts nothing ships the tests or the table compiler.
+  install-consumer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+      - uses: jwlawson/actions-setup-cmake@0d6a7d60b009d01c9e7523be22153ff8f19460d3 # v2.2.0
+        with:
+          cmake-version: ${{ env.CMAKE_VERSION }}
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build pkg-config \
+            libglib2.0-dev libsqlite3-dev uuid-dev
+      - name: Build and install both link modes, then move the prefixes
+        run: |
+          for mode in shared static; do
+            extra=""
+            if [ "$mode" = static ]; then extra="-DBUILD_SHARED_LIBS=OFF"; fi
+            cmake -S . -B "build/ic-$mode" -G Ninja -DCMAKE_BUILD_TYPE=Release \
+              -DLIBPATHIME_REQUIRE_BACKENDS=ON -DLIBPATHIME_BUILD_TESTS=ON \
+              -DLIBPATHIME_BUILD_DEMO=ON \
+              -DCMAKE_INSTALL_PREFIX="$PWD/stage/$mode" $extra
+            cmake --build "build/ic-$mode"
+            cmake --install "build/ic-$mode"
+          done
+          mv stage moved
+      - name: Nothing ships the tests or the table compiler
+        run: |
+          for mode in shared static; do
+            if find "moved/$mode" -name 'pathime-table-compile*' | grep -q .; then
+              echo "pathime-table-compile leaked into the $mode install"; exit 1
+            fi
+            extras=$(ls "moved/$mode/bin" | grep -vE '^(pathime-demo|pathime-data)$' || true)
+            if [ -n "$extras" ]; then
+              echo "unexpected in $mode bin/: $extras"; exit 1
+            fi
+          done
+      - name: find_package consumers
+        run: |
+          for mode in shared static; do
+            cmake -S examples/install-check -B "build/fp-$mode" -G Ninja \
+              -DCMAKE_PREFIX_PATH="$PWD/moved/$mode"
+            cmake --build "build/fp-$mode"
+          done
+          ./build/fp-shared/pathime-install-check
+          cp build/fp-static/pathime-install-check moved/static/bin/
+          ./moved/static/bin/pathime-install-check
+      - name: pkg-config consumers
+        run: |
+          export PKG_CONFIG_PATH="$PWD/moved/shared/lib/pkgconfig"
+          cc examples/install-check/consumer.c \
+            $(pkg-config --cflags --libs pathime) -o pc-shared
+          LD_LIBRARY_PATH="$PWD/moved/shared/lib" ./pc-shared
+          export PKG_CONFIG_PATH="$PWD/moved/static/lib/pkgconfig"
+          cc examples/install-check/consumer.c \
+            $(pkg-config --cflags --libs --static pathime) -o pc-static
+          cp pc-static moved/static/bin/
+          ./moved/static/bin/pc-static

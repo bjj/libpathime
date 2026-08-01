@@ -36,6 +36,8 @@ src/                     # Library implementation; the map is docs/source-layout
 tests/                   # Test suites: one per backend, plus api/ and core/ — see docs/testing.md
 demo/                    # Interactive terminal IME demo (LIBPATHIME_BUILD_DEMO=ON); README.md is the guide
   cpp-terminal/          # Submodule — portable terminal library, used only by the demo
+examples/
+  install-check/         # Standalone consumer of an *installed* libpathime; CI runs it against every install layout
 refs/                    # Local reference clones — gitignored, not submodules
   ibus-hangul/           # C engine wrapping libhangul; straightforward single-library integration
   ibus-anthy/            # Python engine wrapping anthy-unicode — pinned to bjj/ibus-anthy @ 0962741
