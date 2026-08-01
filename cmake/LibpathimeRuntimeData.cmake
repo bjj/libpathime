@@ -186,7 +186,8 @@ function(libpathime_install_runtime_data)
     # pyzy's android.db is what its Database::open() calls main.db.
     install(FILES "${_source}"
       DESTINATION "${LIBPATHIME_INSTALL_DATADIR}/${_subdir}"
-      RENAME "${_name}")
+      RENAME "${_name}"
+      COMPONENT data)
   endforeach()
 endfunction()
 

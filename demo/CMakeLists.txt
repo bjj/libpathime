@@ -63,8 +63,10 @@ set(CPPTERMINAL_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
 # so only cpp-terminal's own targets are created while the value is off, but
 # leaving it off would silently make libpathime itself static on the next
 # configure. Static everywhere rather than only under WIN32, because
-# cpp-terminal is the demo's private dependency and the demo is never
-# installed — one rule, and the executable runs without a library beside it.
+# cpp-terminal is the demo's private dependency: one rule, the executable runs
+# without an extra library beside it, and the demo package ships no shared
+# object that is not libpathime's own. cpp-terminal is MIT, so the static link
+# costs nothing the LGPL backends would charge for.
 get_property(_ct_bsl_help CACHE BUILD_SHARED_LIBS PROPERTY HELPSTRING)
 set(_ct_bsl_saved "${BUILD_SHARED_LIBS}")
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "${_ct_bsl_help}" FORCE)
@@ -174,3 +176,26 @@ if(LIBPATHIME_WITH_PYZY AND NOT PYZY_ANDROID_DB)
     "engines unavailable. It needs Python 3 at configure time; see "
     "PYZY_BUILD_DB_ANDROID.")
 endif()
+
+# --- The shipped demo --------------------------------------------------------
+#
+# COMPONENT demo: selected only by the demo package's cpack invocation
+# (cmake/LibpathimePackage.cmake), alongside runtime and data — a downloadable
+# archive someone unzips and runs. An ordinary `cmake --install` of a build
+# with the demo enabled carries it too, under bin/ where its data-directory
+# fallback (main.cc) and the resource lookup both behave as shipped.
+#
+# The RPATH reaches the library and the private vendored directory from bin/ —
+# computed from the install dirs rather than spelled ../lib, so a layout with
+# lib64 or a nested bindir stays correct. On Windows the function is a no-op
+# and the executable sits beside the DLLs, which is the search rule there.
+file(RELATIVE_PATH _demo_bin_to_lib
+     "${CMAKE_INSTALL_FULL_BINDIR}" "${CMAKE_INSTALL_FULL_LIBDIR}")
+set(_demo_rpath "${_demo_bin_to_lib}")
+if(LIBPATHIME_VENDORED_SUBDIR)
+  list(APPEND _demo_rpath "${_demo_bin_to_lib}/${LIBPATHIME_VENDORED_SUBDIR}")
+endif()
+libpathime_set_install_rpath(pathime-demo ${_demo_rpath})
+install(TARGETS pathime-demo
+  RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+  COMPONENT demo)

@@ -216,11 +216,16 @@ function(libpathime_install_vendored)
   foreach(_tgt ${ARGN})
     set_property(GLOBAL APPEND PROPERTY LIBPATHIME_VENDORED_TARGETS ${_tgt})
     libpathime_set_install_rpath(${_tgt})
+    # ARCHIVE is devel while the libraries themselves are runtime: on Windows
+    # the archive is the import library, on a static build the code itself —
+    # both are link-time artifacts, and the demo package (which selects no
+    # devel) has no use for either.
     install(TARGETS ${_tgt} EXPORT ${LIBPATHIME_EXPORT_SET}
       ${LIBPATHIME_RUNTIME_DEP_SET_ARGS}
-      RUNTIME DESTINATION "${LIBPATHIME_VENDORED_BINDIR}"
-      LIBRARY DESTINATION "${LIBPATHIME_VENDORED_LIBDIR}"
-      ARCHIVE DESTINATION "${LIBPATHIME_VENDORED_LIBDIR}")
+      RUNTIME DESTINATION "${LIBPATHIME_VENDORED_BINDIR}" COMPONENT runtime
+      LIBRARY DESTINATION "${LIBPATHIME_VENDORED_LIBDIR}" COMPONENT runtime
+              NAMELINK_SKIP
+      ARCHIVE DESTINATION "${LIBPATHIME_VENDORED_LIBDIR}" COMPONENT devel)
   endforeach()
 endfunction()
 
@@ -278,13 +283,14 @@ function(libpathime_install_package)
       PRE_EXCLUDE_REGEXES "^api-ms-" "^ext-ms-"
       POST_EXCLUDE_REGEXES "[/\\\\][Ss]ystem32[/\\\\]"
       ${_vcpkg_dirs}
-      RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+      RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT runtime)
   endif()
 
   install(EXPORT ${LIBPATHIME_EXPORT_SET}
     FILE pathime-targets.cmake
     NAMESPACE libpathime::
-    DESTINATION "${_cmakedir}")
+    DESTINATION "${_cmakedir}"
+    COMPONENT devel)
 
   # The template is cmake/pathime-config.cmake.in — note its neighbour
   # cmake/pathime-config.h.in, which is a different thing with a similar name:
@@ -306,7 +312,8 @@ function(libpathime_install_package)
   install(FILES
     "${PROJECT_BINARY_DIR}/pathime-config.cmake"
     "${PROJECT_BINARY_DIR}/pathime-config-version.cmake"
-    DESTINATION "${_cmakedir}")
+    DESTINATION "${_cmakedir}"
+    COMPONENT devel)
 
   _libpathime_install_pkgconfig()
 endfunction()
@@ -455,5 +462,6 @@ function(_libpathime_install_pkgconfig)
     OUTPUT "${PROJECT_BINARY_DIR}/pkgconfig/$<CONFIG>/pathime.pc"
     INPUT "${PROJECT_BINARY_DIR}/pathime.pc.configured")
   install(FILES "${PROJECT_BINARY_DIR}/pkgconfig/$<CONFIG>/pathime.pc"
-    DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig")
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig"
+    COMPONENT devel)
 endfunction()

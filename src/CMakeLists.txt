@@ -155,13 +155,21 @@ set_target_properties(pathime PROPERTIES
 # the generated targets file then says about them differs by link mode and is
 # right both times: archives on a static consumer's link line, and nothing but
 # an RPATH hint for a shared one. cmake/LibpathimeInstall.cmake has the detail.
+# The component split is what cpack packages select from
+# (cmake/LibpathimePackage.cmake): `runtime` is what every artifact carries,
+# `devel` is what only the library package adds. The namelink is devel — but
+# note it is not only for the link editor: BUILD.md's install section names
+# runtime loaders that probe `libpathime.so` by that exact spelling, which is
+# why the library package's component list includes devel rather than trying
+# to ship a runtime-only tree.
 libpathime_set_install_rpath(pathime ${LIBPATHIME_VENDORED_SUBDIR})
 install(TARGETS pathime
   EXPORT ${LIBPATHIME_EXPORT_SET}
   ${LIBPATHIME_RUNTIME_DEP_SET_ARGS}
-  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT runtime
+  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT runtime
+          NAMELINK_COMPONENT devel
+  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT devel)
 
 # The table databases, compiled from engines/ibus-table-chinese by the tool in
 # tools/. Declared here rather than there because an add_custom_command output

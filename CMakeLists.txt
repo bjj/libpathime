@@ -17,7 +17,7 @@ cmake_minimum_required(VERSION 3.21)
 project(libpathime
   VERSION 0.1.0
   DESCRIPTION "IBus input method engine library"
-  HOMEPAGE_URL "https://github.com/ben/libpathime"
+  HOMEPAGE_URL "https://github.com/bjj/libpathime"
   LANGUAGES C CXX)
 
 list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
@@ -28,6 +28,7 @@ include(LibpathimeCompat)        # libpathime_add_win32_compat() + win32 shim li
 include(LibpathimeDependencies)  # probe deps, gate backends, print the summary
 include(LibpathimeRuntimeData)   # the pathime-data/ the library reads at runtime
 include(LibpathimeInstall)       # the installed layout and the find_package() half
+include(LibpathimePackage)       # what cpack makes of the install components
 
 # --- Korean: libhangul ships modern, target-based CMake for its `hangul`
 # library. We descend straight into that library directory rather than the
@@ -100,7 +101,8 @@ configure_file("${CMAKE_CURRENT_SOURCE_DIR}/cmake/pathime-config.h.in"
                @ONLY)
 install(FILES "${PROJECT_BINARY_DIR}/include/pathime/config.h"
               "${CMAKE_CURRENT_SOURCE_DIR}/include/pathime/pathime.h"
-        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pathime")
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pathime"
+        COMPONENT devel)
 
 # --- The library itself: the `pathime` target. It carries the public include
 # directories and the PATHIME_BUILD/PATHIME_STATIC definitions, so a consumer
