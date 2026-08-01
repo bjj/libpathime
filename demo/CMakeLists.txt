@@ -152,10 +152,17 @@ endif()
 # ~/.config/anthy or pyzy user database — the same isolation the api tests get.
 # --data-dir overrides it.
 #
+# The directory is created now, at configure time, because main.cc takes the
+# baked path only when it exists on disk: that is what lets the same binary,
+# unpacked from a demo package on another machine, fall through to the
+# library's own per-user default instead of writing to a dead absolute path
+# from the machine that built it.
+#
 # The engines' *read-only* data needs nothing here: it is staged beside the
 # library by src/CMakeLists.txt and the default resource_dir finds it, which is
 # the same thing that will happen for a client shipping the two together.
 set(_demo_data "${CMAKE_CURRENT_BINARY_DIR}/data")
+file(MAKE_DIRECTORY "${_demo_data}")
 target_compile_definitions(pathime-demo PRIVATE
   "PATHIME_DEMO_DATA_DIR=\"${_demo_data}\"")
 

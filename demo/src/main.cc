@@ -19,6 +19,7 @@
 #include <cstdio>
 #include <cstring>
 #include <exception>
+#include <filesystem>
 #include <string>
 
 #include <cpp-terminal/event.hpp>
@@ -126,8 +127,18 @@ int main(int argc, char **argv)
         }
     }
 
+    /* The baked path is this build tree's data/ directory, which the build
+     * creates — so a developer run stays out of the real per-user location,
+     * the same isolation the api tests get. It is taken only when it exists:
+     * a shipped demo is this same binary unpacked on a machine where it does
+     * not, and there data_dir stays empty and pathime_init() applies its own
+     * rule — a platform per-user directory, created on first use. */
 #ifdef PATHIME_DEMO_DATA_DIR
-    if (data_dir.empty()) data_dir = PATHIME_DEMO_DATA_DIR;
+    if (data_dir.empty()) {
+        std::error_code ec;
+        if (std::filesystem::is_directory(PATHIME_DEMO_DATA_DIR, ec))
+            data_dir = PATHIME_DEMO_DATA_DIR;
+    }
 #endif
 
     /* Initialized in the declaration, which is the idiom the header asks for:

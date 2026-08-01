@@ -16,7 +16,10 @@ cmake --build build
 
 `--list` prints which engines this build can supply and exits, `--engine NAME`
 starts on one of them, and `--data-dir DIR` decides where the engines keep what
-they learn. `F1` inside the program lists the keys.
+they learn. Without the flag, a demo run from a build tree keeps that state in
+the build tree's `data/`, so it never touches your real per-user IME state; a
+demo installed or unpacked anywhere else uses the library's per-user default
+(created on first run). `F1` inside the program lists the keys.
 
 ## What is on the screen
 
