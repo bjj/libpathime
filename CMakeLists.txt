@@ -15,7 +15,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(libpathime
-  VERSION 0.1.0
+  VERSION 0.1.1
   DESCRIPTION "IBus input method engine library"
   HOMEPAGE_URL "https://github.com/bjj/libpathime"
   LANGUAGES C CXX)
