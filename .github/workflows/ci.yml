@@ -1,0 +1,162 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Every job configures with LIBPATHIME_REQUIRE_BACKENDS=ON so a runner that
+# quietly lost a dependency fails instead of testing three backends, and pins
+# CMake so a runner-image refresh cannot change the build overnight.
+env:
+  CMAKE_VERSION: 3.31.6
+
+jobs:
+  linux:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-gcc-release
+            configure: >-
+              cmake --preset linux-release
+              -DLIBPATHIME_BUILD_TESTS=ON -DLIBPATHIME_REQUIRE_BACKENDS=ON
+              -DLIBPATHIME_BUILD_DEMO=ON
+            builddir: build/linux-release
+          - name: linux-gcc-debug
+            configure: >-
+              cmake --preset linux-debug
+              -DLIBPATHIME_BUILD_TESTS=ON -DLIBPATHIME_REQUIRE_BACKENDS=ON
+            builddir: build/linux-debug
+          - name: linux-clang-release
+            configure: >-
+              cmake --preset linux-release
+              -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+              -DLIBPATHIME_BUILD_TESTS=ON -DLIBPATHIME_REQUIRE_BACKENDS=ON
+            builddir: build/linux-release
+          - name: linux-static
+            # Exercises PATHIME_STATIC and the module_path.cc /proc/self/exe
+            # fallback that a shared build never reaches.
+            configure: >-
+              cmake --preset linux-release
+              -DBUILD_SHARED_LIBS=OFF
+              -DLIBPATHIME_BUILD_TESTS=ON -DLIBPATHIME_REQUIRE_BACKENDS=ON
+            builddir: build/linux-release
+          - name: linux-asan-ubsan
+            # The configuration docs/testing.md documents as clean. No preset
+            # carries the sanitizers; the flags are the contract.
+            configure: >-
+              cmake -S . -B build/asan -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
+              -DLIBPATHIME_BUILD_TESTS=ON -DLIBPATHIME_REQUIRE_BACKENDS=ON
+              -DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -g"
+              -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -g"
+              -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+              -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=address,undefined"
+            builddir: build/asan
+            # detect_leaks=0 at build time only: anthy's dictionary codegen
+            # tools exit without freeing, as build-time programs reasonably do,
+            # and LeakSanitizer would fail the build over it. The tests run
+            # with leak detection on; anthy.vendor.main is excluded because it
+            # is upstream's own program, not leak-clean, left as written.
+            build-env: ASAN_OPTIONS=detect_leaks=0
+            ctest-args: -E '^anthy\.vendor\.main$'
+          - name: linux-uninit
+            # Guards the pathime_init_params_t class of bug; docs/testing.md,
+            # "Running with uninitialized locals made hostile".
+            configure: >-
+              cmake -S . -B build/uninit -G Ninja
+              -DLIBPATHIME_BUILD_TESTS=ON -DLIBPATHIME_REQUIRE_BACKENDS=ON
+              -DCMAKE_C_FLAGS="-ftrivial-auto-var-init=pattern -g"
+              -DCMAKE_CXX_FLAGS="-ftrivial-auto-var-init=pattern -g"
+            builddir: build/uninit
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+      - uses: jwlawson/actions-setup-cmake@0d6a7d60b009d01c9e7523be22153ff8f19460d3 # v2.2.0
+        with:
+          cmake-version: ${{ env.CMAKE_VERSION }}
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build pkg-config \
+            libglib2.0-dev libsqlite3-dev uuid-dev check
+      - name: Configure
+        run: ${{ matrix.configure }}
+      - name: Build
+        run: ${{ matrix.build-env }} cmake --build ${{ matrix.builddir }}
+      - name: Test
+        run: ctest --test-dir ${{ matrix.builddir }} --output-on-failure ${{ matrix.ctest-args }}
+
+  windows:
+    name: ${{ matrix.name }}
+    runs-on: windows-2025
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-ninja
+            # The Windows job to lean on: parallel, and carries the demo.
+            preset: windows-ninja
+            configure-args: -DLIBPATHIME_BUILD_DEMO=ON
+            ctest-args: ""
+          - name: windows-msvc
+            # Keeps the Visual Studio generator honest. Serial on purpose —
+            # the build preset carries jobs:1; docs/windows-port.md has why.
+            preset: windows-msvc
+            configure-args: ""
+            ctest-args: -C Release
+    steps:
+      # The runner images configure core.autocrlf=true, and BUILD.md requires
+      # an LF checkout — anthy's dictionary codegen parses tokens with stray
+      # CRs otherwise. A .gitattributes here cannot fix it, because the
+      # requirement is about the submodules' files and attributes do not cross
+      # the submodule boundary. So: before checkout.
+      - name: Force LF checkout
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+      - uses: jwlawson/actions-setup-cmake@0d6a7d60b009d01c9e7523be22153ff8f19460d3 # v2.2.0
+        with:
+          cmake-version: ${{ env.CMAKE_VERSION }}
+      - name: Resolve vcpkg baseline
+        id: vcpkg
+        run: echo "rev=$(git -C C:\vcpkg rev-parse HEAD)" >> $env:GITHUB_OUTPUT
+      - name: Cache vcpkg installed tree
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: C:\vcpkg\installed
+          key: vcpkg-x64-windows-${{ steps.vcpkg.outputs.rev }}
+      - name: Install pyzy's dependencies
+        run: vcpkg install glib:x64-windows sqlite3:x64-windows pkgconf:x64-windows
+      - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+        if: matrix.preset == 'windows-ninja'
+        with:
+          arch: x64
+      - name: Configure
+        # VCPKG_ROOT on the step, not the job: vcvars points it at the vcpkg
+        # bundled with Visual Studio, and the preset reads it.
+        env:
+          VCPKG_ROOT: C:\vcpkg
+        run: >-
+          cmake --preset ${{ matrix.preset }}
+          -DLIBPATHIME_BUILD_TESTS=ON -DLIBPATHIME_REQUIRE_BACKENDS=ON
+          ${{ matrix.configure-args }}
+      - name: Build
+        env:
+          VCPKG_ROOT: C:\vcpkg
+        run: cmake --build --preset ${{ matrix.preset }}
+      - name: Test
+        run: ctest --test-dir build/${{ matrix.preset }} --output-on-failure ${{ matrix.ctest-args }}
