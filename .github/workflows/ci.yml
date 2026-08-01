@@ -104,7 +104,7 @@ jobs:
 
   windows:
     name: ${{ matrix.name }}
-    runs-on: windows-2025
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     strategy:
       fail-fast: false
@@ -112,12 +112,24 @@ jobs:
         include:
           - name: windows-ninja
             # The Windows job to lean on: parallel, and carries the demo.
+            # The link pool serializes link steps only: vcpkg's applocal step
+            # runs as part of each link command, copying the same runtime DLLs
+            # beside every executable, and two concurrent copies of the same
+            # DLL collide ("file is being used by another process"). Compiles
+            # stay parallel; applocal itself must stay on, because the
+            # build-time tools (the table compiler) load those DLLs too.
+            os: windows-2025
             preset: windows-ninja
-            configure-args: -DLIBPATHIME_BUILD_DEMO=ON
+            configure-args: >-
+              -DLIBPATHIME_BUILD_DEMO=ON
+              -DCMAKE_JOB_POOLS=link=1 -DCMAKE_JOB_POOL_LINK=link
             ctest-args: ""
           - name: windows-msvc
             # Keeps the Visual Studio generator honest. Serial on purpose —
             # the build preset carries jobs:1; docs/windows-port.md has why.
+            # windows-2022, not -2025: the preset pins the Visual Studio 17
+            # generator and the 2025 image ships only Visual Studio 18.
+            os: windows-2022
             preset: windows-msvc
             configure-args: ""
             ctest-args: -C Release
@@ -165,20 +177,13 @@ jobs:
         # bundled with Visual Studio, and the preset reads it.
         env:
           VCPKG_ROOT: C:\vcpkg
-        # VCPKG_APPLOCAL_DEPS=OFF: the applocal step copies the same runtime
-        # DLLs beside every linked executable, and two concurrent Ninja links
-        # collide on the copy ("file is being used by another process"). The
-        # Test step puts the vcpkg bin directory on PATH instead.
         run: >-
           cmake --preset ${{ matrix.preset }}
           -DLIBPATHIME_BUILD_TESTS=ON -DLIBPATHIME_REQUIRE_BACKENDS=ON
-          -DVCPKG_APPLOCAL_DEPS=OFF
           ${{ matrix.configure-args }}
       - name: Build
         env:
           VCPKG_ROOT: C:\vcpkg
         run: cmake --build --preset ${{ matrix.preset }}
       - name: Test
-        run: |
-          $env:PATH = "C:\vcpkg\installed\x64-windows\bin;$env:PATH"
-          ctest --test-dir build/${{ matrix.preset }} --output-on-failure ${{ matrix.ctest-args }}
+        run: ctest --test-dir build/${{ matrix.preset }} --output-on-failure ${{ matrix.ctest-args }}
