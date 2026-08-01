@@ -89,9 +89,9 @@ set(LIBPATHIME_VENDORED_BINDIR "${CMAKE_INSTALL_BINDIR}")
 # libpathime_install_package() installs the set's closure, computed at install
 # time. Computed rather than hand-listed on purpose: a list of the current
 # five names goes stale silently on a vcpkg baseline bump, where the
-# dependency-set form encodes the rule and fails loudly.
-# docs/ci-and-release-plan.md 4.3c has the reasoning, the alternatives
-# considered, and the licence consequences of shipping the closure.
+# dependency-set form encodes the rule and fails loudly. The DLLs are shipped
+# components with licence consequences; THIRD-PARTY.md carries their rows and
+# _libpathime_install_licenses() below ships their texts.
 if(WIN32 AND BUILD_SHARED_LIBS)
   set(LIBPATHIME_RUNTIME_DEP_SET_ARGS RUNTIME_DEPENDENCY_SET pathime-runtime)
 else()

@@ -19,16 +19,20 @@ written to stand on its own: the three development-only documents (this file,
 `CLAUDE.md`, `docs/design-history.md`) could be deleted with nothing dangling.
 Keep it that way — nothing outside those three should cite them.
 
-Status in one paragraph: the build (Linux and Windows), the core (all 45
-public entry points), **all four** adapters — hangul, anthy, pyzy and the
+Status in one paragraph: the build (Linux, macOS and Windows), the core (all
+45 public entry points), **all four** adapters — hangul, anthy, pyzy and the
 table engine — options and negotiation including tier 3, the terminal demo
 client, the preedit rule, and the eager candidate strip are built and tested:
-40 suites, all passing on Linux with every backend enabled
+40 suites, all passing on Linux and macOS with every backend enabled
 (`docs/testing.md`), and 39 on Windows under both presets and in both link
 modes — every suite but `hangul.vendored.unittest`, which needs the Check
 library and is not registered where Check is absent. The table engine
 types real Chinese against tables compiled out of `ibus-table-chinese`, trimmed
 at build time to one of two checked-in glyph-coverage maps or to none.
+The project is public at `github.com/bjj/libpathime` with CI on every push
+(`.github/workflows/`), and **v0.1.0 is released** — two binary packages per
+platform plus a source tarball; BUILD.md, "Releases and packaging", has the
+mechanics and `docs/design-history.md` §14 what going public settled.
 
 ---
 
@@ -180,6 +184,21 @@ that engine does not do.
 
 ## Queued work
 
+- **A vcpkg port.** A `vcpkg.json` plus `portfile.cmake`, submitted as a PR
+  to `microsoft/vcpkg`, referencing the published tag. The natural first
+  publishing channel — the audience is C and C++ embedders, and the Windows
+  build already depends on vcpkg. Library only (no demo), and no static
+  feature until someone asks and the licence question is answered
+  (`docs/design-history.md` §14). Conan is the same shape for a second
+  audience, only if asked for.
+- **A macOS glyph-coverage map.** macOS inherits the Noto map by recorded
+  choice (`cmake/LibpathimeOptions.cmake` has the reasoning). The follow-up
+  is generating a PingFang/Hiragino map with `tools/generate-coverage.py`
+  against the system faces and measuring it against the shipped tables; only
+  then is there something to compare.
+- **Waiting for a consumer to ask:** macOS Intel and Windows arm64 CI and
+  release artifacts; a `CODECOV_TOKEN` repository secret (tokenless coverage
+  upload works but is rate-limited).
 - **Guarded names for the vendored libraries, as a build option.** The install
   layout keeps our libhangul, anthy-unicode and pyzy in a private
   `lib/pathime/` (`cmake/LibpathimeInstall.cmake`), which stops them colliding

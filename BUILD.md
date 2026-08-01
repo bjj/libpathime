@@ -417,6 +417,37 @@ CMake needs them named to work out RPATHs and static link lines. That does not
 make them part of the interface: there is no installed header to compile
 against them with, and the library they belong to is `libpathime::pathime`.
 
+## Releases and packaging
+
+The install rules are component-scoped — `runtime` (the libraries, and on
+Windows the external runtime DLLs), `devel` (headers, the `.so` namelink, the
+CMake package, `pathime.pc`), `data` (`pathime-data/`), `demo` (the demo
+binary and its licence text) — and `cpack` selects archives from them
+(`cmake/LibpathimePackage.cmake`):
+
+```bash
+cpack --config build/<preset>/CPackConfig.cmake            # library package
+cpack --config build/<preset>/CPackConfig.cmake \
+      -D CPACK_COMPONENTS_ALL="runtime;demo;data" \
+      -D CPACK_PACKAGE_FILE_NAME=pathime-demo-<ver>-<os>-<arch>   # demo package
+```
+
+The source tarball — the repository with every submodule populated at its
+pinned commit, which GitHub's auto-generated archive is not — comes from
+`tools/make-source-tarball.sh`.
+
+Cutting a release is three edits and a tag:
+
+1. Set the version in `CMakeLists.txt` and add the dated entry to
+   `CHANGELOG.md`.
+2. Push the changes, wait for CI.
+3. Tag `v<version>` and push the tag. `.github/workflows/release.yml` builds
+   both packages for every supported platform, generates and build-verifies
+   the source tarball, attests provenance, and creates a **draft** release —
+   version-shaped tags only, and the build fails if the tag and
+   `CMakeLists.txt` disagree. Review the draft on the releases page and
+   publish it by hand.
+
 ## How the pieces fit together
 
 - `cmake/LibpathimeOptions.cmake` — build-wide preamble and the

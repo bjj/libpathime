@@ -65,7 +65,7 @@ tools/
                         (BUILD.md, "Glyph coverage")
   make-source-tarball.sh  the source release artifact: superproject plus all five
                         submodules, read from git rather than the working tree
-                        (docs/ci-and-release-plan.md 6.5)
+                        (BUILD.md, "Releases and packaging")
 tests/
   api/                  links the built library, exported symbols only, C11:
                         abi, lifecycle, options, one test per engine, the

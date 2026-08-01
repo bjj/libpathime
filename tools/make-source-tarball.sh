@@ -6,8 +6,8 @@
 # This artifact exists because GitHub's auto-generated "Source code (tar.gz)"
 # omits submodules, and this project's submodules are three of its four
 # backends — that download does not build. It is also the corresponding-source
-# offer that has to sit beside the GPL-3 binaries; docs/ci-and-release-plan.md
-# 6.5 has the reasoning.
+# offer that has to sit beside the GPL-3 binaries; THIRD-PARTY.md, "The
+# artifacts", states that obligation.
 #
 # Usage:
 #   tools/make-source-tarball.sh [-o OUTDIR]

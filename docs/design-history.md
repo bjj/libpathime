@@ -11,15 +11,17 @@ cost, and what would legitimately reopen it. The full narrative of every round
 Nothing here is pending — that is `TODO.md`. Model: `docs/CONCEPTS.md`.
 Contract: `include/pathime/pathime.h`.
 
-## Ledger (as of 2026-07-31)
+## Ledger (as of 2026-08-01)
 
-Built and tested: the build (Linux + Windows, both presets, both link modes),
-all 45 public entry points, all four adapters — hangul, anthy, pyzy, and the
+Built and tested: the build (Linux, macOS and Windows, both link modes), all
+45 public entry points, all four adapters — hangul, anthy, pyzy, and the
 table engine, the last written here rather than wrapped — options and
 negotiation including tier 3, the preedit rule, the eager candidate strip, and
-the terminal demo. 40 suites pass on Linux with every backend enabled, 39 on
-Windows (`hangul.vendored.unittest` needs the Check library). `docs/testing.md`
-maps the suites; `docs/source-layout.md` maps the files.
+the terminal demo. 40 suites pass on Linux and macOS with every backend
+enabled, 39 on Windows (`hangul.vendored.unittest` needs the Check library).
+`docs/testing.md` maps the suites; `docs/source-layout.md` maps the files.
+Public at `github.com/bjj/libpathime` with CI on every push; v0.1.0 released
+2026-08-01 — §14 holds what going public settled.
 
 ## 1. Options round
 
@@ -559,8 +561,77 @@ there; what was closed is here.
   header's status enum stops being a table, and `romaji.cc`'s 286-line
   one-row-per-line romaji table packs into 73. Cost: no mechanical guard
   against drift; the style stays a matter of reading the surrounding code, as
-  `CLAUDE.md` already asks. `docs/ci-and-release-plan.md` Phase 5 holds the
-  measurements — re-run them before reopening, they are cheap. The one finding
-  that outlives the decision is that the three generated headers must be
-  excluded from any whole-tree text operation, being 64% of the raw diff and
-  required to match their generator's output byte for byte.
+  `CLAUDE.md` already asks. The measurements (clang-format 19, changed lines
+  of 36,890 non-vendored, non-generated): 80 columns 9,780; 90 columns 6,902;
+  100 columns 7,737; 90 + `ReflowComments: false` 6,860; + `IndentPPDirectives`,
+  `AlignEscapedNewlines: Left` 6,786; + `AlignConsecutive*` 7,986 and
+  + `BinPack{Arguments,Parameters}: false` 7,452 — the last two *worsen* it.
+  Re-run before reopening; they are cheap. If ever reopened, the honest form is
+  a check over new files only. The one finding that outlives the decision is
+  that the three generated headers must be excluded from any whole-tree text
+  operation, being 64% of the raw diff and required to match their generator's
+  output byte for byte.
+
+## 14. Going public (2026-08-01)
+
+The repository went public (`github.com/bjj/libpathime`), grew CI, and
+released v0.1.0, all in one day; `.github/workflows/` carries the operational
+reasoning as comments, `THIRD-PARTY.md` the licence consequences, and BUILD.md
+the release mechanics. What was *decided* rather than merely done:
+
+- **Two release packages per platform–arch pair, and only two.** A library
+  package (headers, libraries, CMake + pkg-config, data) and a standalone
+  demo package (binary, libraries, data) — no separate runtime package,
+  because the runtime/devel split serves a distribution's dependency
+  resolver and nothing plays that role on a release page; the whole layout
+  is an application bundling the library beside itself. Cost: developers
+  download headers they may not need. Reopen: a consumer for a runtime-only
+  artifact materialises — the four install components (`runtime`, `devel`,
+  `data`, `demo`) already express the split, so it is one more cpack line.
+- **Per-arch archives, no combined SDK.** The generated
+  `pathime-targets.cmake` describes one triplet; a `lib/x64`-style combined
+  zip needs a hand-written dispatching config free to drift from the
+  generated truth. Cost: the ~25 MB arch-independent data is duplicated
+  across archives, on our side of the wire.
+- **Every artifact ships all data and is therefore GPL-3 as a whole**, stated
+  on the release rather than implied by `LICENSE`;
+  `LIBPATHIME_WITH_ANTHY=OFF` / `LIBPATHIME_WITH_TABLE=OFF` are the escape
+  hatches. The corresponding-source offer is a generated tarball with every
+  submodule at its pin (`tools/make-source-tarball.sh`) — GitHub's
+  auto-tarball omits submodules and does not build. release.yml proves the
+  tarball by building and testing from it.
+- **Windows artifacts carry the vcpkg runtime-DLL closure; POSIX artifacts
+  carry no external libraries.** Windows has no system glib, every other
+  platform does. Alternatives rejected: MSYS2 glib (second toolchain family,
+  more DLLs, unpinnable rolling repo), gvsbuild (another tool, same output),
+  Conan (no advantage over the vcpkg already load-bearing), static glib via
+  `x64-windows-static-md` (the one option that removes files; the triplet
+  has never been configured and glib's static Windows build is its fragile
+  corner). Reopen the last only if the DLL count itself becomes a problem.
+- **No static release artifacts.** The LGPL relinking obligation attaches to
+  a static artifact in a way it does not to the shared arrangement, and a
+  static artifact pushes the vendored archives and the C++ runtime onto the
+  consumer's link line — a support surface with no audience. Static stays a
+  tested build (`BUILD_SHARED_LIBS=OFF` is in CI, and the consumer job runs
+  against a static install); nothing ships it. The vcpkg port, when written,
+  should offer no static feature until someone asks.
+- **Releases are drafts from version-shaped tags.** `v[0-9]+.[0-9]+.[0-9]+`
+  only; the workflow fails a tag that disagrees with `CMakeLists.txt`;
+  publishing the draft is a human act. Provenance is attested
+  (`gh attestation verify` answers authenticity); the binaries are unsigned,
+  decided 2026-08-01 — SmartScreen's "Run anyway" is the accepted cost, and
+  Azure Trusted Signing (~$10/mo) or SignPath's OSS program are the routes
+  if the demo finds an audience.
+- **Linux release binaries build on the oldest supported runner image**
+  (ubuntu-22.04 → glibc 2.35 floor, stated in the notes), never
+  `ubuntu-latest` — silence about the floor is how "doesn't run on Debian
+  stable" becomes the first issue filed.
+- **`CHANGELOG.md` exists as of the first release** — one dated entry per
+  release, the only document that speaks in dates; everything else keeps the
+  present-tense rule.
+- **The macOS port (Phase 2 of the plan) cost three CI rounds** on a private
+  spike repo, landed as PR #2: the `_NSGetExecutablePath` fallback, the
+  uuid-sites' Darwin arms (SDK header, libSystem symbols, no `uuid.pc`,
+  nothing to link), and the recorded choice that macOS inherits the Noto
+  glyph map until a PingFang map is generated and measured (`TODO.md`).
+  macOS Intel and Windows arm64 wait for a consumer to ask.
