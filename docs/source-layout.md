@@ -63,6 +63,9 @@ tools/
   generate-coverage.py  regenerates engines/table/coverage_data_{noto,windows}.h
                         from fonts; opt-in target only, never an ordinary build
                         (BUILD.md, "Glyph coverage")
+  make-source-tarball.sh  the source release artifact: superproject plus all five
+                        submodules, read from git rather than the working tree
+                        (docs/ci-and-release-plan.md 6.5)
 tests/
   api/                  links the built library, exported symbols only, C11:
                         abi, lifecycle, options, one test per engine, plus the

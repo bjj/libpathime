@@ -880,17 +880,30 @@ taken": this is a required artifact, both because GitHub's auto-generated
 is not a buildable source release — and because it is the corresponding-source
 offer that sits on the same page as the GPL-3 binaries. Mechanics:
 
-- **Generation**: from a fresh `--recurse-submodules` clone of the tag,
-  `git ls-files --recurse-submodules | tar -T -` is the simplest correct form —
-  it honours the pinned commits, handles nesting, and includes no `.git`.
-  `refs/` and build directories are gitignored and excluded for free.
-- **Reproducibly**: sorted names, `--mtime` pinned to the commit date,
-  `--owner=0 --group=0`, `gzip -n` — cheap, and it lets Phase 3's
-  reproducibility job cover the tarball too.
+**Implemented** as `tools/make-source-tarball.sh`. Run it from a checkout of
+the tag; `-o` names the output directory.
+
+- **Generation**: `git archive` of the superproject, concatenated with a
+  `git archive` of each submodule at its pinned commit. Not the
+  `git ls-files --recurse-submodules | tar -T -` this plan first proposed:
+  that archives the *working tree*, so the output depends on the builder's
+  `core.autocrlf` and smudge filters, and a release cut on Windows could ship
+  CRLF into anthy's dictionary codegen, which BUILD.md requires to be LF.
+  Reading blobs makes the content a function of the commit alone — verified
+  here by comparing every extracted file against `git show`. `.git` is
+  excluded by construction, and `refs/` and build directories are gitignored.
+- **Reproducibly**: git archive emits tree order, `0:0` ownership and the
+  commit date of the repository each file came from; `gzip -9n` records no
+  timestamp. Two runs are byte-identical, checked. The caveat is that it is
+  reproducible per git version, not across them, since the tar framing is
+  git's.
 - **Verified**: a CI job that configures, builds and tests **from the generated
-  tarball**, not from the checkout. That job is the only thing that keeps
-  "buildable source release" true — it is also what catches any configure-time
-  step that quietly assumed `.git` exists.
+  tarball**, not from the checkout. Still to write, and it must run on Linux:
+  `engines/pyzy/src/main.db` is a symlink, so extracting the tarball on Windows
+  without symlink privileges silently drops it.  That job is the only thing
+  that keeps "buildable source release" true — it is also what catches any
+  configure-time step that quietly assumed `.git` exists. Nothing in the build
+  reads `.git` today, checked.
 
 **6.6 — vcpkg port.** A `vcpkg.json` plus `portfile.cmake`, submitted as a PR to
 `microsoft/vcpkg`. This is the natural first channel: the audience is C and C++
