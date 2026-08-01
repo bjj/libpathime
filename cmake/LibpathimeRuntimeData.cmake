@@ -28,11 +28,11 @@ set(LIBPATHIME_RUNTIME_DATA_DIRNAME "pathime-data")
 # would multiply the package for methods no client has asked for, so the default
 # is this set and the rest is a one-line opt-in.
 #
-# The third field is the frequency-transfer source of tools/table-compile. It is
-# set for exactly the two families the fork these tables come from preprocesses
-# (bjj/ibus-table-chinese d0f9849, cc4a17f): without it, a partially typed
-# Cangjie or Quick code offers the table's structural order rather than common
-# characters first.
+# The third field is the frequency-transfer source of tools/table-compile. It
+# is set for exactly the two families the transfer was designed around (in
+# bjj/ibus-table-chinese d0f9849 and cc4a17f, where the technique originates):
+# without it, a partially typed Cangjie or Quick code offers the table's
+# structural order rather than common characters first.
 set(LIBPATHIME_TABLES
   "cangjie5|tables/cangjie/cangjie5.txt|tables/cantonese/cantonese.txt"
   "quick5|tables/quick/quick5.txt|tables/cantonese/cantonese.txt"

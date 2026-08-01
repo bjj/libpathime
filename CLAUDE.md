@@ -48,7 +48,7 @@ engines/                 # Vendored — three libraries and one data set; anthy 
   anthy-unicode/         # Japanese kana-kanji conversion library
   pyzy/                  # Chinese Pinyin/Bopomofo conversion library
   ibus-table-chinese/    # Table sources (Wubi, Cangjie, …); data, not code — its own
-                         # CMake build is unused. bjj/ibus-table-chinese @ cc4a17f
+                         # CMake build is unused. mike-fabian/ibus-table-chinese @ 1.8.14
 tools/                   # Build-time tools: the table compiler, the variant generator
 ```
 

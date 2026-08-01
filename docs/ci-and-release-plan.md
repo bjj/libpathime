@@ -199,15 +199,15 @@ Nothing else can start until this is done, and it is the phase with the most
 **[manual]** in it.
 
 **[manual] 0.1 — Push the submodule forks first.** This is the step whose
-omission produces a confusing CI failure later. Three of the five submodules are
-your own forks, and two of them are pinned to a `libpathime` branch:
+omission produces a confusing CI failure later. Two of the five submodules are
+your own forks, each pinned to a `libpathime` branch:
 
 | Submodule | Remote | Pinned at |
 |---|---|---|
 | `engines/libhangul` | `libhangul/libhangul` (upstream) | `a34aef7` |
 | `engines/anthy-unicode` | `bjj/anthy-unicode` (fork, branch `libpathime`) | `b3f0bd6` |
 | `engines/pyzy` | `bjj/pyzy` (fork, branch `libpathime`) | `82afe13` |
-| `engines/ibus-table-chinese` | `bjj/ibus-table-chinese` (fork) | `cc4a17f` |
+| `engines/ibus-table-chinese` | `mike-fabian/ibus-table-chinese` (upstream) | `d261412` (1.8.14) |
 | `demo/cpp-terminal` | `jupyter-xeus/cpp-terminal` (upstream) | `c64ca6f` |
 
 All five remotes are already public and reachable. What is not guaranteed is
@@ -218,7 +218,6 @@ runner with a message about a missing object. For each fork:
 ```bash
 cd engines/anthy-unicode && git push origin libpathime && cd -
 cd engines/pyzy         && git push origin libpathime && cd -
-cd engines/ibus-table-chinese && git push origin HEAD && cd -
 ```
 
 **[manual] 0.2 — Create the repository and push.**

@@ -18,7 +18,7 @@ front. Coverage filtering -- this -- keeps unrenderable ones out entirely.
 Why a checked-in table rather than a build-time font lookup
 -----------------------------------------------------------
 
-The fork this library's tables come from (bjj/ibus-table-chinese) shells out to
+The fork this technique originates from (bjj/ibus-table-chinese) shells out to
 fc-query while preprocessing, which makes the produced table a function of which
 fonts happen to be installed on the build machine: two builds of the same commit
 produce different data. Here the map is generated once, checked in, and consumed

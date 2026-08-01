@@ -14,7 +14,7 @@ Each is built as a **shared library** and loaded as one.
 | libhangul | LGPL-2.1 | `github.com/libhangul/libhangul` | upstream, unmodified |
 | anthy-unicode | LGPL-2.1 — its dictionary sources differ, see "Data files" below | `github.com/fujiwarat/anthy-unicode` | `github.com/bjj/anthy-unicode`, branch `libpathime` |
 | pyzy | LGPL-2.1 | `github.com/openSUSE/pyzy` | `github.com/bjj/pyzy`, branch `libpathime` |
-| ibus-table-chinese | GPLv3 | `github.com/mike-fabian/ibus-table` | upstream |
+| ibus-table-chinese | GPLv3 | `github.com/mike-fabian/ibus-table-chinese` | upstream, unmodified |
 
 **anthy-unicode and pyzy are modified.** Each fork's `libpathime` branch carries
 a short series of titled commits on top of an unmodified `main`/`master`.

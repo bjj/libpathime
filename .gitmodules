@@ -14,4 +14,4 @@
 	url = https://github.com/jupyter-xeus/cpp-terminal
 [submodule "engines/ibus-table-chinese"]
 	path = engines/ibus-table-chinese
-	url = https://github.com/bjj/ibus-table-chinese.git
+	url = https://github.com/mike-fabian/ibus-table-chinese.git

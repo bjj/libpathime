@@ -164,9 +164,9 @@ size_t strip_punctuation_keys(TableSource *source);
  * Rewrite @a target's frequencies from a second table's, for every entry
  * @a target itself ranks at or above @a threshold.
  *
- * This is the portable half of the preprocessing carried in the fork this
- * library's tables come from (bjj/ibus-table-chinese, commits d0f9849 and
- * cc4a17f): character frequency data taken from one table — Cantonese, which
+ * This is the portable half of a preprocessing step that originates in
+ * bjj/ibus-table-chinese (commits d0f9849 and cc4a17f): character
+ * frequency data taken from one table — Cantonese, which
  * ranks by usage — is transferred onto tables that sort by structure, so that
  * a partially typed code offers common characters first. Without it, Cangjie
  * and Quick offer their exact matches and then whatever the table's own order
