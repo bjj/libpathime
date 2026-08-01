@@ -1,0 +1,42 @@
+name: Coverage
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  coverage:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build pkg-config \
+            libglib2.0-dev libsqlite3-dev uuid-dev check gcovr
+      - name: Configure
+        run: cmake --preset linux-coverage -DLIBPATHIME_REQUIRE_BACKENDS=ON
+      - name: Build
+        run: cmake --build build/linux-coverage
+      # The target runs the suites and writes the report; it does not build
+      # them — hence the separate build above. BUILD.md, "Test coverage".
+      - name: Measure
+        run: cmake --build build/linux-coverage --target pathime-test-coverage
+      # Tokenless upload works on a public repository but is rate-limited;
+      # adding a CODECOV_TOKEN repository secret (from codecov.io, [manual])
+      # removes the flakiness. The action reads the secret if present.
+      - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          files: build/linux-coverage/coverage/coverage.xml
+          token: ${{ secrets.CODECOV_TOKEN }}

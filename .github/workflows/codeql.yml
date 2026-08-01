@@ -1,0 +1,47 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  schedule:
+    - cron: "17 4 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build pkg-config \
+            libglib2.0-dev libsqlite3-dev uuid-dev
+      - uses: github/codeql-action/init@18420e3271f74589575af831a523c833acda327f # codeql-bundle-v2.26.2
+        with:
+          languages: c-cpp
+          build-mode: manual
+          # The vendored trees are analyzed-at-build otherwise; findings in
+          # them belong upstream, not in this repository's security tab.
+          config: |
+            paths-ignore:
+              - engines
+              - demo/cpp-terminal
+      - name: Build
+        run: |
+          cmake --preset linux-release -DLIBPATHIME_REQUIRE_BACKENDS=ON
+          cmake --build build/linux-release
+      - uses: github/codeql-action/analyze@18420e3271f74589575af831a523c833acda327f # codeql-bundle-v2.26.2

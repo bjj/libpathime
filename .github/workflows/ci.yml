@@ -194,3 +194,40 @@ jobs:
         run: cmake --build --preset ${{ matrix.preset }}
       - name: Test
         run: ctest --test-dir build/${{ matrix.preset }} --output-on-failure ${{ matrix.ctest-args }}
+
+  # BUILD.md, "Glyph coverage": two builds of the same commit with the same
+  # map produce byte-identical tables. The claim is load-bearing for the
+  # checked-in coverage maps, and this job is what enforces it. Tables only —
+  # the other backends are off, so the whole job is a couple of minutes; and
+  # deliberately no anthy.dic comparison, which is not a documented claim.
+  reproducible-tables:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+      - uses: jwlawson/actions-setup-cmake@0d6a7d60b009d01c9e7523be22153ff8f19460d3 # v2.2.0
+        with:
+          cmake-version: ${{ env.CMAKE_VERSION }}
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build pkg-config libsqlite3-dev
+      - name: Build the tables twice
+        run: |
+          for b in a b; do
+            cmake -S . -B build/repro-$b -G Ninja -DCMAKE_BUILD_TYPE=Release \
+              -DLIBPATHIME_WITH_HANGUL=OFF -DLIBPATHIME_WITH_ANTHY=OFF \
+              -DLIBPATHIME_WITH_PYZY=OFF -DLIBPATHIME_REQUIRE_BACKENDS=ON
+            cmake --build build/repro-$b --target pathime-runtime-data
+          done
+      - name: Compare
+        run: |
+          for b in a b; do
+            (cd build/repro-$b && find . -path '*/pathime-data/table/*.db' -print0 \
+              | sort -z | xargs -0 sha256sum) > $b.sum
+          done
+          test "$(wc -l < a.sum)" -eq 5   # the five default tables, found where expected
+          diff -u a.sum b.sum
+          cat a.sum

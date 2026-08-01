@@ -1,0 +1,12 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  # Opens a PR when a submodule's tracked branch moves upstream — the
+  # "a bump is a rebase" workflow, with the bump arriving as a PR.
+  - package-ecosystem: gitsubmodule
+    directory: /
+    schedule:
+      interval: weekly
