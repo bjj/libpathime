@@ -1,5 +1,9 @@
 # libpathime
 
+[![CI](https://github.com/bjj/libpathime/actions/workflows/ci.yml/badge.svg)](https://github.com/bjj/libpathime/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/bjj/libpathime/actions/workflows/codeql.yml/badge.svg)](https://github.com/bjj/libpathime/actions/workflows/codeql.yml)
+[![codecov](https://codecov.io/gh/bjj/libpathime/branch/master/graph/badge.svg)](https://codecov.io/gh/bjj/libpathime)
+
 A CJK input method engine as a plain C library.
 
 Does it use the latest and greatest backend for each language? No. But does it require
