@@ -23,7 +23,7 @@ Per-backend dependencies:
 |---------|-------|
 | Korean (libhangul) | nothing beyond a C compiler |
 | Japanese (anthy-unicode) | nothing external; its dictionary is built by host tools at build time, so cross-compiling is not supported |
-| Chinese (pyzy) | `glib-2.0 ≥ 2.24`, `sqlite3`, a UUID provider (`libuuid` on Unix; the bundled Rpcrt4 shim on Windows), plus Python 3 for the optional `android.db` |
+| Chinese (pyzy) | `glib-2.0 ≥ 2.24`, `sqlite3`, a UUID provider (`libuuid` on Linux and the BSDs; libSystem on macOS; the bundled Rpcrt4 shim on Windows), plus Python 3 for the optional `android.db` |
 | Table-driven | `sqlite3` — the compiled table format *is* a SQLite database, so reading one ibus-table wrote needs it. Its tables come from the `engines/ibus-table-chinese` submodule. |
 
 The table-driven backend (`PATHIME_ENGINE_TABLE`: Wubi, Cangjie, Stroke5,
@@ -38,6 +38,15 @@ Linux (Debian/Ubuntu):
 sudo apt-get install build-essential cmake ninja-build pkg-config \
                      libglib2.0-dev libsqlite3-dev uuid-dev
 ```
+
+macOS (Homebrew):
+
+```bash
+brew install cmake ninja glib pkgconf
+```
+
+sqlite3 comes from the SDK and the UUID functions from libSystem; there is
+nothing else to install.
 
 Windows: Visual Studio 2022 (or the Build Tools), plus vcpkg for pyzy's
 dependencies.

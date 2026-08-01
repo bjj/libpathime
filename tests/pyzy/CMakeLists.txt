@@ -126,10 +126,11 @@ function(pyzy_add_test name)
 
   # Util.h includes <uuid/uuid.h> and <sys/utsname.h> unconditionally, so every
   # test that touches a private header needs them: from the compat shims on
-  # Windows, from libuuid (and the C library) elsewhere.
+  # Windows, from libuuid on Linux and the BSDs, and from the SDK and libSystem
+  # on macOS — where there is no target to link, matching cmake/ports/pyzy.
   if(WIN32)
     libpathime_add_win32_compat(${_target})
-  else()
+  elseif(NOT APPLE)
     target_link_libraries(${_target} PRIVATE PkgConfig::LIBPATHIME_UUID)
   endif()
 

@@ -40,9 +40,11 @@ composition model would all still be yours to write.
 
 ## Platforms
 
-Linux and Windows (MSVC and clang-cl). What Windows needs comes from an in-tree
-POSIX compat layer plus a short series of portability fixes carried as commits
-on each vendored library's `libpathime` branch. See **[BUILD.md](BUILD.md)**.
+Linux, macOS, and Windows (MSVC and clang-cl). What Windows needs comes from an
+in-tree POSIX compat layer plus a short series of portability fixes carried as
+commits on each vendored library's `libpathime` branch; macOS takes the
+ordinary POSIX path, with glib from Homebrew and sqlite3 and the UUID
+functions from the system. See **[BUILD.md](BUILD.md)**.
 
 ## Demo
 

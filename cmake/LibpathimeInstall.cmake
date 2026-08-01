@@ -500,8 +500,11 @@ function(_libpathime_install_pkgconfig)
     endif()
     if(LIBPATHIME_WITH_PYZY)
       list(APPEND _requires "glib-2.0 >= 2.24.0")
-      if(NOT WIN32)
-        list(APPEND _requires uuid)   # cmake/ports/pyzy links it everywhere but Windows
+      if(NOT WIN32 AND NOT APPLE)
+        # cmake/ports/pyzy links libuuid on Linux and the BSDs; Windows has
+        # the Rpcrt4 shim in the archives, macOS has uuid_generate in
+        # libSystem, and neither has a uuid.pc to require.
+        list(APPEND _requires uuid)
       endif()
     endif()
     list(JOIN _requires ", " PATHIME_PC_REQUIRES_PRIVATE)

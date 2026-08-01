@@ -27,6 +27,11 @@
 #  include <dlfcn.h>
 #  include <unistd.h>
 #  include <vector>
+#  if defined(__APPLE__)
+#    include <climits>        /* PATH_MAX, for realpath's buffer */
+#    include <cstdlib>        /* realpath */
+#    include <mach-o/dyld.h>  /* _NSGetExecutablePath */
+#  endif
 #endif
 
 namespace pathime {
@@ -116,8 +121,31 @@ std::string module_file()
      * The static-build fallback. With libpathime linked into the program there
      * is no separate object for dladdr to name, and what it reports for the
      * main map is the name the program was invoked under — which may be
-     * relative, or empty. /proc/self/exe is the kernel's own answer and is
-     * absolute, symlink-resolved, and immune to a later chdir().
+     * relative, or empty. Each kernel has an authoritative answer of its own.
+     */
+#if defined(__APPLE__)
+    /*
+     * Darwin has no /proc. _NSGetExecutablePath names the executable, with
+     * the documented protocol that a too-small buffer makes the call fail and
+     * write the size it wanted — so ask with an empty one first. The result
+     * may hold symlinks or "../" components, so realpath() settles it to the
+     * absolute form the /proc read gives the other platforms for free.
+     */
+    uint32_t size = 0;
+    _NSGetExecutablePath(nullptr, &size);
+    std::vector<char> buffer(size + 1);
+    if (_NSGetExecutablePath(buffer.data(), &size) != 0) {
+        return std::string();
+    }
+    char resolved[PATH_MAX];
+    if (realpath(buffer.data(), resolved) == nullptr) {
+        return std::string();
+    }
+    return std::string(resolved);
+#else
+    /*
+     * /proc/self/exe is the kernel's own answer and is absolute,
+     * symlink-resolved, and immune to a later chdir().
      */
     std::vector<char> buffer(1024);
     for (;;) {
@@ -136,6 +164,7 @@ std::string module_file()
         }
         buffer.resize(buffer.size() * 2);
     }
+#endif
 }
 
 #endif

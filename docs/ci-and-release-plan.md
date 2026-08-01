@@ -111,87 +111,6 @@ pyzy. Built from source that is 15–30 minutes; with binary caching it is under
 minute. Configure the cache before adding the job, or it becomes a tax on every
 push.
 
-## macOS: yes, and it is cheaper than it looks
-
-The question was whether macOS support is reachable without owning a Mac. It is,
-on both counts — CI can carry it, and there is a way to get an interactive shell
-today.
-
-### Getting a macOS shell right now, for free
-
-A public repository plus a workflow using an SSH-session action
-(`mxschmitt/action-tmate` or `owenthereal/action-upterm`) gives a real macOS
-runner with an SSH address printed in the job log, held open until the job
-timeout of six hours. That is the fastest path to iterating on the port from
-home, and on a public repository it costs nothing. Push a throwaway branch with
-a workflow that installs the dependencies and then opens the session, and work
-in it exactly as on a local machine.
-
-Rented Macs are the alternative and are worth knowing about but not worth
-starting with: Scaleway's Mac minis run about €0.11–0.22/hour and MacStadium's
-start around $119/month, but **Apple's licensing imposes a 24-hour minimum
-lease**, so the real floor is a few euros per session rather than cents.
-
-### What actually has to change in the tree
-
-The port is small and the reason is visible in the source: the tree is a clean
-`WIN32` / not-`WIN32` split, with every platform conditional in
-`cmake/ports/`, `cmake/LibpathimeOptions.cmake` and `cmake/LibpathimeRuntimeData.cmake`
-testing `WIN32` and nothing else. There is no `APPLE` branch anywhere, and the
-not-`WIN32` side is generic POSIX rather than Linux-specific. Four things need
-attention:
-
-1. **`src/module_path.cc:119` — the `/proc/self/exe` fallback.** `dladdr()`
-   works on macOS and answers for a dylib, so a **shared build needs no change
-   at all**. The fallback exists for static builds, where there is no separate
-   object for `dladdr` to name, and `/proc` does not exist on macOS. The
-   replacement is `_NSGetExecutablePath()` from `<mach-o/dyld.h>`, which takes a
-   buffer and an in/out length and wants `realpath()` afterwards because it can
-   return a non-canonical path. This is the only C++ source change the port
-   needs. It is also, per `docs/testing.md`, the least-covered code in the
-   tree — so it wants the static-build CI job of Phase 1 pointed at it.
-
-2. **The uuid probe, in two places** — `cmake/LibpathimeDependencies.cmake:82-91`
-   and `cmake/ports/pyzy/CMakeLists.txt:80`. Both ask pkg-config for `uuid`, and
-   the second does so `REQUIRED`, making it a hard configure error rather than a
-   gate. macOS has no `uuid.pc`, but it does have `<uuid/uuid.h>` and
-   `uuid_generate`/`uuid_unparse_lower` in libSystem — which is exactly what
-   pyzy's `engines/pyzy/src/Util.h:32` includes and calls. **The code compiles as
-   written; only the detection fails.** The fix is an `APPLE` arm that does a
-   `check_include_file(uuid/uuid.h ...)` and links nothing, structurally the same
-   as the existing Windows arm that maps to the Rpcrt4 shim.
-
-3. **`LIBPATHIME_TABLE_COVERAGE` has no macOS default.**
-   `cmake/LibpathimeOptions.cmake:106` picks `windows` on Windows and `noto`
-   everywhere else, so macOS silently inherits the Noto map. macOS ships PingFang
-   and Hiragino rather than Noto, so the honest options are to generate a third
-   map with `tools/generate-coverage.py` against the system faces, or to decide
-   `noto` is close enough and say so where the default is set. Not a blocker for
-   a first green build, but it is a real decision and should not be reached by
-   accident — the whole point of `BUILD.md`'s "Glyph coverage" section is that
-   the map is a recorded choice rather than a property of the machine.
-
-4. ~~**Install-tree RPATH.**~~ Done with Phase 4:
-   `libpathime_set_install_rpath()` in `cmake/LibpathimeInstall.cmake` picks
-   `@loader_path` on `APPLE` and `$ORIGIN` elsewhere. The `APPLE` arm is written
-   but has never run — it is one of the things the first macOS install job
-   verifies.
-
-Everything else is expected to carry over: sqlite3 comes from the macOS SDK,
-glib and pkg-config from Homebrew, and libhangul's `glob.h` check succeeds.
-anthy's build-time dictionary codegen and pyzy's generated tables have no
-obvious platform dependency, but neither has ever been run there — **the CI job
-is the verification, not this paragraph.**
-
-### Runner labels
-
-`macos-latest` moves to `macos-26` between June and July 2026, so pin the label
-explicitly rather than inheriting a silent platform change. `macos-15` and
-`macos-26` are Apple Silicon; `macos-15-intel` and `macos-26-intel` are x86-64.
-Start with one arm64 label and add Intel only if a consumer asks — the
-`arm64`/`x86_64` split is the more interesting axis than the OS version, and
-neither has been exercised.
-
 ---
 
 # Phase 0 — Get onto GitHub
@@ -227,71 +146,21 @@ repository-admin bypass so the maintainer's direct pushes still work.
 
 # Phase 2 — macOS
 
-**The goal of this phase is a green macOS build and `ctest` run, landed as one
-reviewed change on the public repository.** Deliberately after Phase 1, so that
-when the macOS job goes red you are looking at one variable rather than two.
+**Done 2026-08-01**, via the plan's Route C: a private spike repo
+(`libpathime-macos-spike`) took the churn — three rounds to green — and the
+proven diff landed as one PR. The port was as small as the analysis said:
+the `_NSGetExecutablePath`+`realpath` fallback in `module_path.cc`, an
+`APPLE` arm at the four uuid sites (the SDK has the header and libSystem the
+symbols; there is no `uuid.pc` and nothing to link — the sites are the
+dependency gate, the pyzy port, `tests/pyzy`, and the installed CMake config
+plus the `.pc`), and the glyph-coverage default recording why macOS inherits
+the Noto map until a PingFang map is generated and measured (the follow-up
+noted where the default is set). 40/40 suites pass on `macos-26` (arm64) in
+both link modes; the `@loader_path` RPATH arm ran for the first time and the
+five-engine consumer passed against a moved install; both cpack archives
+build. CI carries `macos-shared` and `macos-static`; the release matrix
+carries `macos-arm64`. macOS Intel waits for a consumer to ask.
 
-## 2.0 — Pick the iteration route first
-
-The port is small but it is guaranteed to take several rounds, because none of
-it has ever been compiled on the platform. Where those rounds happen is the
-decision, and it is worth taking before starting rather than during.
-
-**Route A — public repository, iterate in the open.** Push the CI, watch it go
-red, push again. It works, it needs no setup, and the whole world can watch you
-fail to spell `_NSGetExecutablePath`. Slow feedback (every round is a push, a
-queue and a runner boot) and a commit history full of "fix macOS take 7" unless
-the branch is squashed at the end.
-
-**Route B — interactive session on a runner.** A tmate step gives a real macOS
-shell over SSH, held to the six-hour job limit, and turns the loop from
-push-and-wait into an ordinary terminal. Two caveats. On a *public* repository
-that SSH address is in a public log, so the session is world-reachable while it
-is open — which is the exposure this route was meant to avoid. And it depends on
-outbound SSH, which a locked-down development network may not permit. Verify
-before planning around it.
-
-**Route C — private scratch repository, driven over HTTPS.** Push a
-`libpathime-macos-spike` private repo, iterate there with ordinary CI pushes, and
-land the finished diff as one clean PR on the public repo. This is the
-recommended route, and it is the one neither of the obvious two suggests:
-
-- **It is private**, so nothing is hanging out.
-- **It needs no SSH.** Everything happens over HTTPS to `github.com`, so the
-  whole loop — push, poll `gh run watch`, read the log, fix, push again — runs
-  from an ordinary terminal, even on a network that only passes HTTP and HTTPS.
-- **It is affordable.** Private repositories bill against the Free plan's 2,000
-  Linux-equivalent minutes per month, and macOS runs at a 10× multiplier, so the
-  allowance is 200 macOS-minutes. A libpathime macOS job is a couple of minutes
-  including `brew install`, so that is dozens of rounds a month — ample for a
-  spike, and it ends when the spike does.
-- Public submodules work fine from a private parent repository.
-
-Route B remains the right tool for one specific thing: a problem that needs
-poking at the machine rather than re-running a build — a linker error whose
-cause is in the SDK layout, say. Reach for it then, from the private repo, where
-the log is not public.
-
-**2.1 — Do the port.** In whichever route, work through the four items in "What
-actually has to change" above until a configure, build and `ctest` pass.
-
-**2.2 — Land the source changes**: the `_NSGetExecutablePath` fallback in
-`module_path.cc`, and the `APPLE` arm in both uuid probes.
-
-**2.3 — Decide the glyph-coverage map** for macOS and record the reasoning where
-the default is set, alongside the existing Windows/Noto note.
-
-**2.4 — Add `macos-26` (arm64) to the CI matrix**, with the same
-`REQUIRE_BACKENDS=ON` posture. Add a static-build macOS job too — that is the
-configuration the `module_path.cc` change exists for, and without it the change
-is untested.
-
-**2.5 — Update the documentation.** `README.md` and `BUILD.md` both say Linux
-and Windows; `BUILD.md` gains a Homebrew dependency line beside the apt and
-vcpkg ones. `docs/windows-port.md` stays as it is — the macOS port is not a
-compat layer and does not belong in it.
-
----
 
 # Phase 3 — Quality signals
 
