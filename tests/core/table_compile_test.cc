@@ -905,6 +905,104 @@ void test_derive_single_wildcard()
     }
 }
 
+/*
+ * The punctuation strip, which keeps the punctuation keys with the shared
+ * layer (src/punctuation.*) when a table carries punctuation entries of its
+ * own. The cases below are the real tables in miniature: cangjie5 at
+ * ibus-table-chinese 1.8.9+, whose punctuation is single-key convenience rows
+ * bolted onto an alphabetic table, and stroke5, whose punctuation characters
+ * *are* the alphabet, spelled into multi-key codes.
+ */
+void test_strip_punctuation_keys()
+{
+    /* cangjie-shaped: stripped, and both forms of the declaration follow —
+     * the typed sets and the attr strings the compiler writes back. */
+    {
+        TableSource source = parse(
+            "BEGIN_DEFINITION\nNAME = P1\nLANGUAGES = zh_TW\n"
+            "VALID_INPUT_CHARS = ab,.\n"
+            "BEGIN_CHAR_PROMPTS_DEFINITION\n"
+            "a \xE6\x97\xA5\n"
+            ", \xE9\x80\x97\n"
+            "END_CHAR_PROMPTS_DEFINITION\n"
+            "END_DEFINITION\n"
+            "BEGIN_TABLE\n"
+            "a\tX\t1000\n"
+            "ab\tY\t500\n"
+            ",\t\xEF\xBC\x8C\t950\n"
+            ",\t\xE3\x80\x81\t949\n"
+            ".\t\xE3\x80\x82\t950\n"
+            "END_TABLE\n");
+        PT_CHECK(strip_punctuation_keys(&source) == 3);
+        PT_CHECK(source.phrases.size() == 2);
+        PT_CHECK(source.properties.valid_input_chars.count(U',') == 0);
+        PT_CHECK(source.properties.valid_input_chars.count(U'a') == 1);
+        PT_CHECK_STR(source.properties.attrs["valid_input_chars"], "ab");
+        PT_CHECK(source.properties.char_prompts.count(U',') == 0);
+        PT_CHECK(source.properties.char_prompts.count(U'a') == 1);
+    }
+
+    /* stroke5-shaped: multi-key codes spell with `,./`, so nothing moves —
+     * including the single-key rows those same characters key. */
+    {
+        TableSource source = parse(
+            "BEGIN_DEFINITION\nNAME = P2\nLANGUAGES = zh\n"
+            "VALID_INPUT_CHARS = nm,./\n"
+            "END_DEFINITION\n"
+            "BEGIN_TABLE\n"
+            ",\t\xE4\xB9\x99\t1000\n"
+            ",,\t\xE5\x8F\x88\t900\n"
+            "./\t\xE4\xB9\x8B\t800\n"
+            "nm,./\t\xE6\xB0\xB8\t700\n"
+            "END_TABLE\n");
+        PT_CHECK(strip_punctuation_keys(&source) == 0);
+        PT_CHECK(source.phrases.size() == 4);
+        PT_CHECK(source.properties.valid_input_chars.count(U',') == 1);
+    }
+
+    /* Non-CJK: the punctuation layer never runs, so nothing is stripped. */
+    {
+        TableSource source = parse(
+            "BEGIN_DEFINITION\nNAME = P3\nLANGUAGES = en\n"
+            "VALID_INPUT_CHARS = ab;\n"
+            "END_DEFINITION\n"
+            "BEGIN_TABLE\n"
+            "a\tX\t1000\n"
+            ";\tY\t900\n"
+            "END_TABLE\n");
+        PT_CHECK(strip_punctuation_keys(&source) == 0);
+        PT_CHECK(source.phrases.size() == 2);
+    }
+
+    /* A declared wildcard is input machinery, never stripped. */
+    {
+        TableSource source = parse(
+            "BEGIN_DEFINITION\nNAME = P4\nLANGUAGES = zh\n"
+            "VALID_INPUT_CHARS = ab?\n"
+            "SINGLE_WILDCARD_CHAR = ?\n"
+            "END_DEFINITION\n"
+            "BEGIN_TABLE\n"
+            "a\tX\t1000\n"
+            "END_TABLE\n");
+        PT_CHECK(strip_punctuation_keys(&source) == 0);
+        PT_CHECK(source.properties.valid_input_chars.count(U'?') == 1);
+    }
+
+    /* A table that is nothing but punctuation would be stripped to nothing,
+     * so it is left as declared. */
+    {
+        TableSource source = parse(
+            "BEGIN_DEFINITION\nNAME = P5\nLANGUAGES = zh\n"
+            "VALID_INPUT_CHARS = ,.\n"
+            "END_DEFINITION\n"
+            "BEGIN_TABLE\n"
+            ",\t\xEF\xBC\x8C\t1000\n"
+            "END_TABLE\n");
+        PT_CHECK(strip_punctuation_keys(&source) == 0);
+        PT_CHECK(source.phrases.size() == 1);
+    }
+}
+
 }  // namespace
 
 int main(void)
@@ -924,5 +1022,6 @@ int main(void)
     test_parse_table_source_file();
     test_gouci_section();
     test_derive_single_wildcard();
+    test_strip_punctuation_keys();
     return pt_report("core.table_compile");
 }

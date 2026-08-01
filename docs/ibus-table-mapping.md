@@ -496,12 +496,20 @@ docs end the same way.
   across the two Chinese engines, so `src/punctuation.*` is shared with pyzy and
   §11.4's table is not implemented as written. Named here because §11.4 is still
   the accurate description of *ibus-table*, which is what this document is for.
+  The same ownership extends to the *data*: the cangjie and quick tables of
+  ibus-table-chinese 1.8.9 and later carry punctuation as table entries — `[` in
+  `VALID_INPUT_CHARS`, rows offering 「〔［… as candidates — which under this
+  engine would turn those keys into composition input and take them away from
+  the shared layer. The compiler strips them; `strip_punctuation_keys()` in
+  `src/engines/table/table_source.h` states the rule, what distinguishes
+  stroke5's `,./` (kept), and the cost.
 
 - **Compiled tables are not byte-comparable with `ibus-table-createdb` output.**
   The schema is identical and either program can open the other's databases, but
   this library's compiler additionally trims entries to a font's glyph coverage,
-  transfers frequencies from a usage-ranked table, and derives a `z` wildcard where
-  the source declared none. The last is a behaviour difference rather than a data
+  transfers frequencies from a usage-ranked table, strips the single-key
+  punctuation entries described above, and derives a `z` wildcard where the
+  source declared none. The last is a behaviour difference rather than a data
   one — ibus-table's lookup has no position rule, so under ibus-table a *leading*
   `z` would become a wildcard too.
 

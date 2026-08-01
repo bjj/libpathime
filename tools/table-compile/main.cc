@@ -36,6 +36,7 @@ int usage(const char *program)
                  "                            frequency (default 1000)\n"
                  "  --no-glyph-filter         keep entries no font can render\n"
                  "  --no-derive-wildcard      do not declare `z` as a wildcard\n"
+                 "  --keep-punctuation        keep single-key punctuation entries\n"
                  "\n"
                  "Frequency transfer takes usage-ranked data from one table and\n"
                  "applies it to a table that sorts structurally, so a partially\n"
@@ -53,6 +54,16 @@ int usage(const char *program)
                  "reproducible. See tools/generate-coverage.py. --no-glyph-filter\n"
                  "turns filtering off for anyone whose target can render Extension\n"
                  "B and would rather have the entries than the guarantee.\n"
+                 "\n"
+                 "Punctuation stripping removes ASCII punctuation from a CJK\n"
+                 "table's VALID_INPUT_CHARS when no multi-key code uses it, and\n"
+                 "drops the single-key rows that mapped it. Full-width\n"
+                 "punctuation belongs to the library's own layer, shared across\n"
+                 "the Chinese engines; a table carrying punctuation entries of\n"
+                 "its own — the cangjie and quick tables of ibus-table-chinese\n"
+                 "1.8.9 and later do — would otherwise capture those keys as\n"
+                 "composition input. Characters a table genuinely spells codes\n"
+                 "with, like stroke5's `,./`, are detected and kept.\n"
                  "\n"
                  "Wildcard derivation declares `z` as the single-character\n"
                  "wildcard — Apple's Cangjie convention, for a decomposition the\n"
@@ -74,6 +85,7 @@ int main(int argc, char **argv)
     std::string freq_path;
     long long threshold = 1000;
     bool glyph_filter = true;
+    bool strip_punctuation = true;
     char wildcard_key = 'z';
 
     for (int i = 1; i < argc; ++i) {
@@ -86,6 +98,8 @@ int main(int argc, char **argv)
             glyph_filter = false;
         } else if (std::strcmp(arg, "--no-derive-wildcard") == 0) {
             wildcard_key = '\0';
+        } else if (std::strcmp(arg, "--keep-punctuation") == 0) {
+            strip_punctuation = false;
         } else if (arg[0] == '-') {
             return usage(argv[0]);
         } else if (source_path.empty()) {
@@ -106,6 +120,16 @@ int main(int argc, char **argv)
     if (!pathime::table::parse_table_source_file(source_path, &source, &error)) {
         std::fprintf(stderr, "%s: %s\n", source_path.c_str(), error.c_str());
         return 1;
+    }
+
+    /*
+     * First, before any other transformation reads the rows: a punctuation row
+     * that will not ship should not receive a transferred frequency or hold a
+     * character the wildcard derivation trips over.
+     */
+    size_t punctuation_rows = 0;
+    if (strip_punctuation) {
+        punctuation_rows = pathime::table::strip_punctuation_keys(&source);
     }
 
     if (!freq_path.empty()) {
@@ -168,6 +192,9 @@ int main(int argc, char **argv)
     }
     if (derived_wildcard) {
         std::printf(", '%c' wildcard", wildcard_key);
+    }
+    if (punctuation_rows != 0) {
+        std::printf(", %zu punctuation rows stripped", punctuation_rows);
     }
     if (source.skipped_rows != 0) {
         std::printf(", %zu malformed rows skipped", source.skipped_rows);

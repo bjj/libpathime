@@ -318,6 +318,124 @@ bool derive_single_wildcard(TableSource *source, char key)
     return true;
 }
 
+namespace {
+
+/** The printable ASCII characters that are neither letters nor digits — the
+ *  keys src/punctuation.h maps. */
+bool is_ascii_punctuation(char32_t scalar)
+{
+    if (scalar <= U' ' || scalar >= 0x7F) {
+        return false;
+    }
+    return !((scalar >= U'0' && scalar <= U'9') || (scalar >= U'A' && scalar <= U'Z') ||
+             (scalar >= U'a' && scalar <= U'z'));
+}
+
+std::vector<char32_t> scalars(const std::string &text)
+{
+    std::vector<char32_t> out;
+    size_t offset = 0;
+    uint32_t scalar = 0;
+    while (utf8_next_scalar(text.data(), text.size(), &offset, &scalar)) {
+        out.push_back(static_cast<char32_t>(scalar));
+    }
+    return out;
+}
+
+/** @a text with every scalar in @a drop removed, other scalars kept in order. */
+std::string remove_scalars(const std::string &text, const std::set<char32_t> &drop)
+{
+    std::string out;
+    out.reserve(text.size());
+    size_t offset = 0;
+    while (offset < text.size()) {
+        const size_t begin = offset;
+        uint32_t scalar = 0;
+        if (!utf8_next_scalar(text.data(), text.size(), &offset, &scalar)) {
+            break;
+        }
+        if (drop.count(static_cast<char32_t>(scalar)) == 0) {
+            out.append(text, begin, offset - begin);
+        }
+    }
+    return out;
+}
+
+}  // namespace
+
+size_t strip_punctuation_keys(TableSource *source)
+{
+    TableProperties &properties = source->properties;
+
+    /* Only a CJK table's keys are claimed by the punctuation layer; for any
+     * other table there is no ownership question and nothing to strip. */
+    if (!properties.is_cjk) {
+        return 0;
+    }
+
+    std::set<char32_t> stripped;
+    for (const char32_t scalar : properties.valid_input_chars) {
+        if (is_ascii_punctuation(scalar) && !properties.is_wildcard(scalar)) {
+            stripped.insert(scalar);
+        }
+    }
+
+    /* A character any multi-key code spells with is alphabet, not punctuation. */
+    for (const PhraseRow &row : source->phrases) {
+        if (stripped.empty()) {
+            return 0;
+        }
+        const std::vector<char32_t> keys = scalars(row.tabkeys);
+        if (keys.size() < 2) {
+            continue;
+        }
+        for (const char32_t key : keys) {
+            stripped.erase(key);
+        }
+    }
+    if (stripped.empty() || stripped.size() == properties.valid_input_chars.size()) {
+        /* The second case is a table that is nothing but punctuation, which
+         * stripping would turn into no table at all. Left as declared. */
+        return 0;
+    }
+
+    /* Every row a stripped character keyed is single-key, by construction. */
+    size_t dropped = 0;
+    std::vector<PhraseRow> kept;
+    kept.reserve(source->phrases.size());
+    for (PhraseRow &row : source->phrases) {
+        const std::vector<char32_t> keys = scalars(row.tabkeys);
+        if (keys.size() == 1 && stripped.count(keys[0]) != 0) {
+            ++dropped;
+        } else {
+            kept.push_back(std::move(row));
+        }
+    }
+    source->phrases.swap(kept);
+
+    /*
+     * Both forms of the declaration: the typed sets the engine consults, and
+     * the raw attribute strings compilation writes back into the `ime` table.
+     * A strip that changed one but not the other would compile a database
+     * whose declaration re-grants the keys the rows no longer serve.
+     */
+    for (const char32_t scalar : stripped) {
+        properties.valid_input_chars.erase(scalar);
+        properties.start_chars.erase(scalar);
+        properties.char_prompts.erase(scalar);
+    }
+    const auto valid = properties.attrs.find("valid_input_chars");
+    if (valid != properties.attrs.end()) {
+        valid->second = remove_scalars(valid->second, stripped);
+    }
+    const auto start = properties.attrs.find("start_chars");
+    if (start != properties.attrs.end()) {
+        start->second = remove_scalars(start->second, stripped);
+    }
+
+    return dropped;
+}
+
 void apply_frequency_transfer(TableSource *target,
                               const TableSource &source,
                               int64_t threshold)

@@ -122,6 +122,45 @@ void derive_goucima(TableSource *source);
 bool derive_single_wildcard(TableSource *source, char key);
 
 /**
+ * Remove ASCII punctuation from a CJK table's input alphabet, where the rows
+ * show it is not really part of one: a punctuation character no multi-key code
+ * spells with is stripped from VALID_INPUT_CHARS (and from START_CHARS and the
+ * char prompts), and the single-key rows that mapped it are dropped. Returns
+ * the number of rows dropped.
+ *
+ * This exists because the data and the engine disagree about who owns the
+ * punctuation keys. Full-width punctuation in this library is the shared layer
+ * of src/punctuation.* — one determinate substitution per key, with the
+ * look-behinds and the variant selection — and a CJK table claims every
+ * printable ASCII key so that layer can see the document (§11.4, and the
+ * mapping's "Impedance mismatches"). The cangjie and quick tables of
+ * ibus-table-chinese 1.8.9 and later instead carry punctuation as table data:
+ * `[` in VALID_INPUT_CHARS, and rows offering 「〔［… as candidates. Compiled
+ * as-is, those keys would become composition input and never reach the layer
+ * that owns them. Under ibus-table the rows are a candidate menu; here
+ * punctuation is one fixed substitution — the phone-keyboard target again — so
+ * the table's version gives way.
+ *
+ * Derived from the rows rather than configured per table, like
+ * derive_single_wildcard(): stroke5 spells real codes with `,./` (its
+ * VALID_INPUT_CHARS is `nm,./`), and a character any multi-key code uses is
+ * plainly alphabet, whatever it looks like. cangjie5's `zxc…` symbol codes are
+ * untouched either way — their *keys* are letters; what they produce is not
+ * the question.
+ *
+ * What it costs: a CJK table whose punctuation character only ever forms
+ * single-key codes — even codes producing ordinary characters — loses those
+ * entries. No shipped table is shaped that way, and one that were could pass
+ * --keep-punctuation to tools/table-compile.
+ *
+ * Two cases are left as declared. A non-CJK table, because the punctuation
+ * layer never runs for it, so there is no ownership to settle. And a declared
+ * wildcard character, which is input machinery rather than a mapping — the
+ * strip never removes one.
+ */
+size_t strip_punctuation_keys(TableSource *source);
+
+/**
  * Rewrite @a target's frequencies from a second table's, for every entry
  * @a target itself ranks at or above @a threshold.
  *

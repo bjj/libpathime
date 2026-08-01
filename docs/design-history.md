@@ -271,6 +271,18 @@ never reaches the client's binding.
   `PATHIME_OPT_CHINESE_VARIANT` → tier 3 → `LANGUAGE_FILTER`. Swallowed: a CJK
   table claims *every* printable ASCII key, else it never sees the `1` in
   "1.5" and commits "1。5".
+- **Table-carried punctuation is stripped at compile time** (2026-08-01).
+  Upstream ibus-table-chinese 1.8.9+ gives cangjie/quick punctuation *entries*
+  — `[` in `VALID_INPUT_CHARS`, rows offering 「〔［… — which under this engine
+  would make those keys composition input and starve the shared layer that owns
+  them (the "claims every printable ASCII key" swallow above). Under ibus-table
+  they are a candidate menu; here punctuation is one determinate substitution.
+  The rule is derived from the rows, like the `z` wildcard: an ASCII
+  punctuation character no multi-key code spells with is stripped, with its
+  single-key rows (stroke5's `,./` alphabet survives; non-CJK tables and
+  declared wildcards are untouched; `--keep-punctuation` opts out). Cost: a CJK
+  table whose punctuation char forms only single-key codes loses those entries.
+  Reopen if the API ever grows punctuation candidate menus.
 - **Glyph filtering is build-time, from a checked-in map** — never `fc-query`
   at build (a `.db` must not be a function of the build machine's fonts). Same
   commit + same map = byte-identical, checked across MSVC and clang-cl.
