@@ -1,13 +1,60 @@
 # Third-party components
 
-What libpathime links, what it builds data from, and under what terms.
+What libpathime links, what it builds data from, what it ships, and under what
+terms. Written artifact-relative: this same file appears in the repository, in
+both binary packages, and in the source tarball, so every statement says
+*where* a component lands rather than assuming one context.
 
 libpathime itself is MIT (`LICENSE`); everything below carries its own terms.
 
-## Libraries linked at runtime
+## The artifacts
 
-Each is built as a **shared library** and loaded as one.
-`BUILD_SHARED_LIBS=OFF` produces a static build instead — see "Linkage" below.
+A release publishes three things per platform–architecture pair:
+
+- the **library package** (`libpathime-<ver>-<os>-<arch>`): headers, the
+  libraries, the CMake package and `pathime.pc`, and `pathime-data/`. For
+  developers embedding libpathime.
+- the **demo package** (`pathime-demo-<ver>-<os>-<arch>`): the `pathime-demo`
+  executable, the libraries it needs, and `pathime-data/`. Standalone —
+  download, unpack, run.
+- the **source tarball**: the repository tree with every submodule populated
+  at its pinned commit. This is the corresponding source for both binary
+  packages.
+
+Both binary packages install the licence texts of everything they contain
+under `share/doc/pathime/licenses/`.
+
+**Both binary packages are GPL-3 as a whole.** They ship `table/*.db` (GPL-3)
+and `anthy/anthy.dic` (GPL-2) alongside the MIT and LGPL binaries; the data is
+most of the bytes. A consumer who wants different terms builds their own with
+`LIBPATHIME_WITH_ANTHY=OFF` and/or `LIBPATHIME_WITH_TABLE=OFF` — with both
+off, `pathime-data/` holds only pyzy's LGPL files.
+
+## Where each component lands
+
+| Component | Licence | Library pkg | Demo pkg | Source tarball |
+|---|---|---|---|---|
+| libpathime | MIT | ✓ | ✓ | ✓ |
+| libhangul (shared library) | LGPL-2.1 | ✓ | ✓ | ✓ |
+| anthy-unicode (shared library) | LGPL-2.1 | ✓ | ✓ | ✓ |
+| pyzy (shared library) | LGPL-2.1 | ✓ | ✓ | ✓ |
+| `pathime-data/pyzy/*` | LGPL-2.1 | ✓ | ✓ | as sources |
+| `pathime-data/anthy/anthy.dic` | **GPL-2** | ✓ | ✓ | as sources |
+| `pathime-data/table/*.db` | **GPL-3** | ✓ | ✓ | as sources |
+| cpp-terminal (static, inside `pathime-demo`) | MIT | — | ✓ | ✓ |
+| `glib-2.0-0.dll` | LGPL-2.1-or-later | Windows only | Windows only | — |
+| `iconv-2.dll` (libiconv) | LGPL-2.1 | Windows only | Windows only | — |
+| `intl-8.dll` (gettext's libintl) | LGPL-2.1 | Windows only | Windows only | — |
+| `pcre2-8.dll` | BSD-3-Clause | Windows only | Windows only | — |
+| `sqlite3.dll` | public domain | Windows only | Windows only | — |
+
+The Windows rows exist because Windows has no system copies of those
+libraries: pyzy needs glib and sqlite3, so the Windows artifacts carry the
+vcpkg-built DLL closure beside `pathime.dll`, the ordinary arrangement for a
+glib-using Windows program. On Linux and macOS the same libraries come from
+the system or Homebrew and the artifacts deliberately ship none of them.
+
+## The vendored libraries
 
 | Component | Licence | Upstream | We build from |
 |---|---|---|---|
@@ -18,23 +65,28 @@ Each is built as a **shared library** and loaded as one.
 
 **anthy-unicode and pyzy are modified.** Each fork's `libpathime` branch carries
 a short series of titled commits on top of an unmodified `main`/`master`.
-The forks are the corresponding source for the binaries this project builds.
+The forks — and, at a release, the source tarball — are the corresponding
+source for the binaries this project builds.
 
 libhangul is unmodified — we generate its `config.h` and call
 `add_subdirectory()` on its own CMake, which changes nothing about the library.
+
+cpp-terminal (`github.com/jupyter-xeus/cpp-terminal`, MIT, unmodified) is the
+demo's terminal layer, linked statically into `pathime-demo` and shipped only
+in the demo package. It is not linked into `libpathime`.
 
 ### External dependencies of those libraries
 
 | Component | Licence | Linkage |
 |---|---|---|
-| GLib | LGPL-2.1-or-later | shared; required by pyzy |
-| SQLite3 | public domain | required by pyzy and the table engine |
-| libuuid | Modified BSD | required by pyzy |
+| GLib | LGPL-2.1-or-later | shared; required by pyzy. From the system on POSIX; shipped in the Windows artifacts |
+| SQLite3 | public domain | required by pyzy and the table engine. Same shipping rule |
+| libuuid | Modified BSD | required by pyzy on POSIX; Windows uses a bundled Rpcrt4 shim instead |
 
 ## Data files shipped in `pathime-data/`
 
 These are data files, compiled at build time from the sources named below and
-installed alongside the library. None of them is linked into a binary.
+shipped in both binary packages. None of them is linked into a binary.
 
 | Shipped file | Built from | Licence of the source |
 |---|---|---|
@@ -44,16 +96,7 @@ installed alongside the library. None of them is linked into a binary.
 | `table/*.db` | `engines/ibus-table-chinese` table sources | **GPL-3** |
 
 Either GPL data set can be left out of a build, along with the engine that
-reads it: `LIBPATHIME_WITH_ANTHY=OFF` and `LIBPATHIME_WITH_TABLE=OFF`. With
-both off, `pathime-data/` holds only pyzy's files.
-
-## Development-time only
-
-| Component | Licence | Used by |
-|---|---|---|
-| cpp-terminal | MIT | `demo/` (`LIBPATHIME_BUILD_DEMO=ON`) |
-
-Not linked into `libpathime` and not shipped in an install.
+reads it: `LIBPATHIME_WITH_ANTHY=OFF` and `LIBPATHIME_WITH_TABLE=OFF`.
 
 ## Linkage
 
@@ -61,7 +104,8 @@ The default build (`BUILD_SHARED_LIBS=ON`) produces libhangul, anthy and pyzy
 as separate shared libraries, installed into a private `pathime/` directory
 beside `libpathime` (`BUILD.md`, "What gets produced"). Being separate
 replaceable files is what makes them straightforward to satisfy the LGPL for:
-the private directory changes where they sit, not what they are.
+the private directory changes where they sit, not what they are. Every
+released binary package is this shared arrangement.
 
 `BUILD_SHARED_LIBS=OFF` does not fold them into `libpathime`. It builds each one
 as its own static archive, installs the archives into the same private
@@ -72,5 +116,6 @@ objects.
 
 That changes what is being distributed and the terms that apply to it: the
 relinking clause is now something the embedder's own binary has to satisfy,
-rather than something the arrangement of files satisfies for them. Anyone
-shipping a static build should read the licences above with their own advice.
+rather than something the arrangement of files satisfies for them. No release
+artifact is a static build; anyone shipping one should read the licences above
+with their own advice.
