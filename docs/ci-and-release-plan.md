@@ -208,75 +208,20 @@ the one that would add the checks.
 
 # Phase 1 — Core CI
 
-One workflow, `.github/workflows/ci.yml`, on `push` and `pull_request`, with a
-`concurrency` group keyed on the ref so superseded runs cancel themselves.
-
-Every job calls a **preset** rather than a hand-written `cmake` line — the
-presets are the contract, and a workflow that drifts from them stops testing
-what developers run. Every job also sets `-DLIBPATHIME_REQUIRE_BACKENDS=ON`, the
-option `BUILD.md` documents as existing for exactly this: without it a runner
-that quietly lost `libglib2.0-dev` reports green while testing three backends.
-
-Matrix:
-
-| Job | Configuration | What it is for |
-|---|---|---|
-| `linux-gcc-release` | Release, shared | the baseline |
-| `linux-gcc-debug` | Debug | assertions |
-| `linux-clang-release` | Clang | a second front end sees different things |
-| `linux-static` | `BUILD_SHARED_LIBS=OFF` | exercises `PATHIME_STATIC` and the `module_path.cc` fallback that coverage cannot reach |
-| `linux-asan-ubsan` | per `docs/testing.md` | documented clean today |
-| `linux-uninit` | `-ftrivial-auto-var-init=pattern` | guards the `pathime_init_params_t` class of bug |
-| `windows-ninja` | `windows-ninja` preset | clang-cl; the Windows job to lean on |
-| `windows-msvc` | `windows-msvc` preset | keeps the Visual Studio generator honest; serial, and needs vcpkg binary caching |
-
-Four details that are easy to get wrong:
-
-- **The Windows runner images check out CRLF by default.** Git for Windows on
-  the hosted images has `core.autocrlf=true` in the machine config, and
-  BUILD.md requires an LF checkout — anthy's dictionary codegen parses tokens
-  with stray CRs otherwise. A `.gitattributes` in this repository cannot fix
-  it, because the requirement is about the *submodules'* files and attributes
-  do not cross the submodule boundary. The Windows jobs must run
-  `git config --global core.autocrlf false` **before** `actions/checkout`.
-
-- **The sanitizer job needs `ASAN_OPTIONS=detect_leaks=0` at *build* time and
-  not at test time.** anthy's dictionary codegen tools exit without freeing, as
-  build-time programs reasonably do, and LeakSanitizer fails the build over it.
-  `docs/testing.md` has the reason.
-- **`anthy.vendor.main` is not leak-clean** and is vendored code testing vendored
-  code. Either exclude it in the sanitizer job or accept the suppression.
-- **`windows-ninja` is the Windows job to lean on, and the one to reach for when
-  a Windows job needs to be added or made faster.** `windows-msvc` builds
-  serially — `docs/windows-port.md`, "Known build limitation", has the reason —
-  so it is there to keep the Visual Studio generator honest, not to be the
-  Windows workhorse. Anything wanting wall-clock time, or wanting tests and the
-  demo in one job, belongs on Ninja.
-
-Verified by hand on Windows 2026-07-29, so the matrix above is describing
-something known to pass rather than something hoped for: both presets, both link
-modes, 39/39 suites each. Two Windows facts the matrix should not have to
-rediscover — `LIBPATHIME_REQUIRE_BACKENDS=ON` is satisfiable on a vcpkg host
-with `glib` and `sqlite3` only, and the fully static vcpkg triplet
-(`x64-windows-static-md`) has **never been configured**, because no packages are
-built for it. A `BUILD_SHARED_LIBS=OFF` Windows job therefore means the dynamic
-triplet, and should say so.
-
-**1.1 — Pin CMake.** Configuring with CMake 4.2.3 already emits a deprecation
-warning from `engines/libhangul/hangul/CMakeLists.txt:18`, which asks for
-compatibility with CMake < 3.10. That is a warning now and an error in a future
-release, and GitHub runner images track CMake closely — so this breaks on a
-runner-image refresh, not on a commit. Pin the CMake version in CI
-(`jwlawson/actions-setup-cmake`) so an image bump cannot break the build
-overnight. libhangul is unmodified upstream and should stay that way, so if the
-real fix is needed it is `CMAKE_POLICY_VERSION_MINIMUM` in our own build.
-
-**1.2 — Pin every third-party action to a commit SHA**, not a tag. Tags are
-mutable.
-
-**[manual] 1.3 — Turn on branch protection, once the checks are green.**
-Settings → Rules → Rulesets → New branch ruleset, targeting the default branch:
-require a pull request, and require the status checks that now exist and pass.
+**Done 2026-08-01.** `.github/workflows/ci.yml` carries the planned
+eight-job matrix plus Phase 3's reproducibility job, all green; the
+reasoning that used to live here is now comments in the workflow, next to
+what it explains. What the runners taught beyond the plan: the
+`windows-2025` image ships only Visual Studio 18, so `windows-msvc` runs on
+`windows-2022`; CMake is pinned at 4.2.3 because 3.31 cannot find Visual
+Studio on the 2025 image; Windows jobs force `core.autocrlf=false` before
+checkout; vcpkg's applocal step races with itself under parallel Ninja
+links, answered with a link pool of one (applocal must stay on — the table
+compiler runs at build time against those DLLs); and the vcpkg cache uses a
+per-image-label prefix fallback because the fleet rolls images gradually and
+the exact rev rarely repeats. Branch protection (1.3) is a ruleset on the
+default branch — require a PR, require the eleven checks — with a
+repository-admin bypass so the maintainer's direct pushes still work.
 
 ---
 
@@ -350,27 +295,14 @@ compat layer and does not belong in it.
 
 # Phase 3 — Quality signals
 
-Cheap, and each one is a thing you would otherwise have to remember to do.
-
-- **`coverage.yml`** — the `linux-coverage` preset. `gcovr` already writes
-  Cobertura `coverage.xml` for this purpose. Upload to Codecov for a PR comment
-  with the delta. Report **branch** coverage as well as lines: at 88.3 % lines
-  against roughly 57 % branches, the line figure is the less honest of the two,
-  and `docs/testing.md` says so.
-- **`codeql.yml`** — CodeQL for `c-cpp` with a manual build step. Free on public
-  repositories and genuinely good at C memory bugs.
-- **`.github/dependabot.yml`** — for `github-actions` *and* `gitsubmodule`. The
-  latter opens a PR when libhangul or cpp-terminal move upstream, which is
-  exactly the "a bump is a rebase" workflow the project already intends.
-- **A reproducibility job.** `BUILD.md` claims two builds of the same commit with
-  the same map produce byte-identical tables, checked across MSVC and clang-cl.
-  Build the tables twice and `cmp` them. That claim is load-bearing for the
-  checked-in coverage maps and nothing currently enforces it. Re-verified by hand
-  2026-07-29 — all five default tables *and* `anthy.dic` hash identically between
-  the `windows-msvc` and `windows-ninja` installs, so the job is codifying a
-  measurement rather than testing a hope. `anthy.dic` matching is not a documented
-  claim and should not become one on this evidence alone; it is one data point,
-  not a promise about anthy's codegen.
+**Done 2026-08-01.** `coverage.yml` (the `linux-coverage` preset, Codecov
+upload — tokenless today; **[manual]** adding a `CODECOV_TOKEN` secret from
+codecov.io removes the rate-limit flakiness), `codeql.yml` (c-cpp, manual
+build, vendored trees path-ignored), `.github/dependabot.yml`
+(`github-actions` and `gitsubmodule` — its first submodule-bump PR arrived
+within a minute of landing), and the `reproducible-tables` job in `ci.yml`
+(tables only, twice, hashes diffed; deliberately no `anthy.dic` comparison,
+which is one data point and not a documented claim). All green.
 
 ---
 
