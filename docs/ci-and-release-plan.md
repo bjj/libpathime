@@ -83,7 +83,7 @@ These are settled and the rest of the document assumes them:
   C++ runtime onto the consumer's own link line, which is a support surface with
   no audience yet. A consumer who wants it builds it. This is what keeps 4.3's
   static consumer a *CI* obligation rather than a packaging one.
-- **`orion.local` stops mattering.** GitHub becomes the source of truth.
+- **The private origin remote stops mattering.** GitHub becomes the source of truth.
 - **A formatter was wanted, negotiated, and rejected** — the configuration was
   to be chosen by looking at its output on this tree rather than adopted off
   the shelf, and doing that is what settled it. Phase 5 records the
@@ -227,8 +227,8 @@ cd engines/ibus-table-chinese && git push origin HEAD && cd -
 gh repo create bjj/libpathime --public --source=. --remote=github --push
 ```
 
-Keep `orion.local` as `origin` for now; nothing forces a rename, and having two
-remotes costs nothing.
+Keep the private remote as `origin` for now; nothing forces a rename, and having
+two remotes costs nothing.
 
 **[manual] 0.3 — Verify a cold clone, before writing any workflow.** This is
 five minutes that saves an hour of debugging a runner:
@@ -346,10 +346,9 @@ the branch is squashed at the end.
 shell over SSH, held to the six-hour job limit, and turns the loop from
 push-and-wait into an ordinary terminal. Two caveats. On a *public* repository
 that SSH address is in a public log, so the session is world-reachable while it
-is open — which is the exposure this route was meant to avoid. And handing the
-session to an agent depends on outbound SSH from the sandbox, which the sandbox
-firewall does not obviously permit — it proxies HTTP and HTTPS and default-denies
-the rest. Verify before planning around it.
+is open — which is the exposure this route was meant to avoid. And it depends on
+outbound SSH, which a locked-down development network may not permit. Verify
+before planning around it.
 
 **Route C — private scratch repository, driven over HTTPS.** Push a
 `libpathime-macos-spike` private repo, iterate there with ordinary CI pushes, and
@@ -357,11 +356,9 @@ land the finished diff as one clean PR on the public repo. This is the
 recommended route, and it is the one neither of the obvious two suggests:
 
 - **It is private**, so nothing is hanging out.
-- **It needs no SSH.** Everything happens over HTTPS to `github.com`, which is
-  reachable from the sandbox (verified: `git ls-remote` against all five
-  submodule remotes succeeds), so an agent can drive the whole loop — push, poll
-  `gh run watch`, read the log, fix, push again — without a human relaying
-  output.
+- **It needs no SSH.** Everything happens over HTTPS to `github.com`, so the
+  whole loop — push, poll `gh run watch`, read the log, fix, push again — runs
+  from an ordinary terminal, even on a network that only passes HTTP and HTTPS.
 - **It is affordable.** Private repositories bill against the Free plan's 2,000
   Linux-equivalent minutes per month, and macOS runs at a 10× multiplier, so the
   allowance is 200 macOS-minutes. A libpathime macOS job is a couple of minutes
@@ -457,7 +454,7 @@ Item 4 of the macOS list is done with them.
   otherwise.
 
   Two MSVC-specific notes for whoever writes the job. `pkg-config` output needs
-  `-l`/`-L` translated to `.lib` and `/LIBPATHIME:` for a `cl`-family driver, and
+  `-l`/`-L` translated to `.lib` and `/LIBPATH:` for a `cl`-family driver, and
   the translation must be case-sensitive or `-lpathime` matches `-L`. And
   `BUILD.md`'s "without `--static` the link fails on every hangul, anthy, pyzy
   **and `std::`** symbol" is Unix-only: MSVC auto-links the C++ runtime through
@@ -713,7 +710,7 @@ the thing to re-run first; they are cheap.
 
 **6.1 — Decide the version and tag policy.** The project is at `0.1.0` in
 `CMakeLists.txt:18` and has never released. Note the tension with the house
-rule in `CLAUDE.md` that the library is unreleased and carries no dated
+rule that the library is unreleased and carries no dated
 changelog: releasing is precisely what ends that, and a `CHANGELOG.md` becomes
 correct rather than forbidden. Decide that deliberately.
 

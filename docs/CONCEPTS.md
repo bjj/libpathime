@@ -263,7 +263,7 @@ The client may paginate, scroll, group, or otherwise present the list without in
 The order of a candidate list remains meaningful until the engine supplies new composition data. New composition data replaces the previous candidate list and invalidates positions referring to the previous list.
 
 **IBus and Fcitx note:** IBus calls its candidate list a *lookup table*. An IBus lookup table also includes page size, a candidate cursor, wrapping behavior, orientation, and candidate labels. Fcitx candidate lists may similarly provide paging, cursor movement, labels, comments, placeholders, and other interfaces. Of those, only the cursor is present here — see *Candidate cursor* — and it is present because it is not merely presentation. Page size, wrapping, orientation, and labels are excluded.
-IBus lookup table pagination is controlled by key press events rather than an API, which is undesirable. ([Intelligent Input Bus][3])
+IBus lookup table pagination is controlled by key press events rather than an API. ([Intelligent Input Bus][3])
 
 ### Candidate cursor
 
@@ -314,7 +314,7 @@ The client therefore never navigates between, or adjusts the boundaries of, the 
 
 The client must not select a position from an obsolete candidate list after newer composition data has been received.
 
-**IBus note:** IBus candidate selection is engine-specific and controlled via key press events rather than an API. This is undesirable. ([Intelligent Input Bus][2])
+**IBus note:** IBus candidate selection is engine-specific and controlled via key press events rather than an API. ([Intelligent Input Bus][2])
 
 ## Client text and editing
 
@@ -490,7 +490,6 @@ The engine may indicate that it:
 
 * requires surrounding text
 * requires the ability to delete surrounding text
-* requires a particular key representation
 * supports optional language or conversion features
 
 Requirements travel from engine to client, which is the direction that carries
@@ -584,8 +583,7 @@ The following are outside this model:
 * an IME display caret
 * client text selections
 * client preedit versus panel preedit (fcitx terms)
-* candidate highlighting
-* candidate navigation
+* next- and previous-candidate operations (cursor movement is by absolute position)
 * candidate paging
 * page-relative candidate positions
 * candidate labels and shortcut keys

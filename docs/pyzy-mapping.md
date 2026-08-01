@@ -340,8 +340,8 @@ characters. pyzy commits `std::string` values without any width conversion.
 `FallbackEditor` (`PYFallbackEditor.h/.cc`) handles all key events when
 the active editor has no buffered input, and also handles direct character
 input in English mode. It performs Chinese punctuation substitution: `!`
-→ `！`, `.` → `。`, `,` → `，`, paired `'` → `''`/`''`, paired `"` →
-`""`/`""`, etc., with separate tables for simplified and traditional
+→ `！`, `.` → `。`, `,` → `，`, paired `'` → `‘`/`’`, paired `"` →
+`“`/`”`, etc., with separate tables for simplified and traditional
 Chinese. This logic depends on `m_props.modeFullPunct()` and
 `m_props.modeSimp()`, and tracks `m_prev_committed_char` to handle the
 special case of `.` after a digit. pyzy provides none of this punctuation

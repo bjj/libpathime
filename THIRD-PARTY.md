@@ -14,12 +14,11 @@ Each is built as a **shared library** and loaded as one.
 | libhangul | LGPL-2.1 | `github.com/libhangul/libhangul` | upstream, unmodified |
 | anthy-unicode | LGPL-2.1 — its dictionary sources differ, see "Data files" below | `github.com/fujiwarat/anthy-unicode` | `github.com/bjj/anthy-unicode`, branch `libpathime` |
 | pyzy | LGPL-2.1 | `github.com/openSUSE/pyzy` | `github.com/bjj/pyzy`, branch `libpathime` |
+| ibus-table-chinese | GPLv3 | `github.com/mike-fabian/ibus-table` | upstream |
 
 **anthy-unicode and pyzy are modified.** Each fork's `libpathime` branch carries
-a short series of titled commits on top of an unmodified `main`/`master`;
-`git log vendor/<branch>..libpathime` in the submodule is the complete list of
-changes, with the date of each. The forks are the corresponding source for the
-binaries this project builds.
+a short series of titled commits on top of an unmodified `main`/`master`.
+The forks are the corresponding source for the binaries this project builds.
 
 libhangul is unmodified — we generate its `config.h` and call
 `add_subdirectory()` on its own CMake, which changes nothing about the library.
@@ -30,6 +29,7 @@ libhangul is unmodified — we generate its `config.h` and call
 |---|---|---|
 | GLib | LGPL-2.1-or-later | shared; required by pyzy |
 | SQLite3 | public domain | required by pyzy and the table engine |
+| libuuid | Modified BSD | required by pyzy |
 
 ## Data files shipped in `pathime-data/`
 

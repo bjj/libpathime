@@ -293,8 +293,8 @@ per-segment unconverted text via `anthy_get_segment(ctx, seg_idx, NTH_UNCONVERTE
 pre-conversion `JaString` output) to form a single preedit string. CONCEPTS.md's preedit
 "internal display position" maps to the boundary of the active segment: text of segments before
 the active one is settled, the active segment and everything after is still mutable. The wrapper
-computes this cursor offset by summing the character lengths of the unconverted-segment strings
-(`len(get_segment(i, NTH_UNCONVERTED_CANDIDATE))`, `engine.py:2731-2732`), not `seg_len` and not
+computes this cursor offset by summing the character lengths of the converted texts of the
+segments before the active one (`__update_anthy_convert_chars`, `engine.py:1275-1289`), not `seg_len` and not
 any library-provided cursor — so in the anthy world the display position is
 **per-segment-boundary**, driven by the active-segment index, not a free character cursor.
 

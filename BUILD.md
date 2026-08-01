@@ -80,7 +80,7 @@ cmake --build --preset windows-msvc
 ```
 
 There is also a `windows-ninja` preset (clang-cl + Ninja); it must be run from a
-developer command prompt, and remember to re-set `VCPKG_ROOT` afterwards.
+developer command prompt, and remember to re-set `VCPKG_ROOT` after vcvars.
 
 ## Options
 

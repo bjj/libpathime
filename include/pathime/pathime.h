@@ -378,6 +378,7 @@ typedef struct pathime_init_params {
  * pathime_has_engine is usable
  * too but answers false for everything before initialization, since no engine
  * can be supplied yet; call it again afterward for a meaningful answer.
+ * pathime_option_value_name has specific caveats; see its own docstring.
  */
 PATHIME_API pathime_status_t pathime_init(const pathime_init_params_t *params);
 
@@ -744,8 +745,8 @@ typedef struct pathime_composition {
     size_t candidate_count;
 
     /**
-     * The candidate a client draws highlighted. Always < @a candidate_count,
-     * and 0 when the list is empty.
+     * The candidate a client draws highlighted. Always < @a candidate_count
+     * when the candidate list is non-empty, or 0 when the list is empty.
      *
      * Highlighting is not decoration, because on some engines moving the
      * cursor also rewrites the unsettled span of @a preedit — the highlight
@@ -901,8 +902,8 @@ typedef struct pathime_context pathime_context_t;
  * Fails with PATHIME_ERROR_MISSING_CALLBACK if @a client omits a callback that
  * pathime_engine_requirements() reports as required.
  *
- * A new context starts with empty composition data, no surrounding text, and a
- * candidate cap of PATHIME_DEFAULT_MAX_CANDIDATES.
+ * A new context starts with empty composition data, no surrounding text, and no
+ * options overridden from the engine values.
  */
 PATHIME_API pathime_status_t pathime_context_create(pathime_engine_t *engine,
                                                     const pathime_client_t *client,
@@ -1413,7 +1414,7 @@ typedef enum pathime_option {
      * between their opening and closing forms, and a period directly after a
      * digit stays a period so that "1.5" is not mangled. Both are reset by
      * pathime_context_reset() and can be primed with
-     * pathime_context_set_surrounding_text(), provided sufficent context to
+     * pathime_context_set_surrounding_text(), as long as sufficent context to
      * the left of the cursor is provided.
      */
     PATHIME_OPT_PUNCTUATION_WIDTH = 3,

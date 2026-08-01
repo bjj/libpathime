@@ -104,7 +104,7 @@ descriptive.
 | `AUTO_SELECT` | `FALSE` | Engine option | Promote the first candidate automatically at boundaries and on ambiguity. |
 | `DEF_FULL_WIDTH_PUNCT` | `TRUE` | Engine option | Default full-width punctuation mode (§11.4). |
 | `DEF_FULL_WIDTH_LETTER` | `FALSE` | Engine option | Default full-width letter mode (§11.4). |
-| `LICENSE`, `AUTHOR`, `DESCRIPTION` | see below | Metadata | Descriptive strings (`LGPL`, `somebody`, `A IME under IBus Table`). |
+| `LICENSE`, `AUTHOR`, `DESCRIPTION` | `LGPL`/`somebody`/`A IME under IBus Table` | Metadata | Descriptive strings. |
 | `ICON`, `SYMBOL`, `STATUS_PROMPT` | `ibus-table.svg`/`""`/`""` | Client policy | Presentation only; ignored. |
 | `LAYOUT` | `us` | Client policy | Informational keyboard layout; ignored. |
 | `COMMIT_KEYS` | `space` | Client policy | Which key commits the first candidate — a client binding onto *select candidate*. Ignored by the engine. |
@@ -144,7 +144,7 @@ Goucima (構詞碼) define the key component each character contributes when a c
 key is derived — see `USER_CAN_DEFINE_PHRASE` in §3.1. Each line is two whitespace-separated fields:
 
 ```
-<character>\t<goucima>
+<character> <goucima>
 ```
 
 If the section is absent, goucima are derived automatically: for each single-character phrase, the
@@ -399,8 +399,8 @@ are mapped to fullwidth equivalents, with these punctuation overrides:
 | `` ` `` | `` ` `` | Unchanged |
 | `~` | `～` | Fullwidth tilde |
 | `.` | `。` / `．` | `。` at sentence start, `．` otherwise |
-| `"` | `"` / `"` | Alternates open/close |
-| `'` | `'` / `'` | Alternates open/close |
+| `"` | `“` / `”` | Alternates open/close |
+| `'` | `‘` / `’` | Alternates open/close |
 
 `CONCEPTS.md` treats full-width conversion as an engine option, not model machinery. A libpathime
 engine may offer it as a negotiated transform on committed characters; it is not required for table

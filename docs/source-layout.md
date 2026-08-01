@@ -27,7 +27,7 @@ src/
                         the hovered-candidate cursor, which context.cc
                         publishes into the composition rather than a getter
   options.h/.cc         descriptor table, value-name table, two-level store,
-                        kind-typed accessors, introspection walk — and all 20
+                        kind-typed accessors, introspection walk — and all 21
                         public option entry points, both levels
   keys.h/.cc            engine-agnostic key layer: validation, routing,
                         handled/unhandled
@@ -68,10 +68,12 @@ tools/
                         (docs/ci-and-release-plan.md 6.5)
 tests/
   api/                  links the built library, exported symbols only, C11:
-                        abi, lifecycle, options, one test per engine, plus the
-                        no-database negative for pyzy
+                        abi, lifecycle, options, one test per engine, the
+                        no-database negative for pyzy, and the cross-engine
+                        multicontext test
   core/                 compiles internal sources directly, C++17:
-                        utf8, composition, options, table
+                        utf8, composition, keys, punctuation, romaji, backend
+                        defaults, options, table, table compile
 ```
 
 ## Two structural decisions, and why
@@ -123,7 +125,7 @@ because they are not obvious from the names:
 | `pathime_has_engine`, `pathime_engine_create/destroy/id/requirements` | `engine.cc` |
 | `pathime_context_create/destroy/engine/user_data/requirements`, `_process_key`, `_composition`, `_set_surrounding_text`, `_commit`, `_reset` | `context.cc` |
 | `pathime_context_candidate`, `_set_candidate_cursor`, `_select_candidate` | `candidates.cc` |
-| all 20 `pathime_*option*` functions, both levels | `options.cc` |
+| all 21 `pathime_*option*` functions, both levels | `options.cc` |
 
 Tier 3 — the value a table declares — is the one resolution input that does not
 live in `options.cc`, because it lives in a data file only a backend can read.
@@ -243,6 +245,10 @@ strict C and that the symbols are exported.
   singleton whether or not `open()` found anything (`Database.cc:202-208,
   729-734`), so the adapter tests for the file in front of init and this is what
   proves it.
+- `multicontext_test.c` — the one test not about a single engine: contexts of
+  different backends open at once, differential against each script typed alone,
+  proving one context's activity leaks nothing into another
+  (`docs/testing.md` has the design).
 
 **`tests/core/`** compiles the internal sources under test directly into each
 executable, because internal helpers carry no `PATHIME_API` and a shared build
@@ -259,6 +265,14 @@ widen the ABI for no client's benefit. C++17, ctest names `core.<name>`.
   and the engine-level broadcast. It builds `pathime_engine` and
   `pathime_context` aggregates directly, which is how it reaches machinery the
   public API alone cannot.
+- `keys_test.cc` — `key_event_from_public()`: the struct rejections and the
+  keysym decoding, in round-trip form.
+- `punctuation_test.cc` — the shared Chinese punctuation layer, including both
+  directions of the paired-quote alternation.
+- `romaji_test.cc` — the anthy adapter's romaji and kana front end under every
+  period and symbol style.
+- `backend_defaults_test.cc` — `backend.h`'s inherited vtable defaults, driven
+  through a backend that overrides nothing.
 - `table_test.cc` — the table engine's data layer below the seam: the source
   parser, the typed declaration, LIKE-pattern construction and candidate
   ordering, against inputs chosen to be awkward (wildcard characters that collide
@@ -267,6 +281,9 @@ widen the ABI for no client's benefit. C++17, ctest names `core.<name>`.
   no database and compiles six of `engines/table/`'s files plus `paths.cc` and
   `utf8.cc` — which is only possible because of the boundary inside that
   directory described above.
+- `table_compile_test.cc` — the other half of that line: compiles tables to
+  databases and reads them back, including paths that are syntax to SQL or to
+  URIs (`#`, `%`, an apostrophe).
 
 Compiling the sources in twice is the deliberate trade: a little build time for
 tests that reach the seams where the rules actually live, without any of it
