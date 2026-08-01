@@ -214,12 +214,15 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ninja-build pkg-config libsqlite3-dev
+      # BUILD_TESTS because the staging target (pathime-runtime-data) only
+      # exists when something in the build tree runs the data.
       - name: Build the tables twice
         run: |
           for b in a b; do
             cmake -S . -B build/repro-$b -G Ninja -DCMAKE_BUILD_TYPE=Release \
               -DLIBPATHIME_WITH_HANGUL=OFF -DLIBPATHIME_WITH_ANTHY=OFF \
-              -DLIBPATHIME_WITH_PYZY=OFF -DLIBPATHIME_REQUIRE_BACKENDS=ON
+              -DLIBPATHIME_WITH_PYZY=OFF -DLIBPATHIME_REQUIRE_BACKENDS=ON \
+              -DLIBPATHIME_BUILD_TESTS=ON
             cmake --build build/repro-$b --target pathime-runtime-data
           done
       - name: Compare
