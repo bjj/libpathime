@@ -518,3 +518,18 @@ there; what was closed is here.
   concept space a CJK engine interface has to account for, and it is labelled
   in place as the one part of the model the library does not implement. §1
   holds the deferral itself.
+- **clang-format: measured and rejected.** Eleven candidates against the tree;
+  the floor is 18% of every non-vendored, non-generated line, and the plan's
+  own rule — an enormous diff means the wrong config, not a mandate to reformat
+  — decides it. The style resists because it is deliberate, not accidental:
+  ~1,400 lines deliberately run 81–90 columns, and the settings that look like
+  they would preserve hand alignment make the diff worse by aligning where the
+  author did not. Two regressions are unfixable by configuration — the public
+  header's status enum stops being a table, and `romaji.cc`'s 286-line
+  one-row-per-line romaji table packs into 73. Cost: no mechanical guard
+  against drift; the style stays a matter of reading the surrounding code, as
+  `CLAUDE.md` already asks. `docs/ci-and-release-plan.md` Phase 5 holds the
+  measurements — re-run them before reopening, they are cheap. The one finding
+  that outlives the decision is that the three generated headers must be
+  excluded from any whole-tree text operation, being 64% of the raw diff and
+  required to match their generator's output byte for byte.

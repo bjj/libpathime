@@ -84,8 +84,10 @@ These are settled and the rest of the document assumes them:
   no audience yet. A consumer who wants it builds it. This is what keeps 4.3's
   static consumer a *CI* obligation rather than a packaging one.
 - **`orion.local` stops mattering.** GitHub becomes the source of truth.
-- **A formatter is wanted, but negotiated** — the configuration is chosen by
-  looking at its output on this tree, not adopted off the shelf. Phase 5.
+- **A formatter was wanted, negotiated, and rejected** — the configuration was
+  to be chosen by looking at its output on this tree rather than adopted off
+  the shelf, and doing that is what settled it. Phase 5 records the
+  measurements and the ruling; there is no formatting job.
 
 ## Baseline: what the build costs
 
@@ -631,62 +633,79 @@ packaging one.
 
 ---
 
-# Phase 5 — The formatter
+# Phase 5 — The formatter: measured and rejected (2026-07-31)
 
-Last, and separately, because a reformat touches every file and would collide
-with anything in flight. **It must land as its own commit, after the test
-coverage branch merges.**
+**There is no formatting job and no `.clang-format`.** This section is kept
+because the measurement is the argument, and without it the idea returns.
 
-### What the current style measures as
+The plan was to negotiate a configuration by looking at its output on this tree
+rather than adopting one off the shelf, on the rule that **a config whose diff
+is enormous is the wrong config, not a mandate to reformat**. Eleven candidates
+were measured against the tree with clang-format 19. The floor is 18% of every
+non-vendored, non-generated line — 6,786 of 36,890 — and the rule decides it.
 
-Sampled across `src/`, `include/`, `tests/`, `tools/` and `demo/`, excluding
-vendored trees:
+### What the style measures as, and why it resists
 
-- **Spaces only**, no leading tabs anywhere.
-- **Roughly 80 columns**: the 95th percentile line is 79–81 characters in every
-  directory, with a maximum of 98–103. So the intent is 80 with deliberate
-  exceptions, not a hard limit.
-- **Braces**: on their own line for function definitions, on the same line for
-  control statements. That is clang-format's `BreakBeforeBraces: Stroustrup`.
-- **Pointers and references bind right**: `const std::string &path`.
+Spaces only, no tabs anywhere. Stroustrup braces. Pointers bind right. Trailing
+comments are two spaces out in **122 of 122** cases; short `if (x) stmt;`
+appears 129 times; nested preprocessor is indented. Those all map onto
+configuration exactly and cost nothing.
 
-That is a coherent style, which is why it reads well, and it maps onto a small
-clang-format configuration rather than a large one.
+What does not map is the column behaviour. The 95th-percentile line is 79
+characters, but roughly 1,400 lines run 81–90, and they are deliberate — a
+`ColumnLimit` of 80 rewraps every one of them, while 100 goes the other way and
+*rejoins* lines the author broke on purpose. 90 is the best of the three and
+still leaves the bulk of the diff:
 
-### How to negotiate it
+| Candidate | Changed lines |
+|---|---|
+| 80 columns | 9,780 |
+| 90 columns | 6,902 |
+| 100 columns | 7,737 |
+| 90 + `ReflowComments: false` | 6,860 |
+| ↑ + `IndentPPDirectives`, `AlignEscapedNewlines: Left` | **6,786** |
+| ↑ + `AlignConsecutive*` | 7,986 |
+| ↑ + `BinPack{Arguments,Parameters}: false` | 7,452 |
 
-The point is to see what a configuration does before adopting it, so:
+The last two matter: settings that look like they would *preserve* hand
+alignment make it worse, because they align where the author did not.
 
-1. Write two or three candidate `.clang-format` files — a Stroustrup-based one
-   matching the measurements above, and one or two variants differing in the
-   arguments actually in question (`ColumnLimit` 80 vs 100,
-   `AlignAfterOpenBracket`, `AllowShortFunctionsOnASingleLine`).
-2. Apply each to a **scratch copy** of the tree, never the tree itself, and
-   diff. Review the diff by directory: the interesting files are the ones with
-   hand-aligned tables and long comment blocks, which is most of `cmake/` and
-   the option-handling code.
-3. Iterate on the configuration until the diff is small and every remaining
-   change is an improvement. A config whose diff is enormous is the wrong config,
-   not a mandate to reformat.
-4. Consider `// clang-format off` around the few genuinely hand-aligned blocks
-   rather than contorting the configuration to preserve them.
+### The two regressions that settle it
 
-### Two things not to miss
+The remainder is not a set of improvements waiting to be accepted. In the
+public header, the status enum — an aligned table with aligned doc comments —
+becomes:
 
-- **Exclude the vendored trees.** `engines/` and `demo/cpp-terminal` are
-  submodules and must never be reformatted — a fix to a vendored library is a
-  commit on that submodule's branch, and a reformat is not a fix. A
-  `.clang-format` at the repository root applies to subdirectories unless they
-  contain one of their own, so the CI check must be scoped by path (run over
-  `src include tests tools demo` minus `demo/cpp-terminal`) rather than run over
-  everything.
-- **Add `.git-blame-ignore-revs`.** A whole-tree reformat destroys `git blame`
-  unless the commit is listed in that file. GitHub honours it automatically in
-  the blame view, and `git config blame.ignoreRevsFile .git-blame-ignore-revs`
-  makes the local one match. Create the file in the same commit that reformats.
+```c
+    PATHIME_ERROR_INVALID_ARGUMENT =
+        1, /**< NULL handle, bad index, bad UTF-8, bad struct_size. */
+    PATHIME_ERROR_UNKNOWN_ENGINE = 2, /**< Engine not available in this library. */
+```
 
-Only after the configuration is settled does a `format.yml` job checking
-`clang-format --dry-run --Werror` make sense.
+And `src/engines/anthy/romaji.cc`'s romaji table collapses from **286 lines,
+one row per line, to 73 packed lines**. No setting prevents it —
+`BinPackArguments: false` does not apply to braced init lists — so the only
+remedy is `// clang-format off`, and the diff is too diffuse for that to be
+cheap: the top ten files are only 48% of it.
+
+The style measures as coherent because it is coherent. What clang-format wants
+to change is mostly deliberate hand alignment.
+
+### What the exercise found that outlives it
+
+- **Generated headers must be excluded from any whole-tree text operation.**
+  `variants_data.h`, `coverage_data_noto.h` and `coverage_data_windows.h` were
+  **64% of the raw diff** on their own. Reformatting them would mean the
+  checked-in file no longer matches what `tools/generate-*.py` produces, which
+  is exactly the property Phase 3's reproducibility job exists to enforce. The
+  exclusion that was written down covered only the vendored trees.
+- **The vendored trees stay excluded** regardless — `engines/` and
+  `demo/cpp-terminal` are submodules, and a reformat is not a fix.
+- **`.git-blame-ignore-revs` is now moot**, since nothing reformats the tree.
+
+If this is ever reopened, the honest form is a check over **new files only**, so
+the tree stays as written and only drift is caught. The measurements above are
+the thing to re-run first; they are cheap.
 
 ---
 
@@ -925,5 +944,5 @@ gates all of Phase 6.
           ├──▶ 3  (coverage, CodeQL, dependabot)
           └──▶ 4  (install/export) ──▶ 6 (releases, vcpkg)
 
-5 (formatter) — after the test-coverage branch merges, any time.
+5 (formatter) — measured and rejected; nothing to schedule.
 ```

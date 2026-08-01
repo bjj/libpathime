@@ -90,6 +90,13 @@ else()
 endif()
 
 # --- optional runtime database (android.db) ---------------------------------
+#
+# Ignore the `src/main.db` symlink in pyzy's tree. It is upstream's autotools
+# convenience — it points at `data/db/android/android.db`, which no checkout
+# contains, because that file is generated. It therefore dangles until an
+# in-tree autotools build creates its target, and nothing here reads it: the
+# database is built below into the build directory and installed as `main.db`
+# by cmake/LibpathimeRuntimeData.cmake.
 option(PYZY_BUILD_DB_ANDROID "Build pyzy's bundled Android pinyin database" ON)
 if(PYZY_BUILD_DB_ANDROID)
   # Shared with the coverage-map regeneration target; the Windows fallback it
