@@ -36,7 +36,11 @@ jobs:
       # Tokenless upload works on a public repository but is rate-limited;
       # adding a CODECOV_TOKEN repository secret (from codecov.io, [manual])
       # removes the flakiness. The action reads the secret if present.
+      # Without disable_search the uploader also sweeps up raw .gcov for the
+      # vendored trees and system headers, which drags the reported figure
+      # below what coverage.xml (gcovr, src/ only) says.
       - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
           files: build/linux-coverage/coverage/coverage.xml
+          disable_search: true
           token: ${{ secrets.CODECOV_TOKEN }}
