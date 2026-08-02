@@ -1,0 +1,7 @@
+# Codecov's default counts a line whose branches are only partially taken as
+# uncovered, which drags the reported figure toward branch coverage while
+# wearing line coverage's name. gcovr's summary (BUILD.md, "Test coverage")
+# counts an executed line as covered; this makes the dashboard agree with it.
+parsers:
+  cobertura:
+    partials_as_hits: true
