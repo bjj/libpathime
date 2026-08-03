@@ -68,7 +68,7 @@ candidate paging, and what to do with a key the engine declines. See
 
 There is a **[python binding](https://github.com/bjj/libpathime-python)** and
 a **[C# binding](https://github.com/bjj/libpathime-sharp)** based on this library.
-Each one also has its own demo. The [demo in the C# binding](https://github.com/bjj/libpathime-sharp/demo)
+Each one also has its own demo. The [demo in the C# binding](https://github.com/bjj/libpathime-sharp/tree/master/demo/PathimeSharp.Demo)
 is a graphical demo that actually looks like a phone.
 
 ## Example
