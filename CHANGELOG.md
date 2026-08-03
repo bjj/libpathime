@@ -4,6 +4,20 @@ One dated entry per release. Everything else in this repository stays in the
 present tense and describes what is; this file is the one place that says
 when.
 
+## 0.1.3 — 2026-08-03
+
+No artifact ships an external shared library. pyzy provides the glib calls
+its sources make itself (`GlibLess`, on the fork's `libpathime` branch),
+which removes glib — and on Windows its whole DLL closure: iconv, intl,
+pcre2, with their LGPL relinking obligations — from every platform; pyzy's
+own autotools build keeps real glib and is unchanged. On Windows SQLite
+links statically from vcpkg's `x64-windows-static-md` triplet
+(`LIBPATHIME_STATIC_SQLITE`, ON by default; OFF links and ships
+`sqlite3.dll` instead), so the Windows packages carry only libpathime's own
+five binaries. POSIX artifacts still link the system sqlite3 and ship
+nothing; their dependency list is down to libsqlite3 and libuuid. A new
+`pyzy.glibless` suite pins the shim's contracts. No API change.
+
 ## 0.1.2 — 2026-08-02
 
 The distribution boundary hardened, following an external review of this
