@@ -1,5 +1,9 @@
 # Build-wide preamble and user-facing options.
 # Included once from the top-level CMakeLists.
+#
+# One option is not here: LIBPATHIME_STATIC_SQLITE lives in the top-level
+# CMakeLists before project(), because it is expressed as the vcpkg triplet
+# and the vcpkg toolchain reads that when project() runs.
 
 # --- Reject in-source builds: they scatter generated files through the tree. ---
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)

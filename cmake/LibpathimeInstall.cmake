@@ -82,16 +82,15 @@ endif()
 set(LIBPATHIME_VENDORED_BINDIR "${CMAKE_INSTALL_BINDIR}")
 
 # The external runtime-DLL closure, Windows-shared only. The build links DLLs
-# it does not build — pyzy's glib and friends, from vcpkg — and vcpkg's
-# applocal step stages them only beside the *build* tree's binaries, so an
-# install that did not carry them would produce a pathime.dll that cannot
-# load. Every installed runtime target joins this dependency set, and
-# libpathime_install_package() installs the set's closure, computed at install
-# time. Computed rather than hand-listed on purpose: a list of the current
-# five names goes stale silently on a vcpkg baseline bump, where the
-# dependency-set form encodes the rule and fails loudly. The DLLs are shipped
-# components with licence consequences; THIRD-PARTY.md carries their rows and
-# _libpathime_install_licenses() below ships their texts.
+# it does not build — sqlite3, from vcpkg — and vcpkg's applocal step stages
+# them only beside the *build* tree's binaries, so an install that did not
+# carry them would produce a pathime.dll that cannot load. Every installed
+# runtime target joins this dependency set, and libpathime_install_package()
+# installs the set's closure, computed at install time. Computed rather than
+# hand-listed on purpose: a hand-kept name list goes stale silently on a
+# vcpkg baseline bump, where the dependency-set form encodes the rule and
+# fails loudly. The DLLs are shipped components with licence consequences;
+# THIRD-PARTY.md carries their rows.
 if(WIN32 AND BUILD_SHARED_LIBS)
   set(LIBPATHIME_RUNTIME_DEP_SET_ARGS RUNTIME_DEPENDENCY_SET pathime-runtime)
 else()
@@ -193,10 +192,10 @@ function(libpathime_set_install_rpath tgt)
   # and that last empty component cannot be removed while the RPATH is rewritten
   # at install time rather than relinked. Only BUILD_WITH_INSTALL_RPATH would,
   # by discarding the build tree's computed link paths, which is how a
-  # build-tree pyzy finds a glib that is not in a default directory. One
-  # last-searched cwd entry in a binary that is never installed is the better
-  # end of that trade, and it is what every CMake target with an INSTALL_RPATH
-  # carries.
+  # build-tree pyzy finds an external library that is not in a default
+  # directory. One last-searched cwd entry in a binary that is never installed
+  # is the better end of that trade, and it is what every CMake target with an
+  # INSTALL_RPATH carries.
   set_property(TARGET ${tgt} APPEND PROPERTY INSTALL_RPATH ${_rpath})
   set_property(TARGET ${tgt} APPEND PROPERTY BUILD_RPATH ${_rpath})
 endfunction()
@@ -359,24 +358,6 @@ function(_libpathime_install_licenses)
       DESTINATION "${_lic}" RENAME cpp-terminal.txt COMPONENT demo)
   endif()
 
-  # The Windows runtime-DLL closure's texts, from vcpkg's per-port copyright
-  # files — shipped components per 4.3c, so their terms ship too. A missing
-  # file is a warning rather than a skip: silence here is a compliance gap,
-  # not a smaller install.
-  if(WIN32 AND BUILD_SHARED_LIBS AND LIBPATHIME_WITH_PYZY
-     AND DEFINED VCPKG_INSTALLED_DIR AND DEFINED VCPKG_TARGET_TRIPLET)
-    foreach(_port glib libiconv gettext pcre2)
-      set(_copyright "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/share/${_port}/copyright")
-      if(EXISTS "${_copyright}")
-        install(FILES "${_copyright}"
-          DESTINATION "${_lic}" RENAME "${_port}.txt" COMPONENT runtime)
-      else()
-        message(WARNING
-          "libpathime: no vcpkg copyright file for ${_port}; the installed "
-          "licence set will not cover its DLL.")
-      endif()
-    endforeach()
-  endif()
 endfunction()
 
 # The pkg-config file. Separate from the CMake package because it has one thing
@@ -498,14 +479,11 @@ function(_libpathime_install_pkgconfig)
     if(LIBPATHIME_WITH_PYZY OR LIBPATHIME_WITH_TABLE)
       list(APPEND _requires sqlite3)
     endif()
-    if(LIBPATHIME_WITH_PYZY)
-      list(APPEND _requires "glib-2.0 >= 2.24.0")
-      if(NOT WIN32 AND NOT APPLE)
-        # cmake/ports/pyzy links libuuid on Linux and the BSDs; Windows has
-        # the Rpcrt4 shim in the archives, macOS has uuid_generate in
-        # libSystem, and neither has a uuid.pc to require.
-        list(APPEND _requires uuid)
-      endif()
+    if(LIBPATHIME_WITH_PYZY AND NOT WIN32 AND NOT APPLE)
+      # cmake/ports/pyzy links libuuid on Linux and the BSDs; Windows has
+      # the Rpcrt4 shim in the archives, macOS has uuid_generate in
+      # libSystem, and neither has a uuid.pc to require.
+      list(APPEND _requires uuid)
     endif()
     list(JOIN _requires ", " PATHIME_PC_REQUIRES_PRIVATE)
     if(PATHIME_PC_REQUIRES_PRIVATE)

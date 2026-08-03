@@ -5,8 +5,8 @@ and behave on Windows. `BUILD.md` is what to install and type; this is what the
 build is doing behind that and where the result differs from Linux.
 
 Verified on Windows 11 with Visual Studio 2022 (MSVC 19.44) and with
-clang-cl 19 + Ninja, x64, against the vcpkg glib and sqlite3 the port was
-developed with (2.88 and 3.53). Both presets produce identical `anthy.dic`,
+clang-cl 19 + Ninja, x64, against the vcpkg sqlite3 the port was
+developed with (3.53). Both presets produce identical `anthy.dic`,
 `android.db` and compiled `table/*.db`, and both pass the full test suite —
 which is the real check that the workarounds below preserve Linux behaviour
 rather than merely compiling.
@@ -71,12 +71,16 @@ family is one library on Windows", has the reasoning; the target names
 `anthydic-unicode` and `anthyinput-unicode` survive as interfaces onto that
 one DLL, so nothing else in the tree links differently.
 
-pyzy's vcpkg runtime dependencies (`glib-2.0-0.dll` and friends) follow the
-DLLs into both trees, by different means: vcpkg's applocal step populates the
-build tree's `bin/`, and the install computes the same closure itself — every
-installed runtime target joins a CMake runtime dependency set whose install
-rule, in `cmake/LibpathimeInstall.cmake`, includes what resolves from the
-vcpkg tree and excludes the operating system's own DLLs.
+No external DLL follows them by default: SQLite links statically from
+vcpkg's `x64-windows-static-md` triplet (`LIBPATHIME_STATIC_SQLITE`, ON by
+default and in every release), and the glib calls in pyzy's sources are
+satisfied by its own `GlibLess` (a titled commit on its `libpathime`
+branch), not by a glib DLL. The install still computes the runtime-DLL
+closure of every installed target — each joins a CMake runtime dependency
+set whose install rule, in `cmake/LibpathimeInstall.cmake`, includes what
+resolves from the vcpkg tree and excludes the operating system's own DLLs —
+which is also what makes `LIBPATHIME_STATIC_SQLITE=OFF` work: that build
+links `sqlite3.dll` and the closure ships it beside the libraries.
 
 ## Known build limitation: the Visual Studio generator builds serially
 

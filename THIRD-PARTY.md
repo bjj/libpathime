@@ -42,17 +42,17 @@ off, `pathime-data/` holds only pyzy's LGPL files.
 | `pathime-data/anthy/anthy.dic` | **GPL-2** | ✓ | ✓ | as sources |
 | `pathime-data/table/*.db` | **GPL-3** | ✓ | ✓ | as sources |
 | cpp-terminal (static, inside `pathime-demo`) | MIT | — | ✓ | ✓ |
-| `glib-2.0-0.dll` | LGPL-2.1-or-later | Windows only | Windows only | — |
-| `iconv-2.dll` (libiconv) | LGPL-2.1 | Windows only | Windows only | — |
-| `intl-8.dll` (gettext's libintl) | LGPL-2.1 | Windows only | Windows only | — |
-| `pcre2-8.dll` | BSD-3-Clause | Windows only | Windows only | — |
-| `sqlite3.dll` | public domain | Windows only | Windows only | — |
+| SQLite (static, inside the Windows `pathime` and `pyzy` libraries) | public domain | Windows only | Windows only | — |
 
-The Windows rows exist because Windows has no system copies of those
-libraries: pyzy needs glib and sqlite3, so the Windows artifacts carry the
-vcpkg-built DLL closure beside `pathime.dll`, the ordinary arrangement for a
-glib-using Windows program. On Linux and macOS the same libraries come from
-the system or Homebrew and the artifacts deliberately ship none of them.
+No released artifact ships an external shared library. The two places one
+could enter are both closed off: SQLite, which pyzy and the table engine
+need and Windows has no system copy of, links statically there from vcpkg's
+`x64-windows-static-md` triplet (POSIX links the system copy and ships
+nothing); and glib, whose handful of calls pyzy satisfies itself
+(`src/GlibLess.*` on the fork's `libpathime` branch), so neither glib nor
+glib's own closure (libiconv, libintl, pcre2) appears on any platform. A
+self-build with `LIBPATHIME_STATIC_SQLITE=OFF` links `sqlite3.dll` instead
+and its install carries that one DLL (public domain) beside the libraries.
 
 ## The vendored libraries
 
@@ -79,8 +79,7 @@ in the demo package. It is not linked into `libpathime`.
 
 | Component | Licence | Linkage |
 |---|---|---|
-| GLib | LGPL-2.1-or-later | shared; required by pyzy. From the system on POSIX; shipped in the Windows artifacts |
-| SQLite3 | public domain | required by pyzy and the table engine. Same shipping rule |
+| SQLite | public domain | required by pyzy and the table engine. On Windows the vcpkg static build (`x64-windows-static-md`) is compiled into the libraries; on POSIX the system shared library is linked and nothing ships |
 | libuuid | Modified BSD | required by pyzy on POSIX; Windows uses a bundled Rpcrt4 shim instead |
 
 ## Data files shipped in `pathime-data/`

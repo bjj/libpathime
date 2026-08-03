@@ -287,8 +287,8 @@ Before reading anything into a test's absence:
   against `ucschar`, so nothing is lost on Windows but the vendored suite
   itself.
 - **`hangul.vendored.hangul`** needs iconv, which it uses only to print UCS-4 as
-  UTF-8. glibc has it; on Windows it comes from vcpkg, which glib pulls in
-  anyway.
+  UTF-8. glibc has it; on Windows it comes from vcpkg's libiconv, which
+  BUILD.md's install line names for exactly this test.
 - **`pyzy.full_pinyin`, `pyzy.double_pinyin` and `pyzy.bopomofo`** need
   `android.db`, which the pyzy port builds only when configure finds a Python 3
   interpreter. Without it they are not registered — three tests failing for a

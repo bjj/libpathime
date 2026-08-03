@@ -15,6 +15,7 @@
 #ifndef LIBPATHIME_TESTS_PYZY_PRIVATE_H
 #define LIBPATHIME_TESTS_PYZY_PRIVATE_H
 
+#include "@PYZY_SRC_DIR@/GlibLess.h"
 #include "@PYZY_SRC_DIR@/String.h"
 #include "@PYZY_SRC_DIR@/Types.h"
 #include "@PYZY_SRC_DIR@/PinyinArray.h"

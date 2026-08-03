@@ -600,14 +600,52 @@ the release mechanics. What was *decided* rather than merely done:
   submodule at its pin (`tools/make-source-tarball.sh`) — GitHub's
   auto-tarball omits submodules and does not build. release.yml proves the
   tarball by building and testing from it.
-- **Windows artifacts carry the vcpkg runtime-DLL closure; POSIX artifacts
-  carry no external libraries.** Windows has no system glib, every other
-  platform does. Alternatives rejected: MSYS2 glib (second toolchain family,
-  more DLLs, unpinnable rolling repo), gvsbuild (another tool, same output),
-  Conan (no advantage over the vcpkg already load-bearing), static glib via
-  `x64-windows-static-md` (the one option that removes files; the triplet
-  has never been configured and glib's static Windows build is its fragile
-  corner). Reopen the last only if the DLL count itself becomes a problem.
+- **pyzy does not link glib; GlibLess provides the calls its sources make.**
+  glib was pyzy's only external library besides sqlite3, and on Windows it
+  dragged its whole vcpkg closure (libiconv, libintl, pcre2 — four DLLs, three
+  of them LGPL with a relinking obligation) into every artifact for ~28
+  shallow functions: asserts, printf helpers, UTF-8 walkers, file operations,
+  a timer, and a timeout that never fires because no `GMainLoop` runs.
+  `src/GlibLess.{h,cc}` on the fork's `libpathime` branch implements exactly
+  that inventory (~600 lines carried; the glib names are macros over
+  `pyzy_g_*` symbols, so a real glib in the same process never collides), and
+  the port compiles it like any other pyzy source. Alternatives rejected: a
+  fake `<glib.h>` in our compat layer (replaces a library, not an environment
+  — the compat layer's charter — and its unprefixed symbols would collide
+  with a consumer's real glib in a static build); vcpkg-closure shipping with
+  MSYS2/gvsbuild/Conan/static-glib variants (each keeps glib itself); and
+  upstreaming (openSUSE/pyzy is near-dormant and serves the glib-native ibus
+  ecosystem — a removal offers it nothing). Cost: the branch owns ~600 lines
+  of shim, and a submodule bump that introduces a new g_* call extends
+  GlibLess by hand. Reopen only if a bump makes pyzy's glib surface deep —
+  GObject, GIO, GRegex — where reimplementation stops being honest.
+- **No released artifact carries an external shared library; SQLite links
+  statically on Windows, the system's on POSIX.** SQLite is the one external
+  library pyzy and the table engine need, and Windows has no system copy —
+  so the choice there is shipping `sqlite3.dll` or linking it in, and
+  linking wins for everything this project publishes:
+  `LIBPATHIME_STATIC_SQLITE` (top-level CMakeLists, decided before
+  `project()` because it is expressed as the vcpkg triplet) defaults ON,
+  the same `find_package(SQLite3)` resolves to the static build, and
+  nothing else changes. OFF is for self-builders who prefer a replaceable
+  shared SQLite over embedded copies; it links and ships `sqlite3.dll`
+  through the runtime-dependency machinery that stays in place. Cost: two embedded copies, one in `pathime` and one in
+  `pyzy-1.0` (~1 MB each — measured, the pair together roughly the size of
+  the DLL they replace plus one copy), safe because the copies never open
+  the same file and Windows DLLs cannot interpose; and vcpkg stays the
+  SQLite gatekeeper, with debug/release lib selection leaning on vcpkg's
+  find_package wrapper. Alternatives rejected: shipping `sqlite3.dll` (the
+  file this removes); committing the amalgamation to this repository (a
+  9.5 MB third-party source permanently in history for two files); a
+  submodule holding the amalgamation (workable, but another repository to
+  host for those same two files, when vcpkg already delivers pinned SQLite
+  builds). The earlier note that the static-md triplet "has never been
+  configured and glib's static Windows build is its fragile corner" was
+  about glib, which no longer exists here; SQLite's static build is its
+  ordinary one. POSIX stays on the system SQLite: those artifacts
+  deliberately carry no external libraries and the system copy takes
+  security updates on its own schedule. Reopen the POSIX default only with
+  a concrete need (a distro-less appliance build, say).
 - **No static release artifacts.** The LGPL relinking obligation attaches to
   a static artifact in a way it does not to the shared arrangement, and a
   static artifact pushes the vendored archives and the C++ runtime onto the

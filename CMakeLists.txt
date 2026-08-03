@@ -41,6 +41,36 @@ endif()
 unset(_pathime_header)
 unset(_pathime_line)
 
+# --- SQLite linkage on Windows. Decided here, before project(), because the
+# choice is expressed as the vcpkg triplet and the vcpkg toolchain reads
+# VCPKG_TARGET_TRIPLET when project() runs — LibpathimeOptions.cmake, where
+# every other option lives, is too late.
+#
+# ON (the default, and what CI and the releases use) selects the
+# x64-windows-static-md triplet: SQLite links into the libraries and no
+# external DLL is built against or shipped. OFF selects the ordinary
+# x64-windows triplet: the build links sqlite3.dll and the install ships it
+# beside the artifacts, for anyone who prefers a replaceable shared SQLite
+# over the embedded copies. Either way the same find_package(SQLite3)
+# resolves it; install the sqlite3 vcpkg package for the matching triplet.
+#
+# An explicit -DVCPKG_TARGET_TRIPLET on the command line wins over the
+# option; the triplet names are x64 because the Windows presets and CI are
+# x64-only (an arm64-windows port would extend this). Without the vcpkg
+# toolchain the option steers nothing: linkage follows whatever SQLite
+# find_package(SQLite3) locates.
+if(CMAKE_HOST_WIN32)
+  option(LIBPATHIME_STATIC_SQLITE
+    "Link vcpkg's static SQLite into the libraries instead of shipping sqlite3.dll" ON)
+  if(NOT DEFINED VCPKG_TARGET_TRIPLET)
+    if(LIBPATHIME_STATIC_SQLITE)
+      set(VCPKG_TARGET_TRIPLET "x64-windows-static-md")
+    else()
+      set(VCPKG_TARGET_TRIPLET "x64-windows")
+    endif()
+  endif()
+endif()
+
 project(libpathime
   VERSION ${_pathime_version}
   DESCRIPTION "CJK input method engine library"

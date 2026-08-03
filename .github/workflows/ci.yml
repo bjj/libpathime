@@ -115,7 +115,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ninja-build pkg-config \
-            libglib2.0-dev libsqlite3-dev uuid-dev check
+            libsqlite3-dev uuid-dev check
       - name: Configure
         run: ${{ matrix.configure }}
       - name: Build
@@ -173,8 +173,8 @@ jobs:
         run: echo "rev=$(git -C C:\vcpkg rev-parse HEAD)" >> $env:GITHUB_OUTPUT
       # restore/save rather than the combined action: the combined form saves
       # only when the whole job succeeds, so a failure after `vcpkg install`
-      # throws away a from-source glib build (~25 minutes). Saving immediately
-      # after the install keeps it regardless.
+      # throws away the from-source builds. Saving immediately after the
+      # install keeps them regardless.
       # The exact-rev key rarely hits: the runner fleet rolls image updates
       # gradually, so consecutive runs can land on different vcpkg checkouts.
       # The prefix fallback restores the newest previous tree instead, which
@@ -188,8 +188,11 @@ jobs:
           path: C:\vcpkg\installed
           key: vcpkg-${{ matrix.os }}-${{ steps.vcpkg.outputs.rev }}
           restore-keys: vcpkg-${{ matrix.os }}-
-      - name: Install pyzy's dependencies
-        run: vcpkg install glib:x64-windows sqlite3:x64-windows pkgconf:x64-windows
+      - name: Install external dependencies
+        # The static-md triplet matches the presets: SQLite links into the
+        # libraries and no external DLL ships. libiconv only so libhangul's
+        # vendored upstream test registers.
+        run: vcpkg install sqlite3:x64-windows-static-md libiconv:x64-windows-static-md
       - name: Save vcpkg installed tree
         if: steps.vcpkg-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -241,7 +244,7 @@ jobs:
         with:
           cmake-version: ${{ env.CMAKE_VERSION }}
       - name: Install dependencies
-        run: brew install ninja glib pkgconf check
+        run: brew install ninja pkgconf check
       - name: Configure
         run: >-
           cmake -S . -B build/macos -G Ninja -DCMAKE_BUILD_TYPE=Release
@@ -333,7 +336,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ninja-build pkg-config \
-            libglib2.0-dev libsqlite3-dev uuid-dev
+            libsqlite3-dev uuid-dev
       - name: Build and install both link modes, then move the prefixes
         run: |
           for mode in shared static; do

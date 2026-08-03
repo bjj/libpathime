@@ -109,9 +109,7 @@ function(pyzy_add_test name)
     "${CMAKE_CURRENT_BINARY_DIR}/include"         # <PyZy/...>
     "${_pyzy_port_bindir}")                       # the port's generated <config.h>
 
-  # glib: String.h calls g_strdup_vprintf inline, so anything including a pyzy
-  # private header compiles against glib whether or not it uses it directly.
-  target_link_libraries(${_target} PRIVATE libpathime::pyzy PkgConfig::LIBPATHIME_GLIB)
+  target_link_libraries(${_target} PRIVATE libpathime::pyzy)
   target_compile_definitions(${_target} PRIVATE HAVE_CONFIG_H)
 
   if(MSVC)
@@ -152,6 +150,9 @@ endfunction()
 # Pure table lookup: no database, no InputContext, nothing to stage.
 pyzy_add_test(pinyin_parser pinyin_parser_test.cc)
 pyzy_add_test(simp_trad     simp_trad_test.cc)
+# The glib-free implementations the pyzy branch adds (GlibLess), tested
+# against the contracts their call sites depend on.
+pyzy_add_test(glibless      glibless_test.cc)
 
 # --- conversion tests -------------------------------------------------------
 # These need android.db, which the port only builds when it can find a Python 3

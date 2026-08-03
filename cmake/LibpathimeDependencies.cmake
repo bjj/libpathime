@@ -62,8 +62,8 @@ if(LIBPATHIME_WITH_ANTHY AND CMAKE_CROSSCOMPILING)
     "anthy builds its dictionary with host-run codegen tools; cross-compiling needs a separate native tool build (not implemented yet).")
 endif()
 
-# --- Chinese: pyzy. Needs glib-2.0, sqlite3, and a UUID source. (Its generated
-#     tables are committed in-tree, so Python 3 is only needed for the optional
+# --- Chinese: pyzy. Needs sqlite3 and a UUID source. (Its generated tables
+#     are committed in-tree, so Python 3 is only needed for the optional
 #     runtime database — probed inside the port, not required here.) ---
 if(LIBPATHIME_WITH_PYZY)
   set(_pyzy_missing "")
@@ -71,13 +71,6 @@ if(LIBPATHIME_WITH_PYZY)
   find_package(SQLite3 QUIET)
   if(NOT SQLite3_FOUND)
     list(APPEND _pyzy_missing "SQLite3")
-  endif()
-
-  if(PkgConfig_FOUND)
-    pkg_check_modules(LIBPATHIME_GLIB QUIET "glib-2.0 >= 2.24.0")
-  endif()
-  if(NOT LIBPATHIME_GLIB_FOUND)
-    list(APPEND _pyzy_missing "glib-2.0 >= 2.24.0")
   endif()
 
   # UUID: libuuid on Linux and the BSDs; on Windows the compat shim maps to
@@ -101,7 +94,7 @@ if(LIBPATHIME_WITH_PYZY)
 
   if(_pyzy_missing)
     _lpi_gate(PYZY "Chinese (pyzy)" "${_pyzy_missing}"
-      "Debian/Ubuntu: sudo apt-get install libglib2.0-dev libsqlite3-dev uuid-dev -- Windows: vcpkg install glib sqlite3 (uuid via the bundled Rpcrt4 shim).")
+      "Debian/Ubuntu: sudo apt-get install libsqlite3-dev uuid-dev -- Windows: vcpkg install --triplet x64-windows-static-md sqlite3 (uuid via the bundled Rpcrt4 shim).")
   endif()
 endif()
 
@@ -134,7 +127,7 @@ if(LIBPATHIME_WITH_TABLE)
 
   if(_table_missing)
     _lpi_gate(TABLE "table-driven" "${_table_missing}"
-      "Debian/Ubuntu: sudo apt-get install libsqlite3-dev -- Windows: vcpkg install sqlite3.")
+      "Debian/Ubuntu: sudo apt-get install libsqlite3-dev -- Windows: vcpkg install --triplet x64-windows-static-md sqlite3.")
   endif()
 endif()
 
@@ -150,6 +143,13 @@ message(STATUS "  Table    (libpathime)     : ${LIBPATHIME_WITH_TABLE}")
 # discovered later in a diff of the compiled data.
 if(LIBPATHIME_WITH_TABLE)
   message(STATUS "    glyph coverage map      : ${LIBPATHIME_TABLE_COVERAGE}")
+endif()
+if(CMAKE_HOST_WIN32 AND (LIBPATHIME_WITH_PYZY OR LIBPATHIME_WITH_TABLE))
+  if(LIBPATHIME_STATIC_SQLITE)
+    message(STATUS "  SQLite                    : static")
+  else()
+    message(STATUS "  SQLite                    : shared (ships sqlite3.dll)")
+  endif()
 endif()
 message(STATUS "  Shared libraries          : ${BUILD_SHARED_LIBS}")
 message(STATUS "  Interactive demo          : ${LIBPATHIME_BUILD_DEMO}")

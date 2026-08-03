@@ -23,7 +23,7 @@ Per-backend dependencies:
 |---------|-------|
 | Korean (libhangul) | nothing beyond a C compiler |
 | Japanese (anthy-unicode) | nothing external; its dictionary is built by host tools at build time, so cross-compiling is not supported |
-| Chinese (pyzy) | `glib-2.0 ≥ 2.24`, `sqlite3`, a UUID provider (`libuuid` on Linux and the BSDs; libSystem on macOS; the bundled Rpcrt4 shim on Windows), plus Python 3 for the optional `android.db` |
+| Chinese (pyzy) | `sqlite3`, a UUID provider (`libuuid` on Linux and the BSDs; libSystem on macOS; the bundled Rpcrt4 shim on Windows), plus Python 3 for the optional `android.db`. The glib calls in its sources are satisfied by its own `GlibLess`, not by glib |
 | Table-driven | `sqlite3` — the compiled table format *is* a SQLite database, so reading one ibus-table wrote needs it. Its tables come from the `engines/ibus-table-chinese` submodule. |
 
 The table-driven backend (`PATHIME_ENGINE_TABLE`: Wubi, Cangjie, Stroke5,
@@ -36,30 +36,40 @@ Linux (Debian/Ubuntu):
 
 ```bash
 sudo apt-get install build-essential cmake ninja-build pkg-config \
-                     libglib2.0-dev libsqlite3-dev uuid-dev
+                     libsqlite3-dev uuid-dev
 ```
 
 macOS (Homebrew):
 
 ```bash
-brew install cmake ninja glib pkgconf
+brew install cmake ninja pkgconf
 ```
 
 sqlite3 comes from the SDK and the UUID functions from libSystem; there is
 nothing else to install.
 
-Windows: Visual Studio 2022 (or the Build Tools), plus vcpkg for pyzy's
-dependencies.
+Windows: Visual Studio 2022 (or the Build Tools), plus vcpkg for SQLite.
+Windows has no system SQLite, so `LIBPATHIME_STATIC_SQLITE` decides how it
+arrives: ON (the default, and what CI and the releases use) selects vcpkg's
+`x64-windows-static-md` triplet and links SQLite into the libraries; OFF
+selects the ordinary `x64-windows` triplet, links `sqlite3.dll`, and ships
+the DLL beside the artifacts. Install the sqlite3 package for the triplet
+you build:
 
 ```bat
 git clone https://github.com/microsoft/vcpkg C:\dev\vcpkg
 C:\dev\vcpkg\bootstrap-vcpkg.bat
-C:\dev\vcpkg\vcpkg install glib sqlite3
+C:\dev\vcpkg\vcpkg install --triplet x64-windows-static-md sqlite3 libiconv
 set VCPKG_ROOT=C:\dev\vcpkg
 ```
 
+(For `-DLIBPATHIME_STATIC_SQLITE=OFF`, install with
+`--triplet x64-windows` instead.)
+
 UUID, `mmap`, and the two dozen other POSIX facilities the submodules expect
-come from an in-tree compat layer, so there is nothing else to install. Python 3
+come from an in-tree compat layer, so there is nothing else to install.
+`libiconv` is optional and feeds no library code: it only lets libhangul's
+vendored upstream test register (POSIX has iconv in libc or the SDK). Python 3
 is optional — it is only used for pyzy's `android.db` — and the build finds it
 through the `py` launcher if `FindPython3` cannot.
 
@@ -101,6 +111,7 @@ developer command prompt, and remember to re-set `VCPKG_ROOT` after vcvars.
 | `LIBPATHIME_TABLE_COVERAGE` | `windows` on Windows, `noto` elsewhere | Which glyph-coverage map trims the compiled tables, or `none` to trim nothing. See "Glyph coverage" below; on Windows `none` is a reasonable choice. |
 | `LIBPATHIME_TABLE_REGENERATE_COVERAGE` | `OFF` | Offer a `pathime-table-coverage` target that rewrites the map named by `LIBPATHIME_TABLE_COVERAGE` from a font. Needs Python 3 and nothing else. See "Glyph coverage" below — the ordinary build never reads a font. |
 | `LIBPATHIME_TABLE_COVERAGE_FONT` | per platform | The fonts that target reads, as a list — the Windows map is the union of several. Only consulted when the option above is `ON`. |
+| `LIBPATHIME_STATIC_SQLITE` | `ON` (Windows only) | Link vcpkg's static SQLite into the libraries instead of linking and shipping `sqlite3.dll` — see "Windows" above. Expressed as the vcpkg triplet, so it lives in the top-level `CMakeLists.txt` before `project()`; an explicit `-DVCPKG_TARGET_TRIPLET` wins over it, and without the vcpkg toolchain it steers nothing. |
 | `LIBPATHIME_REQUIRE_BACKENDS` | `OFF` | Turn "missing dependency ⇒ skip" into a hard error (for CI). |
 | `LIBPATHIME_BUILD_TESTS` | `OFF` | Build the test suites — see `docs/testing.md`. |
 | `LIBPATHIME_TEST_COVERAGE` | `OFF` | Instrument the build for **test** coverage and offer the `pathime-test-coverage` target. Needs the option above, `gcovr`, and a gcov-style toolchain. Nothing to do with `LIBPATHIME_TABLE_COVERAGE` — see "Test coverage" below. |
@@ -409,7 +420,7 @@ archives end up on its own link line rather than inside a shared library:
   Without it the link fails on `std::` symbols. The `pkg-config` route names the
   C++ runtime in `Libs.private`, so `--static` is all it needs.
 - **The external libraries come back**: `find_package(pathime)` calls
-  `find_dependency()` for SQLite3 and probes GLib and libuuid, so those must be
+  `find_dependency()` for SQLite3 and probes libuuid, so those must be
   findable where the consumer builds — and if they are not, `find_package`
   reports the package unavailable rather than aborting, so an optional probe can
   fall back. A consumer of a shared build needs none of them.
