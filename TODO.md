@@ -30,9 +30,12 @@ library and is not registered where Check is absent. The table engine
 types real Chinese against tables compiled out of `ibus-table-chinese`, trimmed
 at build time to one of two checked-in glyph-coverage maps or to none.
 The project is public at `github.com/bjj/libpathime` with CI on every push
-(`.github/workflows/`), and **v0.1.0 is released** — two binary packages per
-platform plus a source tarball; BUILD.md, "Releases and packaging", has the
-mechanics and `docs/design-history.md` §14 what going public settled.
+(`.github/workflows/`), and **v0.1.2 is released** — two tested binary
+packages per platform plus a source tarball and an attested `SHA256SUMS`, in
+lockstep with the C# and Python bindings; BUILD.md, "Releases and
+packaging", has the mechanics, RELEASING.md the three-repository order, and
+`docs/design-history.md` §14–15 what going public and the release review
+settled.
 
 ---
 
@@ -265,29 +268,6 @@ One smaller thing from the same read, cheap:
   the first context exists, tier 3 therefore contributes nothing." Setting
   `PATHIME_OPT_TABLE_FILE` populates the cache, which is what makes the
   header's "resolves against the new table's declarations immediately" true.
-
-### The release review, 2026-08-02 — what is left of it
-
-An external review of all three repositories (this one and the two bindings),
-verified claim by claim against the trees; everything it asserted held up,
-and it flushed out a live defect it had not claimed (v0.1.1 shipped with the
-header's version macros still saying 0.1.0). The core repository's share is
-done — the header is the version's single point of definition, release
-binaries are tested before packaging, ARM Linux and the CMake 3.21 floor run
-in CI, archives wrap a top-level directory, `SHA256SUMS` ships attested, and
-SECURITY.md and RELEASING.md exist. The declined items are under "Deferred,
-deliberately"; the rulings are `docs/design-history.md` §15; the bindings'
-items are in their own `TODO.md` files. What remains here:
-
-- **Repository settings.** `master` already requires its checks and PRs;
-  still to review: force-push/deletion protection, version-shaped-tag
-  restrictions on release environments, and the same pass over both binding
-  repositories (which also need their required-check lists once their new
-  CI jobs exist). Settings, not code; recorded here so it is not lost.
-- **v0.1.2, the release that carries all of this**, in RELEASING.md's order
-  — core first, then both bindings in lockstep. First release where the
-  SONAME is `libpathime.so.0.1`, the archives wrap a directory, and the
-  binding version guards are live.
 
 ## Test coverage: measured gaps
 
