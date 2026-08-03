@@ -94,7 +94,7 @@ if(LIBPATHIME_WITH_PYZY)
 
   if(_pyzy_missing)
     _lpi_gate(PYZY "Chinese (pyzy)" "${_pyzy_missing}"
-      "Debian/Ubuntu: sudo apt-get install libsqlite3-dev uuid-dev -- Windows: vcpkg install sqlite3 (uuid via the bundled Rpcrt4 shim).")
+      "Debian/Ubuntu: sudo apt-get install libsqlite3-dev uuid-dev -- Windows: vcpkg install --triplet x64-windows-static-md sqlite3 (uuid via the bundled Rpcrt4 shim).")
   endif()
 endif()
 
@@ -127,7 +127,7 @@ if(LIBPATHIME_WITH_TABLE)
 
   if(_table_missing)
     _lpi_gate(TABLE "table-driven" "${_table_missing}"
-      "Debian/Ubuntu: sudo apt-get install libsqlite3-dev -- Windows: vcpkg install sqlite3.")
+      "Debian/Ubuntu: sudo apt-get install libsqlite3-dev -- Windows: vcpkg install --triplet x64-windows-static-md sqlite3.")
   endif()
 endif()
 

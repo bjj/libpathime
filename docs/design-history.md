@@ -619,8 +619,29 @@ the release mechanics. What was *decided* rather than merely done:
   of shim, and a submodule bump that introduces a new g_* call extends
   GlibLess by hand. Reopen only if a bump makes pyzy's glib surface deep —
   GObject, GIO, GRegex — where reimplementation stops being honest.
-- **POSIX artifacts carry no external libraries; Windows artifacts carry the
-  vcpkg sqlite3.** Windows has no system sqlite3, every other platform does.
+- **No artifact carries an external shared library; SQLite links statically
+  on Windows, the system's on POSIX.** SQLite is the one external library
+  pyzy and the table engine need, and Windows has no system copy — so the
+  choice there is shipping `sqlite3.dll` or linking it in, and linking wins:
+  the presets and CI select vcpkg's `x64-windows-static-md` triplet, the
+  same `find_package(SQLite3)` resolves to the static build, and nothing
+  else changes. Cost: two embedded copies, one in `pathime` and one in
+  `pyzy-1.0` (~1 MB each — measured, the pair together roughly the size of
+  the DLL they replace plus one copy), safe because the copies never open
+  the same file and Windows DLLs cannot interpose; and vcpkg stays the
+  SQLite gatekeeper, with debug/release lib selection leaning on vcpkg's
+  find_package wrapper. Alternatives rejected: shipping `sqlite3.dll` (the
+  file this removes); committing the amalgamation to this repository (a
+  9.5 MB third-party source permanently in history for two files); a
+  submodule holding the amalgamation (workable, but another repository to
+  host for those same two files, when vcpkg already delivers pinned SQLite
+  builds). The earlier note that the static-md triplet "has never been
+  configured and glib's static Windows build is its fragile corner" was
+  about glib, which no longer exists here; SQLite's static build is its
+  ordinary one. POSIX stays on the system SQLite: those artifacts
+  deliberately carry no external libraries and the system copy takes
+  security updates on its own schedule. Reopen the POSIX default only with
+  a concrete need (a distro-less appliance build, say).
 - **No static release artifacts.** The LGPL relinking obligation attaches to
   a static artifact in a way it does not to the shared arrangement, and a
   static artifact pushes the vendored archives and the C++ runtime onto the

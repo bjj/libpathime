@@ -71,14 +71,16 @@ family is one library on Windows", has the reasoning; the target names
 `anthydic-unicode` and `anthyinput-unicode` survive as interfaces onto that
 one DLL, so nothing else in the tree links differently.
 
-The vcpkg runtime dependencies (`sqlite3.dll`) follow the DLLs into both
-trees, by different means: vcpkg's applocal step populates the build tree's
-`bin/`, and the install computes the same closure itself — every installed
-runtime target joins a CMake runtime dependency set whose install rule, in
-`cmake/LibpathimeInstall.cmake`, includes what resolves from the vcpkg tree
-and excludes the operating system's own DLLs. pyzy contributes nothing beyond
-sqlite3: the glib calls in its sources are satisfied by its own `GlibLess`
-(a titled commit on its `libpathime` branch), not by a glib DLL.
+No external DLL follows them: SQLite links statically from vcpkg's
+`x64-windows-static-md` triplet (the presets select it), and the glib calls
+in pyzy's sources are satisfied by its own `GlibLess` (a titled commit on its
+`libpathime` branch), not by a glib DLL. The install still computes the
+runtime-DLL closure of every installed target — each joins a CMake runtime
+dependency set whose install rule, in `cmake/LibpathimeInstall.cmake`,
+includes what resolves from the vcpkg tree and excludes the operating
+system's own DLLs — so a shared dependency reintroduced by a future change
+ships correctly instead of leaving an install that cannot load, and shows up
+as a new file in `bin/`.
 
 ## Known build limitation: the Visual Studio generator builds serially
 

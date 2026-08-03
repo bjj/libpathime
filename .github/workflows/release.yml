@@ -67,9 +67,12 @@ jobs:
           path: C:\vcpkg\installed
           key: vcpkg-${{ matrix.os }}-${{ steps.vcpkg.outputs.rev }}
           restore-keys: vcpkg-${{ matrix.os }}-
-      - name: Install pyzy's dependencies (Windows)
+      - name: Install external dependencies (Windows)
+        # The static-md triplet matches the presets: SQLite links into the
+        # libraries and no external DLL ships. libiconv only so libhangul's
+        # vendored upstream test registers.
         if: runner.os == 'Windows'
-        run: vcpkg install sqlite3:x64-windows libiconv:x64-windows pkgconf:x64-windows
+        run: vcpkg install sqlite3:x64-windows-static-md libiconv:x64-windows-static-md
       - name: Save vcpkg installed tree
         if: runner.os == 'Windows' && steps.vcpkg-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

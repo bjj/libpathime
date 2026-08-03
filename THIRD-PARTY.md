@@ -42,16 +42,15 @@ off, `pathime-data/` holds only pyzy's LGPL files.
 | `pathime-data/anthy/anthy.dic` | **GPL-2** | ✓ | ✓ | as sources |
 | `pathime-data/table/*.db` | **GPL-3** | ✓ | ✓ | as sources |
 | cpp-terminal (static, inside `pathime-demo`) | MIT | — | ✓ | ✓ |
-| `sqlite3.dll` | public domain | Windows only | Windows only | — |
+| SQLite (static, inside the Windows `pathime` and `pyzy` libraries) | public domain | Windows only | Windows only | — |
 
-The Windows row exists because Windows has no system copy of that library:
-pyzy and the table engine need sqlite3, so the Windows artifacts carry the
-vcpkg-built DLL beside `pathime.dll`. On Linux and macOS sqlite3 comes from
-the system or Homebrew and the artifacts deliberately ship none of it. It is
-the only external library any artifact carries: pyzy provides the handful of
-glib calls it makes itself (`src/GlibLess.*` on the fork's `libpathime`
-branch), so neither glib nor glib's own closure (libiconv, libintl, pcre2)
-appears on any platform.
+No artifact ships an external shared library. The two places one could enter
+are both closed off: SQLite, which pyzy and the table engine need and Windows
+has no system copy of, links statically there from vcpkg's
+`x64-windows-static-md` triplet (POSIX links the system copy and ships
+nothing); and glib, whose handful of calls pyzy satisfies itself
+(`src/GlibLess.*` on the fork's `libpathime` branch), so neither glib nor
+glib's own closure (libiconv, libintl, pcre2) appears on any platform.
 
 ## The vendored libraries
 
@@ -78,7 +77,7 @@ in the demo package. It is not linked into `libpathime`.
 
 | Component | Licence | Linkage |
 |---|---|---|
-| SQLite3 | public domain | shared; required by pyzy and the table engine. From the system on POSIX; shipped in the Windows artifacts |
+| SQLite | public domain | required by pyzy and the table engine. On Windows the vcpkg static build (`x64-windows-static-md`) is compiled into the libraries; on POSIX the system shared library is linked and nothing ships |
 | libuuid | Modified BSD | required by pyzy on POSIX; Windows uses a bundled Rpcrt4 shim instead |
 
 ## Data files shipped in `pathime-data/`

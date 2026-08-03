@@ -42,7 +42,7 @@
     {
       "name": "windows-msvc",
       "displayName": "Windows · MSVC (Visual Studio 2022)",
-      "description": "Needs VCPKG_ROOT set and `vcpkg install sqlite3` for pyzy and the table engine (uuid comes from the bundled Rpcrt4 shim). Pass -DCMAKE_INSTALL_PREFIX here rather than to `cmake --install --prefix`: the generated pathime.pc records absolute paths, settled at configure time. See BUILD.md.",
+      "description": "Needs VCPKG_ROOT set and `vcpkg install --triplet x64-windows-static-md sqlite3 libiconv` (uuid comes from the bundled Rpcrt4 shim). The static-md triplet links SQLite into the libraries, so no external DLL is built against or shipped. Pass -DCMAKE_INSTALL_PREFIX here rather than to `cmake --install --prefix`: the generated pathime.pc records absolute paths, settled at configure time. See BUILD.md.",
       "generator": "Visual Studio 17 2022",
       "architecture": "x64",
       "binaryDir": "${sourceDir}/build/${presetName}",
@@ -52,13 +52,14 @@
         "rhs": "Windows"
       },
       "cacheVariables": {
-        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+        "VCPKG_TARGET_TRIPLET": "x64-windows-static-md"
       }
     },
     {
       "name": "windows-ninja",
       "displayName": "Windows · Ninja + clang-cl",
-      "description": "Run from a Visual Studio developer command prompt — and re-set VCPKG_ROOT afterwards, because vcvars points it at the vcpkg bundled with Visual Studio.",
+      "description": "Run from a Visual Studio developer command prompt — and re-set VCPKG_ROOT afterwards, because vcvars points it at the vcpkg bundled with Visual Studio. Uses the x64-windows-static-md triplet: SQLite links into the libraries and no external DLL ships.",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/${presetName}",
       "condition": {
@@ -70,7 +71,8 @@
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_C_COMPILER": "clang-cl",
         "CMAKE_CXX_COMPILER": "clang-cl",
-        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+        "VCPKG_TARGET_TRIPLET": "x64-windows-static-md"
       }
     }
   ],

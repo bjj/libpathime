@@ -48,13 +48,15 @@ brew install cmake ninja pkgconf
 sqlite3 comes from the SDK and the UUID functions from libSystem; there is
 nothing else to install.
 
-Windows: Visual Studio 2022 (or the Build Tools), plus vcpkg for pyzy's
-dependencies.
+Windows: Visual Studio 2022 (or the Build Tools), plus vcpkg for SQLite. The
+presets select the `x64-windows-static-md` triplet, which links SQLite into
+the libraries — Windows has no system SQLite, and the static triplet is what
+keeps `sqlite3.dll` out of every artifact.
 
 ```bat
 git clone https://github.com/microsoft/vcpkg C:\dev\vcpkg
 C:\dev\vcpkg\bootstrap-vcpkg.bat
-C:\dev\vcpkg\vcpkg install sqlite3 libiconv
+C:\dev\vcpkg\vcpkg install --triplet x64-windows-static-md sqlite3 libiconv
 set VCPKG_ROOT=C:\dev\vcpkg
 ```
 
