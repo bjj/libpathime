@@ -153,8 +153,12 @@ Findings that shaped this:
 
 ### The change
 
-- `CMakePresets.json`: both Windows presets set
-  `VCPKG_TARGET_TRIPLET=x64-windows-static-md`.
+- `LIBPATHIME_STATIC_SQLITE` (top-level `CMakeLists.txt`, before `project()`
+  because the choice is the vcpkg triplet, which the toolchain reads at
+  `project()`): ON — the default, used by CI and releases — selects
+  `x64-windows-static-md`; OFF selects `x64-windows`, linking and shipping
+  `sqlite3.dll` for self-builders who want a replaceable shared SQLite. An
+  explicit `-DVCPKG_TARGET_TRIPLET` wins over the option.
 - CI/release Windows vcpkg installs become
   `sqlite3:x64-windows-static-md libiconv:x64-windows-static-md`; `pkgconf`
   leaves the Windows lines (it existed for the glib probe, and the

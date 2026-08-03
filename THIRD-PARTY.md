@@ -44,13 +44,15 @@ off, `pathime-data/` holds only pyzy's LGPL files.
 | cpp-terminal (static, inside `pathime-demo`) | MIT | — | ✓ | ✓ |
 | SQLite (static, inside the Windows `pathime` and `pyzy` libraries) | public domain | Windows only | Windows only | — |
 
-No artifact ships an external shared library. The two places one could enter
-are both closed off: SQLite, which pyzy and the table engine need and Windows
-has no system copy of, links statically there from vcpkg's
+No released artifact ships an external shared library. The two places one
+could enter are both closed off: SQLite, which pyzy and the table engine
+need and Windows has no system copy of, links statically there from vcpkg's
 `x64-windows-static-md` triplet (POSIX links the system copy and ships
 nothing); and glib, whose handful of calls pyzy satisfies itself
 (`src/GlibLess.*` on the fork's `libpathime` branch), so neither glib nor
-glib's own closure (libiconv, libintl, pcre2) appears on any platform.
+glib's own closure (libiconv, libintl, pcre2) appears on any platform. A
+self-build with `LIBPATHIME_STATIC_SQLITE=OFF` links `sqlite3.dll` instead
+and its install carries that one DLL (public domain) beside the libraries.
 
 ## The vendored libraries
 

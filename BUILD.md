@@ -48,10 +48,13 @@ brew install cmake ninja pkgconf
 sqlite3 comes from the SDK and the UUID functions from libSystem; there is
 nothing else to install.
 
-Windows: Visual Studio 2022 (or the Build Tools), plus vcpkg for SQLite. The
-presets select the `x64-windows-static-md` triplet, which links SQLite into
-the libraries — Windows has no system SQLite, and the static triplet is what
-keeps `sqlite3.dll` out of every artifact.
+Windows: Visual Studio 2022 (or the Build Tools), plus vcpkg for SQLite.
+Windows has no system SQLite, so `LIBPATHIME_STATIC_SQLITE` decides how it
+arrives: ON (the default, and what CI and the releases use) selects vcpkg's
+`x64-windows-static-md` triplet and links SQLite into the libraries; OFF
+selects the ordinary `x64-windows` triplet, links `sqlite3.dll`, and ships
+the DLL beside the artifacts. Install the sqlite3 package for the triplet
+you build:
 
 ```bat
 git clone https://github.com/microsoft/vcpkg C:\dev\vcpkg
@@ -59,6 +62,9 @@ C:\dev\vcpkg\bootstrap-vcpkg.bat
 C:\dev\vcpkg\vcpkg install --triplet x64-windows-static-md sqlite3 libiconv
 set VCPKG_ROOT=C:\dev\vcpkg
 ```
+
+(For `-DLIBPATHIME_STATIC_SQLITE=OFF`, install with
+`--triplet x64-windows` instead.)
 
 UUID, `mmap`, and the two dozen other POSIX facilities the submodules expect
 come from an in-tree compat layer, so there is nothing else to install.

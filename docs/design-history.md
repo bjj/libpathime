@@ -619,13 +619,17 @@ the release mechanics. What was *decided* rather than merely done:
   of shim, and a submodule bump that introduces a new g_* call extends
   GlibLess by hand. Reopen only if a bump makes pyzy's glib surface deep —
   GObject, GIO, GRegex — where reimplementation stops being honest.
-- **No artifact carries an external shared library; SQLite links statically
-  on Windows, the system's on POSIX.** SQLite is the one external library
-  pyzy and the table engine need, and Windows has no system copy — so the
-  choice there is shipping `sqlite3.dll` or linking it in, and linking wins:
-  the presets and CI select vcpkg's `x64-windows-static-md` triplet, the
-  same `find_package(SQLite3)` resolves to the static build, and nothing
-  else changes. Cost: two embedded copies, one in `pathime` and one in
+- **No released artifact carries an external shared library; SQLite links
+  statically on Windows, the system's on POSIX.** SQLite is the one external
+  library pyzy and the table engine need, and Windows has no system copy —
+  so the choice there is shipping `sqlite3.dll` or linking it in, and
+  linking wins for everything this project publishes:
+  `LIBPATHIME_STATIC_SQLITE` (top-level CMakeLists, decided before
+  `project()` because it is expressed as the vcpkg triplet) defaults ON,
+  the same `find_package(SQLite3)` resolves to the static build, and
+  nothing else changes. OFF is for self-builders who prefer a replaceable
+  shared SQLite over embedded copies; it links and ships `sqlite3.dll`
+  through the runtime-dependency machinery that stays in place. Cost: two embedded copies, one in `pathime` and one in
   `pyzy-1.0` (~1 MB each — measured, the pair together roughly the size of
   the DLL they replace plus one copy), safe because the copies never open
   the same file and Windows DLLs cannot interpose; and vcpkg stays the
