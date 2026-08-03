@@ -436,10 +436,12 @@ The source tarball — the repository with every submodule populated at its
 pinned commit, which GitHub's auto-generated archive is not — comes from
 `tools/make-source-tarball.sh`.
 
-Cutting a release is three edits and a tag:
+Cutting a release is four edits and a tag:
 
-1. Set the version in `CMakeLists.txt` and add the dated entry to
-   `CHANGELOG.md`.
+1. Set the version in `CMakeLists.txt` **and** in the version macros in
+   `include/pathime/pathime.h` — they are maintained by hand in both places,
+   and only the CMake one is guarded by the tag check — and add the dated
+   entry to `CHANGELOG.md`.
 2. Push the changes, wait for CI.
 3. Tag `v<version>` and push the tag. `.github/workflows/release.yml` builds
    both packages for every supported platform, generates and build-verifies

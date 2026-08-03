@@ -266,6 +266,74 @@ One smaller thing from the same read, cheap:
   `PATHIME_OPT_TABLE_FILE` populates the cache, which is what makes the
   header's "resolves against the new table's declarations immediately" true.
 
+### The release review, 2026-08-02 — accepted work
+
+An external review of all three repositories (this one and the two bindings),
+verified claim by claim against the trees. Everything it asserted held up, and
+the verification found one live defect it had missed. These are the core
+items, in intended order; the bindings' items are in their own `TODO.md`
+files. The declined items are recorded under "Deferred, deliberately".
+
+- **The release tag guard checks only the CMake version, and the header
+  macros drifted.** v0.1.1 shipped with `include/pathime/pathime.h` still
+  saying 0.1.0, so `pathime_version_string()` misreported from a 0.1.1 build
+  — found and fixed 2026-08-02. `tests/api/abi_test.c` compares the function
+  against the same macro, so it is self-consistent by construction and cannot
+  catch this class. The guard in `release.yml` (better: a plain CI check, so
+  it fails before a tag exists) should compare `PATHIME_VERSION_STRING`
+  against `PROJECT_VERSION`. BUILD.md's release checklist now names both
+  files; the check makes that mechanical.
+- **Release binaries are packaged untested.** The `binaries` matrix in
+  `release.yml` never sets `LIBPATHIME_BUILD_TESTS` and has no ctest step;
+  only the source-tarball job tests, on one Linux configuration. Enable the
+  tests and run ctest before cpack in every binary job — it is a release, the
+  minutes are worth it.
+- **linux-aarch64 ships from a platform regular CI never builds.** The
+  release matrix has `ubuntu-22.04-arm`; `ci.yml` has no ARM job at all, so
+  until the previous item lands those artifacts have never had a test run
+  anywhere. Add one ARM Linux CI job, build + test. Decided 2026-08-02.
+  (macOS Intel and Windows arm64 stay under "waiting for a consumer to ask".)
+- **SOVERSION and the package rule disagree — decided 2026-08-02, the code
+  has not caught up.** `src/CMakeLists.txt` sets SOVERSION to the major
+  alone, so all of 0.x shares `libpathime.so.0` and the dynamic loader will
+  substitute 0.2 into a program built against 0.1 — while the package config
+  says `SameMinorVersion` precisely because 0.1 and 0.2 may not interchange.
+  Ruling: pre-1.0 the SOVERSION tracks the minor (`SOVERSION "0.1"`, giving
+  `libpathime.so.0.1`), so the loader enforces what the package file
+  promises; at 1.0 it reverts to the major alone. Cost: every 0.x minor bump
+  forces consumers to relink even when the ABI happened to survive —
+  acceptable while minors are where breaks land. Record the ruling in
+  `docs/design-history.md` with the change. The bindings get the runtime half
+  (a load-time version check), tracked in their own files.
+- **The binary archives unpack flat; the source tarball does not.** CPack's
+  component-archive default omits the top-level directory, so
+  `tar xf libpathime-<ver>-<os>-<arch>.tar.gz` scatters `bin/ lib/ include/
+  share/` into the current directory; `tools/make-source-tarball.sh` prefixes
+  everything, so the two families disagree. Put
+  `libpathime-<ver>-<os>-<arch>/` inside the binary archives (CPack's
+  include-toplevel switch for component archives); a prefix-style install is
+  still one `--strip-components=1` away. Coordinate the consumers that
+  assume the flat layout: libpathime-python's README install text, and any CI
+  step that unpacks the artifacts.
+- **`SHA256SUMS` alongside the attestations.** The provenance attestation is
+  the stronger statement, but `sha256sum -c` needs no GitHub CLI and no
+  attestation knowledge. Generate the file in the `publish` job over all
+  collected assets, and attest the checksum file too.
+- **The declared CMake floor is never exercised.** `cmake_minimum_required`
+  says 3.21; CI pins 4.2.3 everywhere. One Linux job at exactly 3.21 — a
+  shared build plus a test run, not the whole matrix. The pin comment in
+  `ci.yml` already records that libhangul's `<3.10` compatibility request is
+  deprecation-only at 4.2.3, so the floor is on borrowed time from both ends;
+  the job makes the day it breaks visible.
+- **`SECURITY.md`, and a `RELEASING.md` for the three-repository order.**
+  BUILD.md keeps the single-repository mechanics; RELEASING.md owns the
+  sequence that spans repos — core release, binding submodule bumps, the
+  version-guard checks, then binding releases — which today lives nowhere and
+  is exactly the kind of coordination that goes wrong across three trees.
+- **Repository settings.** Required CI checks on `master`, no force-push or
+  deletion, release environments restricted to version-shaped tags — in all
+  three repositories. Settings, not code; recorded here so it is not lost.
+
 ## Test coverage: measured gaps
 
 Measured on Linux with every backend enabled (`LIBPATHIME_TEST_COVERAGE=ON`,
@@ -459,6 +527,18 @@ Not a bug, and recorded here so it is tracked rather than only described:
   report does not file them as an oversight.
 - **Fuzzing the table source parser** — decided against 2026-07-29; the real
   corpus is thirteen fixed, checked-in tables. `docs/design-history.md` §11.
+  The 2026-08-02 release review proposed two further targets outside that
+  ruling — long key-event sequences and UTF-8 boundaries through the public
+  API — and those were declined too, same date: the sanitizer jobs already
+  walk those paths over the suites, and no consumer feeds this library
+  untrusted input at that surface yet.
+- **An ABI-regression CI job (libabigail/abidiff against the latest
+  release)** — proposed by the same review, declined 2026-08-02. struct_size
+  and append-only enums are the deliberate ABI mechanism
+  (`include/pathime/pathime.h`, "Version"), and with the SOVERSION-tracks-
+  minor ruling the loader fences cross-minor substitution anyway. Worth
+  revisiting at 1.0, when the SONAME becomes a promise a machine should
+  check.
 - **Input purpose and hints** (text/name/email/URL/password, single- vs.
   multiline, assistance toggles) — deferred past v1, 2026-07-27. No backend
   consumes them, and the extension is additive when a consumer appears (most
