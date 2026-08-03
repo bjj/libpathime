@@ -150,6 +150,9 @@ endfunction()
 # Pure table lookup: no database, no InputContext, nothing to stage.
 pyzy_add_test(pinyin_parser pinyin_parser_test.cc)
 pyzy_add_test(simp_trad     simp_trad_test.cc)
+# The glib-free implementations the pyzy branch adds (GlibLess), tested
+# against the contracts their call sites depend on.
+pyzy_add_test(glibless      glibless_test.cc)
 
 # --- conversion tests -------------------------------------------------------
 # These need android.db, which the port only builds when it can find a Python 3
