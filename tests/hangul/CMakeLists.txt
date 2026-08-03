@@ -67,12 +67,12 @@ add_test(NAME hangul.vendored.hanja
 # This one needs iconv to turn libhangul's UCS-4 output into UTF-8. glibc has
 # it built in, so Linux always gets it. Windows has no system iconv and there
 # is no shim for one in cmake/compat/win32 (nothing in the three submodules
-# needs it) — but a Windows build configured with the vcpkg toolchain does
-# find vcpkg's libiconv, which glib pulls in anyway, so the usual full build
-# runs this test there too. Making iconv a hard requirement for a demo program
-# would be the wrong trade, so the test is simply registered where iconv
-# exists: hangul_ic_* behaviour is covered portably, and far more thoroughly,
-# by hangul.ic below.
+# needs it) — but a Windows build configured with the vcpkg toolchain finds
+# vcpkg's libiconv, which BUILD.md's install line names for exactly this
+# test, so the usual full build runs it there too. Making iconv a hard
+# requirement for a demo program would be the wrong trade, so the test is
+# simply registered where iconv exists: hangul_ic_* behaviour is covered
+# portably, and far more thoroughly, by hangul.ic below.
 find_package(Iconv QUIET)
 if(Iconv_FOUND)
   add_executable(hangul_vendored_hangul

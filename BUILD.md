@@ -23,7 +23,7 @@ Per-backend dependencies:
 |---------|-------|
 | Korean (libhangul) | nothing beyond a C compiler |
 | Japanese (anthy-unicode) | nothing external; its dictionary is built by host tools at build time, so cross-compiling is not supported |
-| Chinese (pyzy) | `glib-2.0 ≥ 2.24`, `sqlite3`, a UUID provider (`libuuid` on Linux and the BSDs; libSystem on macOS; the bundled Rpcrt4 shim on Windows), plus Python 3 for the optional `android.db` |
+| Chinese (pyzy) | `sqlite3`, a UUID provider (`libuuid` on Linux and the BSDs; libSystem on macOS; the bundled Rpcrt4 shim on Windows), plus Python 3 for the optional `android.db`. The glib calls in its sources are satisfied by its own `GlibLess`, not by glib |
 | Table-driven | `sqlite3` — the compiled table format *is* a SQLite database, so reading one ibus-table wrote needs it. Its tables come from the `engines/ibus-table-chinese` submodule. |
 
 The table-driven backend (`PATHIME_ENGINE_TABLE`: Wubi, Cangjie, Stroke5,
@@ -36,13 +36,13 @@ Linux (Debian/Ubuntu):
 
 ```bash
 sudo apt-get install build-essential cmake ninja-build pkg-config \
-                     libglib2.0-dev libsqlite3-dev uuid-dev
+                     libsqlite3-dev uuid-dev
 ```
 
 macOS (Homebrew):
 
 ```bash
-brew install cmake ninja glib pkgconf
+brew install cmake ninja pkgconf
 ```
 
 sqlite3 comes from the SDK and the UUID functions from libSystem; there is
@@ -54,12 +54,14 @@ dependencies.
 ```bat
 git clone https://github.com/microsoft/vcpkg C:\dev\vcpkg
 C:\dev\vcpkg\bootstrap-vcpkg.bat
-C:\dev\vcpkg\vcpkg install glib sqlite3
+C:\dev\vcpkg\vcpkg install sqlite3 libiconv
 set VCPKG_ROOT=C:\dev\vcpkg
 ```
 
 UUID, `mmap`, and the two dozen other POSIX facilities the submodules expect
-come from an in-tree compat layer, so there is nothing else to install. Python 3
+come from an in-tree compat layer, so there is nothing else to install.
+`libiconv` is optional and feeds no library code: it only lets libhangul's
+vendored upstream test register (POSIX has iconv in libc or the SDK). Python 3
 is optional — it is only used for pyzy's `android.db` — and the build finds it
 through the `py` launcher if `FindPython3` cannot.
 
@@ -409,7 +411,7 @@ archives end up on its own link line rather than inside a shared library:
   Without it the link fails on `std::` symbols. The `pkg-config` route names the
   C++ runtime in `Libs.private`, so `--static` is all it needs.
 - **The external libraries come back**: `find_package(pathime)` calls
-  `find_dependency()` for SQLite3 and probes GLib and libuuid, so those must be
+  `find_dependency()` for SQLite3 and probes libuuid, so those must be
   findable where the consumer builds — and if they are not, `find_package`
   reports the package unavailable rather than aborting, so an optional probe can
   fall back. A consumer of a shared build needs none of them.

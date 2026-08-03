@@ -600,14 +600,27 @@ the release mechanics. What was *decided* rather than merely done:
   submodule at its pin (`tools/make-source-tarball.sh`) — GitHub's
   auto-tarball omits submodules and does not build. release.yml proves the
   tarball by building and testing from it.
-- **Windows artifacts carry the vcpkg runtime-DLL closure; POSIX artifacts
-  carry no external libraries.** Windows has no system glib, every other
-  platform does. Alternatives rejected: MSYS2 glib (second toolchain family,
-  more DLLs, unpinnable rolling repo), gvsbuild (another tool, same output),
-  Conan (no advantage over the vcpkg already load-bearing), static glib via
-  `x64-windows-static-md` (the one option that removes files; the triplet
-  has never been configured and glib's static Windows build is its fragile
-  corner). Reopen the last only if the DLL count itself becomes a problem.
+- **pyzy does not link glib; GlibLess provides the calls its sources make.**
+  glib was pyzy's only external library besides sqlite3, and on Windows it
+  dragged its whole vcpkg closure (libiconv, libintl, pcre2 — four DLLs, three
+  of them LGPL with a relinking obligation) into every artifact for ~28
+  shallow functions: asserts, printf helpers, UTF-8 walkers, file operations,
+  a timer, and a timeout that never fires because no `GMainLoop` runs.
+  `src/GlibLess.{h,cc}` on the fork's `libpathime` branch implements exactly
+  that inventory (~600 lines carried; the glib names are macros over
+  `pyzy_g_*` symbols, so a real glib in the same process never collides), and
+  the port compiles it like any other pyzy source. Alternatives rejected: a
+  fake `<glib.h>` in our compat layer (replaces a library, not an environment
+  — the compat layer's charter — and its unprefixed symbols would collide
+  with a consumer's real glib in a static build); vcpkg-closure shipping with
+  MSYS2/gvsbuild/Conan/static-glib variants (each keeps glib itself); and
+  upstreaming (openSUSE/pyzy is near-dormant and serves the glib-native ibus
+  ecosystem — a removal offers it nothing). Cost: the branch owns ~600 lines
+  of shim, and a submodule bump that introduces a new g_* call extends
+  GlibLess by hand. Reopen only if a bump makes pyzy's glib surface deep —
+  GObject, GIO, GRegex — where reimplementation stops being honest.
+- **POSIX artifacts carry no external libraries; Windows artifacts carry the
+  vcpkg sqlite3.** Windows has no system sqlite3, every other platform does.
 - **No static release artifacts.** The LGPL relinking obligation attaches to
   a static artifact in a way it does not to the shared arrangement, and a
   static artifact pushes the vendored archives and the C++ runtime onto the

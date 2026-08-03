@@ -51,10 +51,10 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ninja-build pkg-config \
-            libglib2.0-dev libsqlite3-dev uuid-dev check
+            libsqlite3-dev uuid-dev check
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
-        run: brew install ninja glib pkgconf
+        run: brew install ninja pkgconf
       - name: Resolve vcpkg baseline
         if: runner.os == 'Windows'
         id: vcpkg
@@ -69,7 +69,7 @@ jobs:
           restore-keys: vcpkg-${{ matrix.os }}-
       - name: Install pyzy's dependencies (Windows)
         if: runner.os == 'Windows'
-        run: vcpkg install glib:x64-windows sqlite3:x64-windows pkgconf:x64-windows
+        run: vcpkg install sqlite3:x64-windows libiconv:x64-windows pkgconf:x64-windows
       - name: Save vcpkg installed tree
         if: runner.os == 'Windows' && steps.vcpkg-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -152,7 +152,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ninja-build pkg-config \
-            libglib2.0-dev libsqlite3-dev uuid-dev check
+            libsqlite3-dev uuid-dev check
       - name: Generate
         run: tools/make-source-tarball.sh -o out
       - name: Build and test from the tarball
@@ -207,7 +207,7 @@ jobs:
 
           \`SHA256SUMS\` covers every asset (\`sha256sum -c SHA256SUMS\`); provenance is attested (\`gh attestation verify <asset> -R $GITHUB_REPOSITORY\`).
 
-          **Linux:** built on Ubuntu 22.04 — needs glibc ≥ 2.35, and glib, sqlite3 and libuuid from the system: \`apt install libglib2.0-0 libsqlite3-0 libuuid1\`. **macOS:** arm64; needs glib from Homebrew (\`brew install glib\`) — sqlite3 and the UUID functions come with the system. **Windows:** needs the Visual C++ redistributable; every other dependency ships in the archive.
+          **Linux:** built on Ubuntu 22.04 — needs glibc ≥ 2.35, and sqlite3 and libuuid from the system: \`apt install libsqlite3-0 libuuid1\`. **macOS:** arm64; sqlite3 and the UUID functions come with the system, so nothing to install. **Windows:** needs the Visual C++ redistributable; every other dependency ships in the archive.
 
           **Licence:** every binary archive is GPL-3 as a whole — it ships GPL-3 table databases and the GPL-2 anthy dictionary beside the MIT library and LGPL backends. \`share/doc/pathime/\` inside each archive has the texts, and THIRD-PARTY.md the component-by-component terms and the build flags that produce differently-licensed trees.
           EOF

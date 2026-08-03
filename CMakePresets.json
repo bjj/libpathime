@@ -42,7 +42,7 @@
     {
       "name": "windows-msvc",
       "displayName": "Windows · MSVC (Visual Studio 2022)",
-      "description": "Needs VCPKG_ROOT set and `vcpkg install glib sqlite3` for pyzy (uuid comes from the bundled Rpcrt4 shim). Pass -DCMAKE_INSTALL_PREFIX here rather than to `cmake --install --prefix`: the generated pathime.pc records absolute paths, settled at configure time. See BUILD.md.",
+      "description": "Needs VCPKG_ROOT set and `vcpkg install sqlite3` for pyzy and the table engine (uuid comes from the bundled Rpcrt4 shim). Pass -DCMAKE_INSTALL_PREFIX here rather than to `cmake --install --prefix`: the generated pathime.pc records absolute paths, settled at configure time. See BUILD.md.",
       "generator": "Visual Studio 17 2022",
       "architecture": "x64",
       "binaryDir": "${sourceDir}/build/${presetName}",
