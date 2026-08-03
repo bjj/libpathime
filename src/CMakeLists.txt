@@ -136,14 +136,22 @@ if(LIBPATHIME_WITH_TABLE)
   target_link_libraries(pathime PRIVATE SQLite::SQLite3)
 endif()
 
-# The ABI version. SOVERSION is the major number alone, so a consumer links
-# `libpathime.so.0` and keeps working across 0.1.1; VERSION carries the rest for
-# anything that reads it. At 0.x the promise that buys is small, and
-# cmake/LibpathimeInstall.cmake's package version file says the same thing in
-# the other direction by requiring a matching minor.
+# The ABI version. Pre-1.0 the SOVERSION tracks the minor — `libpathime.so.0.1`
+# — because the minor is where an incompatible change lands before 1.0, which
+# is exactly what cmake/LibpathimeInstall.cmake's package version file says by
+# requiring a matching minor: the loader and the package file now make the
+# same promise. The cost is that every 0.x minor bump forces consumers to
+# relink even when the ABI happened to survive. At 1.0 this becomes the major
+# alone (`libpathime.so.1`), and cross-version checking becomes worth
+# automating. docs/design-history.md §15.
+if(PROJECT_VERSION_MAJOR EQUAL 0)
+  set(_pathime_soversion "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
+else()
+  set(_pathime_soversion "${PROJECT_VERSION_MAJOR}")
+endif()
 set_target_properties(pathime PROPERTIES
   VERSION "${PROJECT_VERSION}"
-  SOVERSION "${PROJECT_VERSION_MAJOR}")
+  SOVERSION "${_pathime_soversion}")
 
 # The installed library, and the export set that cmake/LibpathimeInstall.cmake
 # turns into pathime-targets.cmake. What a consumer's include path ends up being

@@ -16,7 +16,7 @@
 # directory, and the two files that let a consumer find them:
 #
 #   <prefix>/include/pathime/{pathime.h,config.h}
-#   <prefix>/lib/libpathime.so.0                  (bin/pathime.dll on Windows)
+#   <prefix>/lib/libpathime.so.0.1                (bin/pathime.dll on Windows)
 #   <prefix>/lib/pathime/libhangul.so.1           private: on no search path
 #   <prefix>/lib/pathime/libanthy-unicode.so.0
 #   <prefix>/lib/pathime/libpyzy-1.0.so.1

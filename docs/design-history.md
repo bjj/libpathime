@@ -616,7 +616,8 @@ the release mechanics. What was *decided* rather than merely done:
   against a static install); nothing ships it. The vcpkg port, when written,
   should offer no static feature until someone asks.
 - **Releases are drafts from version-shaped tags.** `v[0-9]+.[0-9]+.[0-9]+`
-  only; the workflow fails a tag that disagrees with `CMakeLists.txt`;
+  only; the workflow fails a tag that disagrees with the version macros in
+  `pathime.h` (§15);
   publishing the draft is a human act. Provenance is attested
   (`gh attestation verify` answers authenticity); the binaries are unsigned,
   decided 2026-08-01 — SmartScreen's "Run anyway" is the accepted cost, and
@@ -634,4 +635,41 @@ the release mechanics. What was *decided* rather than merely done:
   uuid-sites' Darwin arms (SDK header, libSystem symbols, no `uuid.pc`,
   nothing to link), and the recorded choice that macOS inherits the Noto
   glyph map until a PingFang map is generated and measured (`TODO.md`).
+
+## 15. The release review (2026-08-02)
+
+An external review of this repository and both bindings, focused on the
+distribution boundary; every claim was verified against the trees before
+adoption. Most of what it changed is workflow mechanics whose reasoning
+lives as comments in `.github/workflows/`. What was *decided*:
+
+- **The public header is the version's single point of definition.** The
+  review did not ask for this; verifying it flushed out v0.1.1 shipping with
+  header macros still saying 0.1.0, because the version was hand-maintained
+  in two files and only the CMake one was guarded. Ruling: `pathime.h` owns
+  the `PATHIME_VERSION_*` macros — they are part of the documented contract —
+  and CMakeLists.txt parses them, failing configure if the string and
+  numeric macros disagree. The alternative, generating the macros into
+  `pathime/config.h` from a CMake-owned version, was rejected because it
+  moves part of the contract into a generated file, and `config.h` records
+  build choices, which a release version is not. Cost: the parse is a small
+  regex contract between the header's formatting and the build; a malformed
+  edit fails configure, which is the guard doing its job.
+- **Pre-1.0, SOVERSION tracks the minor** (`libpathime.so.0.1`). SOVERSION
+  had been the major alone, so the loader would substitute any 0.x into a
+  program built against any other 0.x, while the CMake package file said
+  `SameMinorVersion` — the two halves of the same promise disagreed, and the
+  loader's was the lie. Ruling: the SONAME says what the package file says;
+  at 1.0 it becomes the major alone. Cost: every 0.x minor forces a relink
+  even when the ABI happened to survive. Rejected alternatives: promising
+  ABI stability across all of 0.x (gives up what 0.x is for), and an
+  independent ABI integer (a third hand-maintained number, right after the
+  version drift showed what hand-maintained numbers do; worth revisiting at
+  1.0 alongside ABI-diff tooling).
+- **Declined: an ABI-regression CI job (libabigail), and fuzzing the
+  key-event/UTF-8 surfaces.** The ABI job is machinery for a promise the
+  SONAME now scopes to a minor; revisit at 1.0. The fuzz targets extend §11's
+  fuzzing decline: the sanitizer jobs already walk those paths over the
+  suites, and no consumer feeds untrusted input to that surface. Reopen
+  either with a consumer that does, or at 1.0.
   macOS Intel and Windows arm64 wait for a consumer to ask.

@@ -51,7 +51,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ninja-build pkg-config \
-            libglib2.0-dev libsqlite3-dev uuid-dev
+            libglib2.0-dev libsqlite3-dev uuid-dev check
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         run: brew install ninja glib pkgconf
@@ -88,11 +88,13 @@ jobs:
           if [ "$RUNNER_OS" = Windows ]; then
             cmake --preset windows-ninja \
               -DCMAKE_JOB_POOLS=link=1 -DCMAKE_JOB_POOL_LINK=link \
-              -DLIBPATHIME_REQUIRE_BACKENDS=ON -DLIBPATHIME_BUILD_DEMO=ON
+              -DLIBPATHIME_REQUIRE_BACKENDS=ON -DLIBPATHIME_BUILD_DEMO=ON \
+              -DLIBPATHIME_BUILD_TESTS=ON
             echo "builddir=build/windows-ninja" >> "$GITHUB_ENV"
           else
             cmake -S . -B build/release -G Ninja -DCMAKE_BUILD_TYPE=Release \
-              -DLIBPATHIME_REQUIRE_BACKENDS=ON -DLIBPATHIME_BUILD_DEMO=ON
+              -DLIBPATHIME_REQUIRE_BACKENDS=ON -DLIBPATHIME_BUILD_DEMO=ON \
+              -DLIBPATHIME_BUILD_TESTS=ON
             echo "builddir=build/release" >> "$GITHUB_ENV"
           fi
       - name: The tag names the built version
@@ -109,6 +111,12 @@ jobs:
           VCPKG_ROOT: C:\vcpkg
         shell: bash
         run: cmake --build "$builddir"
+      # The binaries being packaged are the binaries being tested — a release
+      # is the one build where the extra minutes are always worth it, and for
+      # linux-aarch64 this is the only test run the architecture gets.
+      - name: Test
+        shell: bash
+        run: ctest --test-dir "$builddir" --output-on-failure
       - name: Package
         shell: bash
         run: |
@@ -177,6 +185,11 @@ jobs:
         with:
           path: artifacts
           merge-multiple: true
+      # SHA256SUMS serves the mundane `sha256sum -c` workflow; the provenance
+      # attestation (which also covers the checksum file) is the stronger
+      # statement for anyone with the GitHub CLI.
+      - name: Checksums
+        run: (cd artifacts && sha256sum * > SHA256SUMS)
       - uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
           subject-path: artifacts/*
@@ -189,7 +202,11 @@ jobs:
           Two archives per platform: the **library package** for embedders
           (headers, libraries, CMake and pkg-config files, \`pathime-data/\`)
           and the standalone **demo package** (unpack, run
-          \`bin/pathime-demo\`). The source tarball carries every submodule at
+          \`bin/pathime-demo\` inside the unpacked directory). Every archive
+          unpacks into a single top-level directory named after itself.
+          \`SHA256SUMS\` covers every asset (\`sha256sum -c SHA256SUMS\`);
+          provenance is attested (\`gh attestation verify <asset> -R
+          $GITHUB_REPOSITORY\`). The source tarball carries every submodule at
           its pinned commit — GitHub's auto-generated "Source code" archives
           do not, and do not build.
 

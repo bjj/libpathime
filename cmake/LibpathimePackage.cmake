@@ -42,6 +42,13 @@ set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)
 set(CPACK_COMPONENTS_GROUPING ALL_COMPONENTS_IN_ONE)
 set(CPACK_COMPONENTS_ALL runtime devel data)
 
+# Every archive wraps its contents in a top-level directory matching the
+# archive's file name (the component-install default is flat), so extraction
+# cannot scatter bin/ lib/ include/ share/ into whatever directory tar runs
+# in; a prefix-style extraction is still one --strip-components=1 away. The
+# source tarball already does the same via `git archive --prefix`.
+set(CPACK_COMPONENT_INCLUDE_TOPLEVEL_DIRECTORY ON)
+
 # libpathime-<ver>-<os>-<arch>, in the release artifacts' spelling: linux,
 # windows, macos; x86_64/aarch64 as the toolchain reports them, with Windows'
 # AMD64 folded to the x64 every Windows artifact calls itself.

@@ -25,7 +25,8 @@ env:
 jobs:
   linux:
     name: ${{ matrix.name }}
-    runs-on: ubuntu-24.04
+    # ubuntu-24.04 unless the matrix entry says otherwise (the ARM job does).
+    runs-on: ${{ matrix.os || 'ubuntu-24.04' }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -83,13 +84,33 @@ jobs:
               -DCMAKE_C_FLAGS="-ftrivial-auto-var-init=pattern -g"
               -DCMAKE_CXX_FLAGS="-ftrivial-auto-var-init=pattern -g"
             builddir: build/uninit
+          - name: linux-arm64-gcc-release
+            # The release ships linux-aarch64 binaries; this is the run that
+            # keeps the architecture green between tags rather than
+            # discovering problems from one.
+            os: ubuntu-24.04-arm
+            configure: >-
+              cmake --preset linux-release
+              -DLIBPATHIME_BUILD_TESTS=ON -DLIBPATHIME_REQUIRE_BACKENDS=ON
+            builddir: build/linux-release
+          - name: linux-cmake-floor
+            # The one job at the advertised cmake_minimum_required. Everything
+            # else pins a modern CMake so runner drift cannot change builds
+            # overnight; this run is what makes raising the floor a visible
+            # decision instead of silent rot. No preset — presets and the
+            # pinned toolchains are deliberately out of scope for the floor.
+            cmake-version: 3.21.7
+            configure: >-
+              cmake -S . -B build/floor -G Ninja -DCMAKE_BUILD_TYPE=Release
+              -DLIBPATHIME_BUILD_TESTS=ON -DLIBPATHIME_REQUIRE_BACKENDS=ON
+            builddir: build/floor
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: recursive
       - uses: jwlawson/actions-setup-cmake@0d6a7d60b009d01c9e7523be22153ff8f19460d3 # v2.2.0
         with:
-          cmake-version: ${{ env.CMAKE_VERSION }}
+          cmake-version: ${{ matrix.cmake-version || env.CMAKE_VERSION }}
       - name: Install dependencies
         run: |
           sudo apt-get update

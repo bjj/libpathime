@@ -266,67 +266,28 @@ One smaller thing from the same read, cheap:
   `PATHIME_OPT_TABLE_FILE` populates the cache, which is what makes the
   header's "resolves against the new table's declarations immediately" true.
 
-### The release review, 2026-08-02 — accepted work
+### The release review, 2026-08-02 — what is left of it
 
 An external review of all three repositories (this one and the two bindings),
-verified claim by claim against the trees. Everything it asserted held up.
-(It also flushed out a live defect it had not claimed — v0.1.1 shipped with
-the header's version macros still saying 0.1.0 — fixed the same day by making
-the header the version's single point of definition, parsed by the build; the
-tag guard now covers it transitively.) These are the core items, in intended
-order; the bindings' items are in their own `TODO.md` files. The declined
-items are recorded under "Deferred, deliberately".
+verified claim by claim against the trees; everything it asserted held up,
+and it flushed out a live defect it had not claimed (v0.1.1 shipped with the
+header's version macros still saying 0.1.0). The core repository's share is
+done — the header is the version's single point of definition, release
+binaries are tested before packaging, ARM Linux and the CMake 3.21 floor run
+in CI, archives wrap a top-level directory, `SHA256SUMS` ships attested, and
+SECURITY.md and RELEASING.md exist. The declined items are under "Deferred,
+deliberately"; the rulings are `docs/design-history.md` §15; the bindings'
+items are in their own `TODO.md` files. What remains here:
 
-- **Release binaries are packaged untested.** The `binaries` matrix in
-  `release.yml` never sets `LIBPATHIME_BUILD_TESTS` and has no ctest step;
-  only the source-tarball job tests, on one Linux configuration. Enable the
-  tests and run ctest before cpack in every binary job — it is a release, the
-  minutes are worth it.
-- **linux-aarch64 ships from a platform regular CI never builds.** The
-  release matrix has `ubuntu-22.04-arm`; `ci.yml` has no ARM job at all, so
-  until the previous item lands those artifacts have never had a test run
-  anywhere. Add one ARM Linux CI job, build + test. Decided 2026-08-02.
-  (macOS Intel and Windows arm64 stay under "waiting for a consumer to ask".)
-- **SOVERSION and the package rule disagree — decided 2026-08-02, the code
-  has not caught up.** `src/CMakeLists.txt` sets SOVERSION to the major
-  alone, so all of 0.x shares `libpathime.so.0` and the dynamic loader will
-  substitute 0.2 into a program built against 0.1 — while the package config
-  says `SameMinorVersion` precisely because 0.1 and 0.2 may not interchange.
-  Ruling: pre-1.0 the SOVERSION tracks the minor (`SOVERSION "0.1"`, giving
-  `libpathime.so.0.1`), so the loader enforces what the package file
-  promises; at 1.0 it reverts to the major alone. Cost: every 0.x minor bump
-  forces consumers to relink even when the ABI happened to survive —
-  acceptable while minors are where breaks land. Record the ruling in
-  `docs/design-history.md` with the change. The bindings get the runtime half
-  (a load-time version check), tracked in their own files.
-- **The binary archives unpack flat; the source tarball does not.** CPack's
-  component-archive default omits the top-level directory, so
-  `tar xf libpathime-<ver>-<os>-<arch>.tar.gz` scatters `bin/ lib/ include/
-  share/` into the current directory; `tools/make-source-tarball.sh` prefixes
-  everything, so the two families disagree. Put
-  `libpathime-<ver>-<os>-<arch>/` inside the binary archives (CPack's
-  include-toplevel switch for component archives); a prefix-style install is
-  still one `--strip-components=1` away. Coordinate the consumers that
-  assume the flat layout: libpathime-python's README install text, and any CI
-  step that unpacks the artifacts.
-- **`SHA256SUMS` alongside the attestations.** The provenance attestation is
-  the stronger statement, but `sha256sum -c` needs no GitHub CLI and no
-  attestation knowledge. Generate the file in the `publish` job over all
-  collected assets, and attest the checksum file too.
-- **The declared CMake floor is never exercised.** `cmake_minimum_required`
-  says 3.21; CI pins 4.2.3 everywhere. One Linux job at exactly 3.21 — a
-  shared build plus a test run, not the whole matrix. The pin comment in
-  `ci.yml` already records that libhangul's `<3.10` compatibility request is
-  deprecation-only at 4.2.3, so the floor is on borrowed time from both ends;
-  the job makes the day it breaks visible.
-- **`SECURITY.md`, and a `RELEASING.md` for the three-repository order.**
-  BUILD.md keeps the single-repository mechanics; RELEASING.md owns the
-  sequence that spans repos — core release, binding submodule bumps, the
-  version-guard checks, then binding releases — which today lives nowhere and
-  is exactly the kind of coordination that goes wrong across three trees.
-- **Repository settings.** Required CI checks on `master`, no force-push or
-  deletion, release environments restricted to version-shaped tags — in all
-  three repositories. Settings, not code; recorded here so it is not lost.
+- **Repository settings.** `master` already requires its checks and PRs;
+  still to review: force-push/deletion protection, version-shaped-tag
+  restrictions on release environments, and the same pass over both binding
+  repositories (which also need their required-check lists once their new
+  CI jobs exist). Settings, not code; recorded here so it is not lost.
+- **v0.1.2, the release that carries all of this**, in RELEASING.md's order
+  — core first, then both bindings in lockstep. First release where the
+  SONAME is `libpathime.so.0.1`, the archives wrap a directory, and the
+  binding version guards are live.
 
 ## Test coverage: measured gaps
 

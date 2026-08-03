@@ -176,17 +176,19 @@ has decided to deal with the consequences. `cmake/LibpathimeInstall.cmake` is
 the whole of the layout, in one file.
 
 One of the shared library's three names is load-bearing for consumers that do
-not link at build time. `cmake --install` ships `libpathime.so.0.1.0`, the
-SONAME symlink `libpathime.so.0` a linked program resolves, and the unversioned
-`libpathime.so` — and the last is not only for the link editor. A runtime
-loader handed a bare library name probes exactly that spelling: .NET's
-`DllImport("pathime")` tries `libpathime.so`, a JVM's
-`System.loadLibrary("pathime")` the same, and neither falls back to the SONAME.
-So an install that follows the distribution habit of splitting the unversioned
-symlink into a `-dev` package strands every such consumer, leaving them to name
-`libpathime.so.0` explicitly or be pointed at the file some other way. Keep the
-three names together unless every consumer links against the library when it is
-built. (The DLL has one name, so none of this arises on Windows.)
+not link at build time. `cmake --install` ships the fully-versioned
+`libpathime.so.<version>`, the SONAME symlink a linked program resolves —
+`libpathime.so.0.1`, tracking the minor while the version is 0.x
+(`src/CMakeLists.txt` has the reasoning) — and the unversioned `libpathime.so`,
+and the last is not only for the link editor. A runtime loader handed a bare
+library name probes exactly that spelling: .NET's `DllImport("pathime")` tries
+`libpathime.so`, a JVM's `System.loadLibrary("pathime")` the same, and neither
+falls back to the SONAME. So an install that follows the distribution habit of
+splitting the unversioned symlink into a `-dev` package strands every such
+consumer, leaving them to name the SONAME explicitly or be pointed at the file
+some other way. Keep the three names together unless every consumer links
+against the library when it is built. (The DLL has one name, so none of this
+arises on Windows.)
 
 ## Shipping the data
 
@@ -436,7 +438,8 @@ The source tarball — the repository with every submodule populated at its
 pinned commit, which GitHub's auto-generated archive is not — comes from
 `tools/make-source-tarball.sh`.
 
-Cutting a release is two edits and a tag:
+Cutting a release is two edits and a tag (RELEASING.md owns the larger
+sequence across the binding repositories):
 
 1. Set the `PATHIME_VERSION_*` macros in `include/pathime/pathime.h` — the
    version's single point of definition; the build parses them, so
