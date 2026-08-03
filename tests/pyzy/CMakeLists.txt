@@ -109,9 +109,7 @@ function(pyzy_add_test name)
     "${CMAKE_CURRENT_BINARY_DIR}/include"         # <PyZy/...>
     "${_pyzy_port_bindir}")                       # the port's generated <config.h>
 
-  # glib: String.h calls g_strdup_vprintf inline, so anything including a pyzy
-  # private header compiles against glib whether or not it uses it directly.
-  target_link_libraries(${_target} PRIVATE libpathime::pyzy PkgConfig::LIBPATHIME_GLIB)
+  target_link_libraries(${_target} PRIVATE libpathime::pyzy)
   target_compile_definitions(${_target} PRIVATE HAVE_CONFIG_H)
 
   if(MSVC)

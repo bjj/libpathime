@@ -27,7 +27,7 @@ set(PYZY_SRC_DIR "${_pyzy_dir}" CACHE INTERNAL
 # --- library (source list from src/Makefile.am:libpyzy_c_sources) -----------
 set(_pyzy_srcs
   BopomofoContext.cc Database.cc DataDir.cc DoublePinyinContext.cc
-  DynamicSpecialPhrase.cc FullPinyinContext.cc InputContext.cc
+  DynamicSpecialPhrase.cc FullPinyinContext.cc GlibLess.cc InputContext.cc
   PhoneticContext.cc PhraseEditor.cc PinyinContext.cc PinyinParser.cc
   SimpTradConverter.cc SpecialPhraseTable.cc Variant.cc)
 list(TRANSFORM _pyzy_srcs PREPEND "${_pyzy_dir}/")
@@ -63,20 +63,6 @@ endif()
 find_package(SQLite3 REQUIRED)
 target_link_libraries(pyzy PRIVATE SQLite::SQLite3)
 
-find_package(PkgConfig REQUIRED)
-# GLOBAL: pyzy links glib PRIVATE, but glib is in pyzy's *public* private-header
-# surface — String.h calls g_strdup_vprintf inline — so tests/pyzy needs the
-# same imported target. Without GLOBAL, pkg_check_modules scopes it to this
-# directory and the test tree would have to probe glib a second time.
-#
-# The prefix is the project's own rather than a bare GLIB, because in a static
-# build the imported target's *name* is recorded in the installed
-# pathime-targets.cmake and the consumer's find_package(pathime) has to recreate
-# it in their own scope — where GLIB and UUID are names they may be using for
-# their own queries. See cmake/pathime-config.cmake.in.
-pkg_check_modules(LIBPATHIME_GLIB REQUIRED IMPORTED_TARGET GLOBAL "glib-2.0 >= 2.24.0")
-target_link_libraries(pyzy PRIVATE PkgConfig::LIBPATHIME_GLIB)
-
 if(WIN32)
   # Supplies <uuid/uuid.h> + <sys/utsname.h> shims and links Rpcrt4.
   libpathime_add_win32_compat(pyzy)
@@ -85,8 +71,18 @@ elseif(APPLE)
   # uuid_generate is libSystem's, which every binary links already. The gate in
   # cmake/LibpathimeDependencies.cmake has verified the header exists.
 else()
-  # GLOBAL for the same reason as glib above: Util.h includes <uuid/uuid.h>
+  find_package(PkgConfig REQUIRED)
+  # GLOBAL: pyzy links libuuid PRIVATE, but Util.h includes <uuid/uuid.h>
   # unconditionally, so tests/pyzy needs whatever include path found it here.
+  # Without GLOBAL, pkg_check_modules scopes the imported target to this
+  # directory and the test tree would have to probe uuid a second time.
+  #
+  # The prefix is the project's own rather than a bare UUID, because in a
+  # static build the imported target's *name* is recorded in the installed
+  # pathime-targets.cmake and the consumer's find_package(pathime) has to
+  # recreate it in their own scope — where UUID is a name they may be using
+  # for their own queries. See cmake/pathime-config.cmake.in.
+  #
   # libuuid is where uuid_generate comes from on Linux and the BSDs; Windows
   # takes the Rpcrt4 shim above and macOS the libSystem arm.
   pkg_check_modules(LIBPATHIME_UUID REQUIRED IMPORTED_TARGET GLOBAL uuid)

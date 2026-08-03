@@ -45,35 +45,25 @@ if(PATHIME_STATIC_BUILD)
   if(PATHIME_WITH_PYZY OR PATHIME_WITH_TABLE)
     find_dependency(SQLite3)
   endif()
-  if(PATHIME_WITH_PYZY)
+  # Not on Windows (the Rpcrt4 shim is in the archives) and not on macOS
+  # (uuid_generate is libSystem's, linked already) — only where pyzy links
+  # libuuid as its own library.
+  if(PATHIME_WITH_PYZY AND NOT WIN32 AND NOT APPLE)
     find_dependency(PkgConfig)
-    # The prefixes are the project's own, matching the imported targets recorded
-    # in pathime-targets.cmake. This code runs in the consumer's scope, where a
-    # bare GLIB or UUID would answer their own pkg_check_modules(GLIB ...) with
-    # this query's results; and no GLOBAL, because a package promoting imported
-    # targets the consumer never asked for is the same overreach one step
-    # further. The export's own targets are directory-scoped too, and reach a
-    # consumer's subdirectories the same way these do.
-    pkg_check_modules(LIBPATHIME_GLIB IMPORTED_TARGET "glib-2.0 >= 2.24.0")
-    if(NOT LIBPATHIME_GLIB_FOUND)
+    # The prefix is the project's own, matching the imported target recorded
+    # in pathime-targets.cmake. This code runs in the consumer's scope, where
+    # a bare UUID would answer their own pkg_check_modules(UUID ...) with
+    # this query's results; and no GLOBAL, because a package promoting
+    # imported targets the consumer never asked for is the same overreach one
+    # step further. The export's own targets are directory-scoped too, and
+    # reach a consumer's subdirectories the same way this does.
+    pkg_check_modules(LIBPATHIME_UUID IMPORTED_TARGET uuid)
+    if(NOT LIBPATHIME_UUID_FOUND)
       set(pathime_FOUND FALSE)
-      set(pathime_NOT_FOUND_MESSAGE "glib-2.0 >= 2.24.0 not found; a static \
+      set(pathime_NOT_FOUND_MESSAGE "uuid (libuuid) not found; a static \
 libpathime with the Chinese backend puts pyzy on the consumer's link line, and \
 pyzy needs it.")
       return()
-    endif()
-    # Not on Windows (the Rpcrt4 shim is in the archives) and not on macOS
-    # (uuid_generate is libSystem's, linked already) — only where pyzy links
-    # libuuid as its own library.
-    if(NOT WIN32 AND NOT APPLE)
-      pkg_check_modules(LIBPATHIME_UUID IMPORTED_TARGET uuid)
-      if(NOT LIBPATHIME_UUID_FOUND)
-        set(pathime_FOUND FALSE)
-        set(pathime_NOT_FOUND_MESSAGE "uuid (libuuid) not found; a static \
-libpathime with the Chinese backend puts pyzy on the consumer's link line, and \
-pyzy needs it.")
-        return()
-      endif()
     endif()
   endif()
 endif()
