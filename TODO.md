@@ -269,20 +269,14 @@ One smaller thing from the same read, cheap:
 ### The release review, 2026-08-02 — accepted work
 
 An external review of all three repositories (this one and the two bindings),
-verified claim by claim against the trees. Everything it asserted held up, and
-the verification found one live defect it had missed. These are the core
-items, in intended order; the bindings' items are in their own `TODO.md`
-files. The declined items are recorded under "Deferred, deliberately".
+verified claim by claim against the trees. Everything it asserted held up.
+(It also flushed out a live defect it had not claimed — v0.1.1 shipped with
+the header's version macros still saying 0.1.0 — fixed the same day by making
+the header the version's single point of definition, parsed by the build; the
+tag guard now covers it transitively.) These are the core items, in intended
+order; the bindings' items are in their own `TODO.md` files. The declined
+items are recorded under "Deferred, deliberately".
 
-- **The release tag guard checks only the CMake version, and the header
-  macros drifted.** v0.1.1 shipped with `include/pathime/pathime.h` still
-  saying 0.1.0, so `pathime_version_string()` misreported from a 0.1.1 build
-  — found and fixed 2026-08-02. `tests/api/abi_test.c` compares the function
-  against the same macro, so it is self-consistent by construction and cannot
-  catch this class. The guard in `release.yml` (better: a plain CI check, so
-  it fails before a tag exists) should compare `PATHIME_VERSION_STRING`
-  against `PROJECT_VERSION`. BUILD.md's release checklist now names both
-  files; the check makes that mechanical.
 - **Release binaries are packaged untested.** The `binaries` matrix in
   `release.yml` never sets `LIBPATHIME_BUILD_TESTS` and has no ctest step;
   only the source-tarball job tests, on one Linux configuration. Enable the

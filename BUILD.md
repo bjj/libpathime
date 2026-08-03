@@ -436,18 +436,18 @@ The source tarball — the repository with every submodule populated at its
 pinned commit, which GitHub's auto-generated archive is not — comes from
 `tools/make-source-tarball.sh`.
 
-Cutting a release is four edits and a tag:
+Cutting a release is two edits and a tag:
 
-1. Set the version in `CMakeLists.txt` **and** in the version macros in
-   `include/pathime/pathime.h` — they are maintained by hand in both places,
-   and only the CMake one is guarded by the tag check — and add the dated
-   entry to `CHANGELOG.md`.
+1. Set the `PATHIME_VERSION_*` macros in `include/pathime/pathime.h` — the
+   version's single point of definition; the build parses them, so
+   `PROJECT_VERSION`, packaging and the tag guard all follow — and add the
+   dated entry to `CHANGELOG.md`.
 2. Push the changes, wait for CI.
 3. Tag `v<version>` and push the tag. `.github/workflows/release.yml` builds
    both packages for every supported platform, generates and build-verifies
    the source tarball, attests provenance, and creates a **draft** release —
-   version-shaped tags only, and the build fails if the tag and
-   `CMakeLists.txt` disagree. Review the draft on the releases page and
+   version-shaped tags only, and the build fails if the tag and the version
+   macros in `pathime.h` disagree. Review the draft on the releases page and
    publish it by hand.
 
 ## How the pieces fit together

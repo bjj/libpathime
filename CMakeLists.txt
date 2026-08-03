@@ -14,8 +14,35 @@
 #   src/                 the libpathime library target
 cmake_minimum_required(VERSION 3.21)
 
+# The version is defined once, in the public header: pathime.h documents the
+# PATHIME_VERSION_* macros as part of the contract, so the header owns the
+# numbers and the build reads them out. PROJECT_VERSION, the SOVERSION, the
+# .pc file, CPack and the release tag guard all derive from what is parsed
+# here — and configure fails if PATHIME_VERSION_STRING disagrees with the
+# numeric macros, so the two cannot drift.
+set(_pathime_header "${CMAKE_CURRENT_SOURCE_DIR}/include/pathime/pathime.h")
+foreach(_part MAJOR MINOR PATCH)
+  file(STRINGS "${_pathime_header}" _pathime_line
+       REGEX "^#define PATHIME_VERSION_${_part} ")
+  if(NOT _pathime_line MATCHES "#define PATHIME_VERSION_${_part} ([0-9]+)")
+    message(FATAL_ERROR
+      "PATHIME_VERSION_${_part} not found in include/pathime/pathime.h")
+  endif()
+  set(_pathime_${_part} "${CMAKE_MATCH_1}")
+endforeach()
+set(_pathime_version "${_pathime_MAJOR}.${_pathime_MINOR}.${_pathime_PATCH}")
+file(STRINGS "${_pathime_header}" _pathime_line
+     REGEX "^#define PATHIME_VERSION_STRING ")
+if(NOT _pathime_line MATCHES "\"([0-9.]+)\""
+   OR NOT CMAKE_MATCH_1 STREQUAL _pathime_version)
+  message(FATAL_ERROR "PATHIME_VERSION_STRING in include/pathime/pathime.h "
+    "(${_pathime_line}) disagrees with its numeric macros (${_pathime_version})")
+endif()
+unset(_pathime_header)
+unset(_pathime_line)
+
 project(libpathime
-  VERSION 0.1.1
+  VERSION ${_pathime_version}
   DESCRIPTION "CJK input method engine library"
   HOMEPAGE_URL "https://github.com/bjj/libpathime"
   LANGUAGES C CXX)

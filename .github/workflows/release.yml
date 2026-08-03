@@ -2,8 +2,8 @@ name: Release
 
 # Tag filters match only tag refs — a branch can never trigger this — and the
 # pattern admits only version-shaped tags, so a stray `vendor-sync` tag does
-# not start a release build. A version-shaped tag that disagrees with
-# CMakeLists.txt still fails the guard step below.
+# not start a release build. A version-shaped tag that disagrees with the
+# version macros in pathime.h still fails the guard step below.
 on:
   push:
     tags: ["v[0-9]+.[0-9]+.[0-9]+"]
@@ -102,7 +102,7 @@ jobs:
             "$builddir/CPackConfig.cmake")
           tag="${GITHUB_REF_NAME#v}"
           if [ "$built" != "$tag" ]; then
-            echo "tag v$tag but CMakeLists.txt says $built"; exit 1
+            echo "tag v$tag but pathime.h says $built"; exit 1
           fi
       - name: Build
         env:

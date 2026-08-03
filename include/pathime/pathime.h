@@ -167,6 +167,11 @@ extern "C" {
  * gains a field does not need a global version bump to stay compatible, and
  * the library can tell precisely which fields a caller's struct really has.
  * The version numbers describe the release; struct_size describes the ABI.
+ *
+ * These four macros are the release version's single point of definition:
+ * the build parses them (top of CMakeLists.txt), everything downstream
+ * derives from that, and configure fails if PATHIME_VERSION_STRING and the
+ * numeric macros disagree.
  */
 
 #define PATHIME_VERSION_MAJOR 0
