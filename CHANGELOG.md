@@ -4,6 +4,21 @@ One dated entry per release. Everything else in this repository stays in the
 present tense and describes what is; this file is the one place that says
 when.
 
+## 0.1.2 — 2026-08-02
+
+The distribution boundary hardened, following an external review of this
+repository and both bindings. The shared library's SONAME is
+`libpathime.so.0.1` — pre-1.0 it tracks the minor, which is the promise the
+CMake package file already made; programs linked against an earlier 0.1
+library relink at their next build. Binary archives unpack into a single
+top-level directory named after themselves; the release carries an attested
+`SHA256SUMS`; release binaries are tested before packaging, and ARM Linux and
+the CMake 3.21 floor joined regular CI. The version is defined once, in
+`pathime.h`, and the build parses it — 0.1.1 shipped reporting itself as
+0.1.0, the class of drift this removes. The project description no longer
+names IBus. The bindings release in lockstep from this version on;
+RELEASING.md has the order.
+
 ## 0.1.1 — 2026-08-01
 
 macOS (arm64) is a supported platform, and `libpathime-*-macos-arm64` /

@@ -197,32 +197,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # One paragraph per line — hard-wrapping the source injects line
+          # breaks into the rendered notes. Licence last, below the build
+          # info; a per-release summary paragraph is added by hand on the
+          # draft.
           ver="${GITHUB_REF_NAME#v}"
           cat > notes.md <<EOF
-          Two archives per platform: the **library package** for embedders
-          (headers, libraries, CMake and pkg-config files, \`pathime-data/\`)
-          and the standalone **demo package** (unpack, run
-          \`bin/pathime-demo\` inside the unpacked directory). Every archive
-          unpacks into a single top-level directory named after itself.
-          \`SHA256SUMS\` covers every asset (\`sha256sum -c SHA256SUMS\`);
-          provenance is attested (\`gh attestation verify <asset> -R
-          $GITHUB_REPOSITORY\`). The source tarball carries every submodule at
-          its pinned commit — GitHub's auto-generated "Source code" archives
-          do not, and do not build.
+          Two archives per platform: the **library package** for embedders (headers, libraries, CMake and pkg-config files, \`pathime-data/\`) and the standalone **demo package** (unpack, run \`bin/pathime-demo\` inside the unpacked directory). Every archive unpacks into a single top-level directory named after itself. The source tarball carries every submodule at its pinned commit — GitHub's auto-generated "Source code" archives do not, and do not build.
 
-          **Licence:** every binary archive is GPL-3 as a whole — it ships
-          GPL-3 table databases and the GPL-2 anthy dictionary beside the MIT
-          library and LGPL backends. \`share/doc/pathime/\` inside each
-          archive has the texts, and THIRD-PARTY.md the component-by-component
-          terms and the build flags that produce differently-licensed trees.
+          \`SHA256SUMS\` covers every asset (\`sha256sum -c SHA256SUMS\`); provenance is attested (\`gh attestation verify <asset> -R $GITHUB_REPOSITORY\`).
 
-          **Linux:** built on Ubuntu 22.04 — needs glibc ≥ 2.35, and glib,
-          sqlite3 and libuuid from the system:
-          \`apt install libglib2.0-0 libsqlite3-0 libuuid1\`.
-          **macOS:** arm64; needs glib from Homebrew (\`brew install glib\`) —
-          sqlite3 and the UUID functions come with the system.
-          **Windows:** needs the Visual C++ redistributable; every other
-          dependency ships in the archive.
+          **Linux:** built on Ubuntu 22.04 — needs glibc ≥ 2.35, and glib, sqlite3 and libuuid from the system: \`apt install libglib2.0-0 libsqlite3-0 libuuid1\`. **macOS:** arm64; needs glib from Homebrew (\`brew install glib\`) — sqlite3 and the UUID functions come with the system. **Windows:** needs the Visual C++ redistributable; every other dependency ships in the archive.
+
+          **Licence:** every binary archive is GPL-3 as a whole — it ships GPL-3 table databases and the GPL-2 anthy dictionary beside the MIT library and LGPL backends. \`share/doc/pathime/\` inside each archive has the texts, and THIRD-PARTY.md the component-by-component terms and the build flags that produce differently-licensed trees.
           EOF
           gh release create "$GITHUB_REF_NAME" \
             --repo "$GITHUB_REPOSITORY" \

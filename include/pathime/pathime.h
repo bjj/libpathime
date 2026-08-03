@@ -176,9 +176,9 @@ extern "C" {
 
 #define PATHIME_VERSION_MAJOR 0
 #define PATHIME_VERSION_MINOR 1
-#define PATHIME_VERSION_PATCH 1
+#define PATHIME_VERSION_PATCH 2
 
-#define PATHIME_VERSION_STRING "0.1.1"
+#define PATHIME_VERSION_STRING "0.1.2"
 
 /** Encodes a version as a single comparable integer. */
 #define PATHIME_VERSION_ENCODE(major, minor, patch) \
