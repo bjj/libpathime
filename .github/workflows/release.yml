@@ -129,7 +129,7 @@ jobs:
             -D CPACK_COMPONENTS_ALL="runtime;demo;data" \
             -D CPACK_PACKAGE_FILE_NAME="pathime-demo-$ver-${{ matrix.name }}"
           ls -l out
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: packages-${{ matrix.name }}
           path: |
@@ -167,7 +167,7 @@ jobs:
             -DLIBPATHIME_REQUIRE_BACKENDS=ON -DLIBPATHIME_BUILD_TESTS=ON
           cmake --build /tmp/from-tarball/build
           ctest --test-dir /tmp/from-tarball/build --output-on-failure
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: source-tarball
           path: out/*.tar.gz
